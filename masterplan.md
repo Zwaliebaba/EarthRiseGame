@@ -1,6 +1,6 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.4 — for review
+> **Status:** DRAFT v0.5 — for review
 > **Date:** 2026-06-18
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
@@ -11,20 +11,20 @@
 
 ## Changelog
 
-**v0.4 (this revision)**
-- **SQL Server is an external networked service — never containerized** (self-hosted
-  now → Azure SQL later). Removes the SQL-container path (§15, §20).
-- **Real login at launch** → new **Accounts & Authentication** section (§14):
-  custom accounts, password hashing + encrypted handshake via **Windows CNG**.
-- Transport **encryption promoted from "deferred" to required** for the auth
-  handshake (§8.3).
-- **Dev = Docker Desktop, Prod = Kubernetes** (Windows node pool + UDP load
-  balancer) (§20).
-- **Sim tick locked at 20 Hz** (§7.2).
+**v0.5 (this revision)**
+- **Shaders precompiled to embedded byte-array headers** via the MSBuild HLSL
+  Compiler task — Variable Name `g_p%(Filename)`, Header File Output
+  `$(ProjectDir)CompiledShaders\%(Filename).h` (§12.4).
+- **Login provider locked: custom username/password.**
+- **App→DB auth locked:** SQL login now → managed identity / Entra ID on Azure SQL.
+- SQL Server edition direction confirmed (self-hosted Developer/Standard now). **All
+  open questions resolved** — architecture is fully specified for M0 (§19).
 
-**v0.3** — ERServer/ERHeadless renames; metres; CMO meshes; monospace fonts; STL
-allowed; zoned PvP; SQLite → SQL Server (ODBC).
-**v0.2** — NeuronCore/NeuronClient/NeuronRender/NeuronHeadless split; 3D vs 2D;
+**v0.4** — SQL Server external (not containerized), self-hosted → Azure SQL; real
+login + CNG crypto; dev Docker Desktop / prod Kubernetes; 20 Hz.
+**v0.3** — ERServer/ERHeadless; metres; CMO; monospace fonts; STL; zoned PvP;
+SQLite→SQL Server.
+**v0.2** — NeuronCore/NeuronClient/NeuronRender/NeuronHeadless; 3D vs 2D;
 DirectXMath; MSBuild; Server Core container; PvE+PvP; user meshes.
 
 ---
@@ -32,7 +32,7 @@ DirectXMath; MSBuild; Server Core container; PvE+PvP; user meshes.
 ## 0. How to read this document
 
 - **🔒 Locked** — decided (§2). **💡 Proposed** — my default. **❓ Open** — needs
-  input (§19).
+  input (§19 — currently none).
 - Custom C++23 throughout. The only non-engine code we rely on are **Microsoft
   platform components**: `cppwinrt`, **DirectXMath**, **DirectX 12**, **Winsock**,
   **ODBC / SQL Server**, and **Windows CNG** (crypto). No third-party libraries.
@@ -63,15 +63,17 @@ via headless clients/bots.
 | Server OS / deploy | Windows only; **ERServer** in a **Windows Server Core container**. Winsock + IOCP. |
 | Build system | **MSBuild** (`EarthRise.sln`); UWP → MSIX. |
 | Network transport | Custom **reliable UDP**, **encrypted** (CNG handshake). |
-| **Database** | **Microsoft SQL Server, accessed over the network — not containerized.** Self-hosted now → **Azure SQL** later. ODBC Driver 18. |
-| **Authentication** | **Real login at launch** — custom accounts, CNG password hashing, encrypted handshake. |
+| **Database** | **SQL Server over the network — not containerized.** Self-hosted (Developer/Standard) now → **Azure SQL** later. ODBC Driver 18. |
+| **Authentication** | **Real login at launch — custom username/password**; CNG password hashing; encrypted handshake. |
+| **App→DB auth** | **SQL login now → managed identity / Entra ID on Azure SQL.** |
+| **Shaders** | Precompiled to embedded headers (MSBuild HLSL Compiler): Variable Name `g_p%(Filename)`, Header File Output `$(ProjectDir)CompiledShaders\%(Filename).h`. |
 | Math | **DirectXMath**-based. |
 | Coordinate scale | **1 unit = 1 metre.** |
 | Core / client / render libs | **NeuronCore**, **NeuronClient** (render-agnostic), **NeuronRender** (DX12). |
 | Headless host / bots | **ERHeadless**. |
 | Client rendering | **3D Scene** and **2D Canvas (UI)** are separate subsystems. |
 | Combat | **PvE** + **zoned PvP** (base safe-zones, loot-on-kill). |
-| Meshes / Fonts | **CMO** meshes (you provide) / **fixed-grid monospace** bitmap fonts (you provide). |
+| Meshes / Fonts | **CMO** meshes / **fixed-grid monospace** bitmap fonts (you provide both). |
 | STL | **Allowed.** |
 | Sim tick | **20 Hz (50 ms).** |
 | Dev / Prod | **Dev: Docker Desktop. Prod: Kubernetes** (Windows nodes + UDP LB). |
@@ -92,8 +94,8 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | DirectX 12 / DXGI | UWP client | Rendering |
 | Winsock | all | UDP sockets |
 | ODBC (Driver 18) + SQL Server | ERServer | `sql.h`/`odbc32.lib` (SDK); driver installed in the container |
-| **Windows CNG** (`bcrypt.h`) | ERServer + client | Key exchange, AEAD, password hashing |
-| `dxc` (build-time) | tooling | HLSL → DXIL |
+| Windows CNG (`bcrypt.h`) | ERServer + client | ECDH, AES-GCM, PBKDF2 hashing |
+| MSBuild HLSL Compiler (`fxc`/`dxc`) | build-time | HLSL → embedded bytecode headers |
 | STL | all | 🔒 allowed |
 
 ---
@@ -110,7 +112,7 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | Transport | Custom **encrypted** reliable-UDP (§8) |
 | Client app | `CoreApplication` + `IFrameworkView` (CoreWindow), C++/WinRT, no XAML |
 | Rendering | DX12 + DXGI flip-model; **Scene (3D)** + **Canvas (2D)** split |
-| Shaders | HLSL → DXIL offline (no runtime HLSL on UWP) |
+| Shaders | HLSL → **embedded byte-array headers** via MSBuild HLSL Compiler (var `g_p%(Filename)`, out `CompiledShaders\%(Filename).h`); no runtime HLSL on UWP |
 | Meshes / fonts | CMO (custom parser) / fixed-grid monospace atlas |
 | Headless/bots | **ERHeadless** — many NeuronClient sessions, render-free |
 | Tests | custom assert runner + ERHeadless multi-client harness |
@@ -166,11 +168,13 @@ ERHeadless) · **NeuronRender** (lib, UWP/DX12 → UWP app) · **ERServer** (exe
 ├── ERServer/      netio/ simloop/ ai/(PvE) interest/ auth/ persist/(ODBC)
 ├── EarthRise.Client/  app/ ui/(HUD on CanvasRenderer)                      [UWP/MSIX]
 ├── ERHeadless/    host/ (N sessions; load + integration tests)
-├── NeuronTools/   meshcook/ ddscheck/ fontpack/ shaderbuild/ testrunner/
+├── NeuronTools/   meshcook/ ddscheck/ fontpack/ testrunner/
 ├── assets/        .dds · monospace font bitmaps · your .cmo meshes
-├── shaders/       .hlsl + build → shaders/bin (DXIL)
+├── shaders/       .hlsl sources → MSBuild HLSL Compiler → CompiledShaders/*.h (embedded)
 └── deploy/        ERServer Dockerfile (Server Core) · k8s manifests · dev scripts
 ```
+> Generated `CompiledShaders/` headers live under each project that compiles shaders
+> (per `$(ProjectDir)`), so they're picked up by `#include` at build time.
 
 ---
 
@@ -241,9 +245,9 @@ uint64 ↔ float.
 16-bit per-channel sequences; **ack + 32-bit ack-bitfield**; RTT/RTO retransmit;
 dup detection; **fragmentation/reassembly** (~1200 B safe payload); connection
 token (anti-spoof); keepalive/timeout; congestion backoff.
-**Encryption (now required, not deferred):** the handshake performs a **CNG ECDH
-key agreement**; subsequent packets use **AES-GCM (CNG)** AEAD. This protects the
-**login credential exchange** (§14) and, ideally, all reliable traffic.
+**Encryption (required):** the handshake performs a **CNG ECDH key agreement**;
+packets then use **AES-GCM (CNG)** AEAD — protecting the **login exchange** (§14)
+and, ideally, all reliable traffic.
 
 ### 8.4 State replication
 Per tick, each player gets a snapshot of **only their subscribed sectors**,
@@ -253,8 +257,8 @@ entities (~100 ms back) and **predict + reconcile** their own units. Input is
 
 ### 8.5 Connection sequence
 1. UDP handshake + **CNG ECDH** → shared key (anti-spoof connection token).
-2. **Login** (§14) over the encrypted channel → server verifies vs SQL → **session
-   token**.
+2. **Login** (§14, custom username/password) over the encrypted channel → verify vs
+   SQL → **session token**.
 3. Initial world sync (`Bulk`) → enter the tick/snapshot loop.
 
 ---
@@ -302,7 +306,8 @@ Separate subsystems 🔒 (own modules/PSOs/command lists; composited last).
 - **CanvasRenderer (2D UI):** immediate-mode orthographic pass — batched quads /
   monospace bitmap text / lines / rects; HUD & menus build on it, fully decoupled.
 
-Shaders precompiled offline to DXIL (no runtime HLSL on UWP).
+Shaders are precompiled into embedded byte-array headers (no runtime HLSL on UWP);
+see §12.4.
 
 ---
 
@@ -317,7 +322,22 @@ Shaders precompiled offline to DXIL (no runtime HLSL on UWP).
   = DDS], vertex buffers [pos/normal/tangent/color/uv], optional skinning, 16-bit
   indices, submeshes, optional skeleton/animation). `meshcook` repacks for
   instancing.
-- **Shaders:** `*.hlsl` → `dxc` → DXIL in `shaders/bin/`.
+
+### 12.4 Shaders — precompiled, embedded as headers 🔒
+`shaders/*.hlsl` are built by the **MSBuild HLSL Compiler task** with:
+- **Variable Name** → `g_p%(Filename)`
+- **Header File Output** → `$(ProjectDir)CompiledShaders\%(Filename).h`
+
+Each shader becomes a generated header declaring a bytecode array
+`const BYTE g_p<Filename>[]`, `#include`d directly to build PSOs — **no runtime
+shader file I/O** (ideal for UWP). Target DXIL/SM6 via `dxc` where available, else
+`fxc`. Usage:
+```cpp
+#include "CompiledShaders/SceneVS.h"
+#include "CompiledShaders/ScenePS.h"
+psoDesc.VS = { g_pSceneVS, sizeof(g_pSceneVS) };
+psoDesc.PS = { g_pScenePS, sizeof(g_pScenePS) };
+```
 
 ---
 
@@ -339,26 +359,26 @@ emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNod
 ---
 
 ## 14. Accounts & Authentication 🔒 (real login at launch)
-- **Accounts** stored in SQL Server: username, **salted PBKDF2 password hash via
-  CNG** (per-user random salt, high iteration count — never plaintext), profile,
+- **Accounts** in SQL Server: username, **salted PBKDF2 password hash via CNG**
+  (per-user random salt, high iteration count — never plaintext), profile,
   created/last-login, status.
-- **Registration & login** flow over the **encrypted** channel (§8.5): client sends
-  credentials only after the ECDH handshake; server verifies and issues a
-  **session token** (expiring; bound to the connection).
+- **Registration & login** over the **encrypted** channel (§8.5): credentials sent
+  only after the ECDH handshake; server verifies and issues an expiring **session
+  token** bound to the connection.
 - **Sessions:** token validation on reliable traffic; reconnect support; **one
-  active session per account** (deny/kick duplicate). On login the server binds the
-  session to the player's `Base`/entity.
-- **💡 Launch = custom username/password.** Federated **Entra ID** is a natural
-  later option (especially with Azure SQL). ❓ §19.
-- **Dev stub:** a "pick a name" identity remains behind a dev flag for M1–M4
+  active session per account** (deny/kick duplicate); login binds the session to the
+  player's `Base`/entity.
+- **🔒 Launch = custom username/password.** Federated **Entra ID** remains a possible
+  post-launch option (especially with Azure SQL).
+- **Dev stub:** a "pick a name" identity stays behind a dev flag for M1–M4
   iteration; real auth lands with persistence (M5).
 
 ---
 
 ## 15. Persistence — SQL Server over the network 🔒
 - **System of record = Microsoft SQL Server, accessed over the network — not
-  containerized.** **Self-hosted host/VM now → Azure SQL later**; the migration is
-  essentially a connection-string + auth change.
+  containerized.** **Self-hosted host/VM now (Developer/Standard) → Azure SQL
+  later**; migration is essentially a connection-string + auth change.
 - **Access:** **ODBC Driver 18** (`sql.h`/`odbc32.lib`, Windows SDK); thin custom
   ODBC wrapper in `ERServer/persist/`. Parameterized statements / stored procs;
   **connection pooling**; **batched write-behind** on the persistence thread;
@@ -367,7 +387,7 @@ emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNod
   queues, ships, world objects, resource nodes, zones/PvP. Avoid features absent in
   Azure SQL DB (cross-DB queries, SQL Agent jobs → Elastic Jobs, FILESTREAM).
   Versioned migrations.
-- **App→DB auth:** **💡 SQL login now → managed identity / Entra ID on Azure SQL.**
+- **App→DB auth:** **🔒 SQL login now → managed identity / Entra ID on Azure SQL.**
 - **Durability:** SQL transactions + log are authoritative (**no custom journal**);
   an optional in-memory **snapshot** enables fast warm-restart.
 - **ERServer stateless** → restarts recover from SQL.
@@ -375,9 +395,9 @@ emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNod
 ---
 
 ## 16. Build, Tooling, Testing
-- **MSBuild** 🔒 (`EarthRise.sln`): UWP `.vcxproj` → MSIX; others standard. Shader
-  build + asset cooking as pre-build steps; CMO/DDS authored via the VS content
-  pipeline.
+- **MSBuild** 🔒 (`EarthRise.sln`): UWP `.vcxproj` → MSIX; others standard. The
+  **HLSL Compiler task** emits embedded shader headers (§12.4); asset cooking
+  (CMO/DDS) runs as pre-build steps via the VS content pipeline.
 - **Tests:** custom assert runner; units for math (DirectXMath), serialization,
   reliability (loss/reorder/dup), **crypto handshake**, and CMO/DDS parsers.
   **ERHeadless** = multi-client integration & load harness.
@@ -391,7 +411,8 @@ emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNod
 
 **M0 — Foundations** *(S–M)* — `EarthRise.sln`; NeuronCore skeleton (DirectXMath,
 ECS, world, serde, time, logging); NeuronClient + ERHeadless skeletons; test
-runner; build steps. **Done:** all targets build; NeuronCore tests pass.
+runner; HLSL-Compiler shader-header build wired. **Done:** all targets build;
+NeuronCore tests pass.
 
 **M1 — Networked tech slice** 🔒 *(L)* ← first — ERServer (containerized) 20 Hz
 loop; reliable-UDP handshake (+ CNG encryption stub); **ERHeadless drives ≥3
@@ -413,10 +434,10 @@ meshes) with thrusters + glow over a legible HUD at target frame rate.
 budget (App. B).
 
 **M5 — Accounts, auth & persistence** *(M–L)* — **CNG encrypted handshake + real
-login**; ODBC persist layer + schema/migrations + write-behind + warm-restart;
-**SQL Server reached over the network (self-hosted)**; ERServer stateless. **Done:**
-register/login works; kill & restart the ERServer container → world + bases restore
-from SQL.
+login (custom username/password)**; ODBC persist layer + schema/migrations +
+write-behind + warm-restart; **SQL Server over the network (self-hosted)**; ERServer
+stateless. **Done:** register/login works; kill & restart the ERServer container →
+world + bases restore from SQL.
 
 **M6 — Combat, deployment & polish** *(L)* — weapons/projectiles, PvE AI, **zones +
 base safe-zones + loot-on-kill**; **Kubernetes production deploy (Windows nodes +
@@ -433,28 +454,31 @@ topology.
 | R1 | UWP networking sandbox (caps, loopback) | High | §8.1; `ISocket`; headless Win32 dodges loopback; test Store path early. |
 | R2 | `uint64_t` vs float GPU precision | Med | Floating origin + sector-local floats; sub-metre residual (§6). |
 | R3 | Single-shard scaling to 100 | Med | Interest mgmt + delta compression; ERHeadless load tests (M4). |
-| R4 | **External DB latency/availability** | Med | DB out of tick hot path; in-memory sim; write-behind; co-locate ERServer near SQL/Azure SQL (low-latency network). |
+| R4 | **External DB latency/availability** | Med | DB out of tick hot path; in-memory sim; write-behind; co-locate ERServer near SQL/Azure SQL. |
 | R5 | **K8s + Windows containers + UDP** | Med | Windows node pool; **UDP-capable LoadBalancer**; one pod per shard + **client→pod affinity** (§20). |
 | R6 | Credential/session security | High | CNG ECDH + AES-GCM; PBKDF2 hashing; tokens; `Encrypt=yes` to SQL. |
 | R7 | Azure SQL feature parity | Low–Med | Keep schema Azure-SQL-compatible from day one (§15). |
 | R8 | "Custom everything" scope | High | Only MS platform components; strict milestone scoping. |
-| R9 | UWP no runtime HLSL | Low | Offline DXIL from day one. |
+| R9 | UWP no runtime HLSL | Low | Embedded shader headers from day one (§12.4). |
 | R10 | Reliable-UDP / crypto correctness | Med | Loss/reorder/dup + handshake tests; ERHeadless harness. |
 | R11 | CMO edge cases (skinning/anim) | Low–Med | Static meshes first; add skinning later; validate via meshcook. |
 
 ---
 
-## 19. Open Questions (non-blocking)
+## 19. Open Questions & Future Considerations
 
-1. **Login provider (§14):** custom username/password (proposed) vs federated
-   (**Entra ID** / social)?
-2. **App→DB auth path (§15):** confirm **SQL login now → managed identity / Entra
-   ID on Azure SQL**.
-3. **Self-hosted SQL Server flavour/edition** for now (Developer/Standard on a
-   host/VM) and target Azure SQL tier later?
+**No open blocking questions — the architecture is fully specified for M0.**
 
-*(Resolved in v0.4: SQL = external network service, self-hosted → Azure SQL; real
-login at launch; dev Docker Desktop / prod Kubernetes; 20 Hz tick.)*
+Deferred to post-launch (not needed now):
+- Federated **Entra ID** / social login (launch is custom username/password).
+- **Multi-shard** topology + directory/matchmaking service (launch is single shard).
+- Encrypting **all** traffic vs the auth exchange only (handshake supports either).
+- Azure SQL **tier sizing**, read-replicas, geo-redundancy.
+
+*(Resolved through v0.5: coordinate scale = m; CMO meshes; monospace fonts; STL;
+zoned PvP; SQL = external network service (self-hosted Developer/Standard → Azure
+SQL); real login (custom username/password); SQL login → managed identity on Azure;
+dev Docker Desktop / prod Kubernetes; 20 Hz; shader precompile to embedded headers.)*
 
 ---
 
@@ -464,17 +488,17 @@ login at launch; dev Docker Desktop / prod Kubernetes; 20 Hz tick.)*
 external network service — never containerized.**
 
 **SQL Server (external)**
-- **Self-hosted host/VM now → Azure SQL later.** ERServer connects via **ODBC over
-  TCP 1433, `Encrypt=yes`**; connection string + credentials from a **secret/env**.
+- **Self-hosted host/VM now (Developer/Standard) → Azure SQL later.** ERServer
+  connects via **ODBC over TCP 1433, `Encrypt=yes`**; connection string +
+  credentials from a **secret/env**.
 - Migration self-hosted → Azure SQL = connection-string + auth change (managed
-  identity/Entra ID); keep the schema Azure-SQL-compatible (§15).
+  identity/Entra ID); schema kept Azure-SQL-compatible (§15).
 
 **Dev — Docker Desktop** 🔒
-- Runs **only the ERServer Windows container** locally; SQL Server is reached
-  **over the network** (a local dev instance on the host/LAN or a shared dev SQL).
-- Because SQL isn't containerized, the [Docker Desktop Windows/Linux
-  container-mode toggle](https://devblogs.microsoft.com/premier-developer/running-docker-windows-and-linux-containers-simultaneously/)
-  is a **non-issue** — no mixed-OS container stack is needed.
+- Runs **only the ERServer Windows container** locally; SQL Server is reached **over
+  the network** (a local dev instance on the host/LAN or a shared dev SQL).
+- Because SQL isn't containerized, the Docker Desktop Windows/Linux
+  container-mode toggle is a **non-issue** — no mixed-OS container stack needed.
 - Inner-loop option: run ERServer directly on the host for fast iteration; use the
   container for parity checks.
 
@@ -483,11 +507,11 @@ external network service — never containerized.**
   (e.g., AKS Windows nodes), tag matched to the host build.
 - Reliable-UDP needs a **UDP-capable LoadBalancer** (HTTP ingress won't route UDP):
   Service `type: LoadBalancer` with `protocol: UDP` / NodePort / cloud UDP LB.
-- **One shard = one ERServer pod**, exposed on its own UDP endpoint, with
-  **client→pod session affinity** (a client must keep talking to the same pod). A
-  future directory/matchmaking service routes players to shards.
-- **Azure SQL** accessed from the cluster (private endpoint / firewall);
-  connection string via a K8s Secret.
+- **One shard = one ERServer pod**, on its own UDP endpoint, with **client→pod
+  session affinity**. A future directory/matchmaking service routes players to
+  shards.
+- **Azure SQL** accessed from the cluster (private endpoint / firewall); connection
+  string via a K8s Secret.
 - ERServer is **stateless** → safe rolling restarts; persistence lives in SQL.
 
 ---
@@ -525,4 +549,5 @@ UDP datagram (post-handshake: AES-GCM encrypted payload + auth tag)
 
 ---
 
-*End of DRAFT v0.4 — please review §2 and §19. I'll fold answers into v0.5.*
+*End of DRAFT v0.5 — architecture specified end-to-end; ready to scaffold M0 on
+your go.*
