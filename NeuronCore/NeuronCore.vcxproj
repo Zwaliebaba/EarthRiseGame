@@ -79,7 +79,7 @@
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)math;$(ProjectDir)platform;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)math;$(ProjectDir)platform;$(ProjectDir)ecs;$(ProjectDir)world;$(ProjectDir)serde;$(ProjectDir)sim;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;WINRT_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -94,10 +94,16 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="math\MathCommon.h" />
+    <ClInclude Include="ecs\Ecs.h" />
     <ClInclude Include="math\GameMath.h" />
+    <ClInclude Include="math\MathCommon.h" />
+    <ClInclude Include="platform\Allocators.h" />
     <ClInclude Include="platform\Debug.h" />
     <ClInclude Include="platform\TimerCore.h" />
+    <ClInclude Include="serde\BitStream.h" />
+    <ClInclude Include="serde\Serde.h" />
+    <ClInclude Include="sim\FixedStepAccumulator.h" />
+    <ClInclude Include="world\WorldPos.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="NeuronCore.cpp" />

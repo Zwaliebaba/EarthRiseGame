@@ -5,8 +5,20 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+
+  <!-- Core libraries -->
+  <Project Path="NeuronCore/NeuronCore.vcxproj" Id="7f3a9c42-5d18-4b0e-9e21-3c9a1f2d4b67" />
+  <Project Path="NeuronClient/NeuronClient.vcxproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
+
+  <!-- UWP client application -->
   <Project Path="EarthRise/EarthRise.vcxproj" Id="4aeb4d7e-319a-41a2-996b-ef51b7744761">
     <Deploy />
   </Project>
-  <Project Path="NeuronCore/NeuronCore.vcxproj" Id="7f3a9c42-5d18-4b0e-9e21-3c9a1f2d4b67" />
+
+  <!-- Server and headless host -->
+  <Project Path="ERServer/ERServer.vcxproj" Id="b2c3d4e5-f6a7-8901-bcde-f23456789012" />
+  <Project Path="ERHeadless/ERHeadless.vcxproj" Id="c3d4e5f6-a7b8-9012-cdef-345678901234" />
+
+  <!-- Tools -->
+  <Project Path="NeuronTools/testrunner/testrunner.vcxproj" Id="d4e5f6a7-b8c9-0123-def0-456789012345" />
 </Solution>
