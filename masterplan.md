@@ -1,6 +1,6 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.5 — for review
+> **Status:** DRAFT v0.6 — for review
 > **Date:** 2026-06-18
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
@@ -11,7 +11,13 @@
 
 ## Changelog
 
-**v0.5 (this revision)**
+**v0.6 (this revision)**
+- **Simulation tick set to 60 Hz** (snapshot stays 20 Hz), aligning the plan with
+  `NeuronCore/platform/TimerCore.h`. Updates §2, §3, §7.2, §9, §17, Appendix B.
+- **NeuronCore** scaffolded as a Windows Store static library from the provided
+  template headers (`math/`, `platform/`) and added to `EarthRise.slnx`.
+
+**v0.5**
 - **Shaders precompiled to embedded byte-array headers** via the MSBuild HLSL
   Compiler task — Variable Name `g_p%(Filename)`, Header File Output
   `$(ProjectDir)CompiledShaders\%(Filename).h` (§12.4).
@@ -75,7 +81,7 @@ via headless clients/bots.
 | Combat | **PvE** + **zoned PvP** (base safe-zones, loot-on-kill). |
 | Meshes / Fonts | **CMO** meshes / **fixed-grid monospace** bitmap fonts (you provide both). |
 | STL | **Allowed.** |
-| Sim tick | **20 Hz (50 ms).** |
+| Sim tick / snapshot | **60 Hz sim (~16.67 ms) / 20 Hz snapshot.** |
 | Dev / Prod | **Dev: Docker Desktop. Prod: Kubernetes** (Windows nodes + UDP LB). |
 | First milestone | Networked tech slice (§17, M1). |
 
@@ -106,7 +112,7 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | --- | --- |
 | Language / build | C++23, MSVC; **MSBuild**; UWP → MSIX |
 | Math | DirectXMath (`XMVECTOR`/`XMMATRIX`; store `XMFLOAT*`) |
-| Server | **ERServer** — Win32 console in a Windows Server Core container; Winsock UDP + IOCP; **20 Hz** sim |
+| Server | **ERServer** — Win32 console in a Windows Server Core container; Winsock UDP + IOCP; **60 Hz** sim / **20 Hz** snapshot |
 | Database | **SQL Server over the network** (self-hosted → Azure SQL); ODBC Driver 18 |
 | Crypto | **Windows CNG** — ECDH handshake, AES-GCM, PBKDF2 password hashing |
 | Transport | Custom **encrypted** reliable-UDP (§8) |
@@ -132,7 +138,7 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
   │  │  └ CanvasRenderer (2D UI)  │  │◀──────▶│  │ frag, acks, auth/session   │  │
   │  └───────────┬───────────────┘  │packets │  └─────────────┬──────────────┘  │
   │  ┌───────────▼───────────────┐  │snap/   │  ┌─────────────▼──────────────┐  │
-  │  │ NeuronClient (lib)         │  │deltas  │  │ Simulation (20 Hz, auth.   │  │
+  │  │ NeuronClient (lib)         │  │deltas  │  │ Simulation (60 Hz, auth.   │  │
   │  │  session/replica/predict/  │◀─┼───────▶│  │ ECS, PvE AI, PvP, interest)│  │
   │  │  interp/controller(human)  │  │        │  └─────────────┬──────────────┘  │
   │  └────────────────────────────┘  │        │  ┌─────────────▼──────────────┐  │
@@ -219,7 +225,8 @@ uint64 ↔ float.
   identical client/server.
 - **Serialization:** versioned binary; bit-packing for the wire; same primitives
   for warm-restart snapshots.
-- **Time:** fixed sim step **🔒 20 Hz (50 ms)**; ticks are canonical.
+- **Time:** fixed sim step **🔒 60 Hz (~16.67 ms)**; **snapshots 20 Hz**; bounded
+  catch-up; ticks are canonical. (See `platform/TimerCore.h`.)
 - **Shared sim rules:** pure functions for movement, build costs, yields, combat
   (PvE+PvP) — used by both client prediction and server authority.
 
@@ -267,7 +274,7 @@ entities (~100 ms back) and **predict + reconcile** their own units. Input is
 - Single Win32 console exe (one shard, ~100 players) in a **Windows Server Core
   container** (§20); **stateless** (durable state in SQL Server).
 - **Threading (💡):** IOCP net threads → decode/reliability/decrypt → enqueue; a
-  **single-threaded 20 Hz simulation** owns state; a **persistence thread** does
+  **single-threaded 60 Hz simulation** owns state; a **persistence thread** does
   write-behind via ODBC. MPSC queues.
 - **Tick:** commands → systems (movement, harvest, build, **PvE AI**, **PvP**) →
   advance → per-player interest snapshots → net → periodic persistence batch.
@@ -414,7 +421,7 @@ ECS, world, serde, time, logging); NeuronClient + ERHeadless skeletons; test
 runner; HLSL-Compiler shader-header build wired. **Done:** all targets build;
 NeuronCore tests pass.
 
-**M1 — Networked tech slice** 🔒 *(L)* ← first — ERServer (containerized) 20 Hz
+**M1 — Networked tech slice** 🔒 *(L)* ← first — ERServer (containerized) 60 Hz
 loop; reliable-UDP handshake (+ CNG encryption stub); **ERHeadless drives ≥3
 parallel bots**; UWP client renders base + a few ships with **3D Scene + 2D Canvas
 HUD** as separate passes; **move the base**; server-authoritative replication +
@@ -430,7 +437,7 @@ meshes) with thrusters + glow over a legible HUD at target frame rate.
 **Done:** harvest → return → build a ship, server-authoritative.
 
 **M4 — Scale & interest** *(L)* — sector subscriptions, delta compression;
-**ERHeadless ~100 bots**. **Done:** 100-bot load test holds 20 Hz within bandwidth
+**ERHeadless ~100 bots**. **Done:** 100-bot load test holds 60 Hz within bandwidth
 budget (App. B).
 
 **M5 — Accounts, auth & persistence** *(M–L)* — **CNG encrypted handshake + real
@@ -478,7 +485,7 @@ Deferred to post-launch (not needed now):
 *(Resolved through v0.5: coordinate scale = m; CMO meshes; monospace fonts; STL;
 zoned PvP; SQL = external network service (self-hosted Developer/Standard → Azure
 SQL); real login (custom username/password); SQL login → managed identity on Azure;
-dev Docker Desktop / prod Kubernetes; 20 Hz; shader precompile to embedded headers.)*
+dev Docker Desktop / prod Kubernetes; 60 Hz sim / 20 Hz snapshot; shader precompile to embedded headers.)*
 
 ---
 
@@ -527,8 +534,8 @@ UDP datagram (post-handshake: AES-GCM encrypted payload + auth tag)
 ## Appendix B — Tick & timing budget
 | Quantity | Target |
 | --- | --- |
-| Sim tick | 20 Hz (50 ms) |
-| Snapshot send / client | 10–20 Hz |
+| Sim tick | 60 Hz (~16.67 ms) |
+| Snapshot send / client | 20 Hz |
 | Client render | display-rate (60+ fps), decoupled |
 | Interpolation delay | ~100 ms |
 | Safe UDP payload | ~1200 bytes |
@@ -549,5 +556,5 @@ UDP datagram (post-handshake: AES-GCM encrypted payload + auth tag)
 
 ---
 
-*End of DRAFT v0.5 — architecture specified end-to-end; ready to scaffold M0 on
-your go.*
+*End of DRAFT v0.6 — architecture specified end-to-end; M0 underway (NeuronCore
+scaffolded).*
