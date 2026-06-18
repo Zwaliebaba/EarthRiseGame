@@ -11,8 +11,11 @@
 
 namespace Neuron::Timer
 {
-  // Server simulation tick. 60 Hz simulation cadence per ImplementationPlan Section 3.
-  inline constexpr int    SimulationTicksPerSecond = 60;
+  // Server simulation tick. 30 Hz fixed-step simulation cadence per ImplementationPlan Section 3.
+  // NOTE: the Core helper below is a *variable*-step timer; the authoritative server
+  // loop must drive a fixed-step accumulator off SimulationDeltaSeconds (plan Section 7.2),
+  // clamped to MaxCatchUpTicksPerFrame, rather than advancing by raw wall-clock delta.
+  inline constexpr int    SimulationTicksPerSecond = 30;
   inline constexpr double SimulationDeltaSeconds   = 1.0 / static_cast<double>(SimulationTicksPerSecond);
 
   // Network snapshot cadence. 20 Hz per Section 3.

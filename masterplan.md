@@ -1,6 +1,6 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.6 — for review
+> **Status:** DRAFT v0.7 — for review
 > **Date:** 2026-06-18
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
@@ -11,23 +11,48 @@
 
 ## Changelog
 
-**v0.6 (this revision)**
-- **Simulation tick set to 60 Hz** (snapshot stays 20 Hz), aligning the plan with
-  `NeuronCore/platform/TimerCore.h`. Updates §2, §3, §7.2, §9, §17, Appendix B.
-- **NeuronCore** scaffolded as a Windows Store static library from the provided
-  template headers (`math/`, `platform/`) and added to `EarthRise.slnx`.
+**v0.7 (this revision) — engine/netcode review pass**
+- **Simulation tick reset to 30 Hz** (snapshot stays 20 Hz). 60 Hz in v0.6 only
+  mirrored a scaffold constant; 30 Hz halves per-tick CPU/delta-encoding cost and
+  is ample for a command-driven 4X. Fast projectiles sub-step locally. Updates §2,
+  §3, §4, §7.2, §9, §17, App. B. `TimerCore.h` constant updated to match.
+- **Fixed-step sim loop made real.** The provided `TimerCore.h` is a *variable*-step
+  timer (DX `StepTimer` with the fixed path stripped); §7.2/§9 now mandate a true
+  accumulator with bounded catch-up (`MaxCatchUpTicksPerFrame`), WinRT-free in core.
+- **World coordinates → `int64_t` centered at 0** (was `uint64_t` at 2⁶³). Interest
+  grid keyed on a **`SectorId` struct hash**, not a 64-bit Morton code (three 50-bit
+  sector indices overflow 64 bits). Position unified to **sector index + sector-local
+  float offset**. Updates §6, §7.1.
+- **Crypto hardened (§8/§14):** server **static-key pinning/signature** added to the
+  ECDH handshake (resists active MITM on the login exchange); **AES-GCM nonce =
+  direction‖64-bit packet counter** with **rekey-before-wrap**; **explicit replay
+  window** on decrypt; **stateless cookie before ECDH** (handshake-DoS guard);
+  connection token widened to 64-bit; **clock sync** and **protocol-version gate**
+  added to the connection sequence.
+- **Client-side prediction deferred past M1** — interpolation + snap-on-ack for the
+  tech slice; predict/reconcile added later only where feel demands it (§8.4, §10.1,
+  §17). Cuts scope risk R8.
+- **Persistence durability boundary defined (§15):** economy events
+  (trades/currency/loot) are **write-through / transactional outbox**; high-frequency
+  position is **write-behind** with a stated **RPO**. Warm-restart uses a **binary
+  state snapshot + event log since snapshot**, not row-by-row reconstruction.
+- **Shaders locked to SM6/DXIL via `dxc`** (not "dxc else fxc" — fxc cannot emit
+  SM6). Root signatures authored in HLSL. (§12.4)
+- **M1 split into M1a (headless transport) + M1b (client render)** to de-risk
+  reliable-UDP/crypto before a DX12 pipeline is in the loop. Per-milestone numeric
+  perf gates added; per-client bandwidth budget estimated **now** (App. B).
+- **Folded-in engineering specifics:** ECS handle generation bits + deterministic
+  iteration order; frame-arena / pool (`pmr`) allocators in the tick hot path;
+  input-log **record/replay determinism harness**; snapshot-encoding **job pool**;
+  IOCP **per-connection affinity**; login **rate-limit/lockout + server pepper**.
+- New **§21 Observability & Telemetry**; risk table updated (R1, R6, R12–R14).
 
-**v0.5**
-- **Shaders precompiled to embedded byte-array headers** via the MSBuild HLSL
-  Compiler task — Variable Name `g_p%(Filename)`, Header File Output
-  `$(ProjectDir)CompiledShaders\%(Filename).h` (§12.4).
-- **Login provider locked: custom username/password.**
-- **App→DB auth locked:** SQL login now → managed identity / Entra ID on Azure SQL.
-- SQL Server edition direction confirmed (self-hosted Developer/Standard now). **All
-  open questions resolved** — architecture is fully specified for M0 (§19).
-
-**v0.4** — SQL Server external (not containerized), self-hosted → Azure SQL; real
-login + CNG crypto; dev Docker Desktop / prod Kubernetes; 20 Hz.
+**v0.6** — Sim tick set to 60 Hz to match `TimerCore.h`; NeuronCore scaffolded as a
+Windows Store static library, added to the solution.
+**v0.5** — Shaders precompiled to embedded headers; custom username/password login
+locked; App→DB auth SQL login → managed identity; SQL edition direction confirmed.
+**v0.4** — SQL external (not containerized), self-hosted → Azure SQL; real login +
+CNG crypto; dev Docker Desktop / prod Kubernetes; 20 Hz.
 **v0.3** — ERServer/ERHeadless; metres; CMO; monospace fonts; STL; zoned PvP;
 SQLite→SQL Server.
 **v0.2** — NeuronCore/NeuronClient/NeuronRender/NeuronHeadless; 3D vs 2D;
@@ -38,7 +63,7 @@ DirectXMath; MSBuild; Server Core container; PvE+PvP; user meshes.
 ## 0. How to read this document
 
 - **🔒 Locked** — decided (§2). **💡 Proposed** — my default. **❓ Open** — needs
-  input (§19 — currently none).
+  input (§19).
 - Custom C++23 throughout. The only non-engine code we rely on are **Microsoft
   platform components**: `cppwinrt`, **DirectXMath**, **DirectX 12**, **Winsock**,
   **ODBC / SQL Server**, and **Windows CNG** (crypto). No third-party libraries.
@@ -52,8 +77,8 @@ DirectXMath; MSBuild; Server Core container; PvE+PvP; user meshes.
 ships, explore, expand, and fight (PvE **and** zoned PvP) — a real-time 4X loop
 shared by ~100 concurrent players at launch.
 
-**Pillars:** (1) one universe, one shard, `uint64_t` coordinates; (2) the base is
-a mobile unit, not a tile; (3) the Darwinia look — dark void, neon glow, bloom,
+**Pillars:** (1) one universe, one shard, signed `int64_t` coordinates; (2) the base
+is a mobile unit, not a tile; (3) the Darwinia look — dark void, neon glow, bloom,
 additive particles, minimalist bitmap-font HUD; (4) server-authoritative;
 (5) custom engine on Microsoft platform tech only; (6) testable by construction
 via headless clients/bots.
@@ -68,27 +93,30 @@ via headless clients/bots.
 | --- | --- |
 | Server OS / deploy | Windows only; **ERServer** in a **Windows Server Core container**. Winsock + IOCP. |
 | Build system | **MSBuild** (`EarthRise.sln`); UWP → MSIX. |
-| Network transport | Custom **reliable UDP**, **encrypted** (CNG handshake). |
+| Network transport | Custom **reliable UDP**, **encrypted** (CNG handshake, **server-key pinned**). |
 | **Database** | **SQL Server over the network — not containerized.** Self-hosted (Developer/Standard) now → **Azure SQL** later. ODBC Driver 18. |
-| **Authentication** | **Real login at launch — custom username/password**; CNG password hashing; encrypted handshake. |
+| **Authentication** | **Real login at launch — custom username/password**; CNG PBKDF2 hashing (+ server pepper, rate-limit/lockout); encrypted handshake. |
 | **App→DB auth** | **SQL login now → managed identity / Entra ID on Azure SQL.** |
-| **Shaders** | Precompiled to embedded headers (MSBuild HLSL Compiler): Variable Name `g_p%(Filename)`, Header File Output `$(ProjectDir)CompiledShaders\%(Filename).h`. |
+| **Shaders** | Precompiled to embedded headers; **SM6 / DXIL via `dxc`** (DXCCompile). Variable Name `g_p%(Filename)`, Output `$(ProjectDir)CompiledShaders\%(Filename).h`. |
 | Math | **DirectXMath**-based. |
-| Coordinate scale | **1 unit = 1 metre.** |
+| Coordinate scale / type | **1 unit = 1 metre; `int64_t` per axis, signed, origin (0,0,0).** |
 | Core / client / render libs | **NeuronCore**, **NeuronClient** (render-agnostic), **NeuronRender** (DX12). |
 | Headless host / bots | **ERHeadless**. |
+| Client app model | **UWP + CoreWindow + DX12** (Store reach). Loopback/sandbox toil accepted; see R1. |
 | Client rendering | **3D Scene** and **2D Canvas (UI)** are separate subsystems. |
+| Client prediction | **Deferred past M1** — interpolation + snap-on-ack first; predict/reconcile later. |
 | Combat | **PvE** + **zoned PvP** (base safe-zones, loot-on-kill). |
 | Meshes / Fonts | **CMO** meshes / **fixed-grid monospace** bitmap fonts (you provide both). |
-| STL | **Allowed.** |
-| Sim tick / snapshot | **60 Hz sim (~16.67 ms) / 20 Hz snapshot.** |
+| STL | **Allowed** (but tick hot path uses arena/pool/`pmr` allocators — §7.2). |
+| Sim tick / snapshot | **30 Hz sim (~33.3 ms) / 20 Hz snapshot**; true fixed-step accumulator. |
+| Persistence durability | **Economy = write-through / outbox; position = write-behind (RPO bounded).** |
 | Dev / Prod | **Dev: Docker Desktop. Prod: Kubernetes** (Windows nodes + UDP LB). |
-| First milestone | Networked tech slice (§17, M1). |
+| First milestone | Networked tech slice, split **M1a (headless) → M1b (client)** (§17). |
 
 ### 🔒 Hard constraints (brief)
 
 C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open world,
-**`uint64_t` x/y/z**; one **movable base**/player; ~**100 players**; textures
+**`int64_t` x/y/z**; one **movable base**/player; ~**100 players**; textures
 **`.dds`**; fonts **bitmap** (you provide).
 
 ### Allow-list (Microsoft platform components only)
@@ -100,8 +128,8 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | DirectX 12 / DXGI | UWP client | Rendering |
 | Winsock | all | UDP sockets |
 | ODBC (Driver 18) + SQL Server | ERServer | `sql.h`/`odbc32.lib` (SDK); driver installed in the container |
-| Windows CNG (`bcrypt.h`) | ERServer + client | ECDH, AES-GCM, PBKDF2 hashing |
-| MSBuild HLSL Compiler (`fxc`/`dxc`) | build-time | HLSL → embedded bytecode headers |
+| Windows CNG (`bcrypt.h`) | ERServer + client | ECDH, **ECDSA (server-key sign)**, AES-GCM, PBKDF2 hashing |
+| MSBuild HLSL Compiler (`dxc`) | build-time | HLSL → embedded **SM6/DXIL** bytecode headers |
 | STL | all | 🔒 allowed |
 
 ---
@@ -112,16 +140,16 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | --- | --- |
 | Language / build | C++23, MSVC; **MSBuild**; UWP → MSIX |
 | Math | DirectXMath (`XMVECTOR`/`XMMATRIX`; store `XMFLOAT*`) |
-| Server | **ERServer** — Win32 console in a Windows Server Core container; Winsock UDP + IOCP; **60 Hz** sim / **20 Hz** snapshot |
+| Server | **ERServer** — Win32 console in a Windows Server Core container; Winsock UDP + IOCP; **30 Hz** fixed-step sim / **20 Hz** snapshot |
 | Database | **SQL Server over the network** (self-hosted → Azure SQL); ODBC Driver 18 |
-| Crypto | **Windows CNG** — ECDH handshake, AES-GCM, PBKDF2 password hashing |
+| Crypto | **Windows CNG** — ECDH handshake (**server-key pinned**), AES-GCM AEAD, PBKDF2 password hashing |
 | Transport | Custom **encrypted** reliable-UDP (§8) |
 | Client app | `CoreApplication` + `IFrameworkView` (CoreWindow), C++/WinRT, no XAML |
 | Rendering | DX12 + DXGI flip-model; **Scene (3D)** + **Canvas (2D)** split |
-| Shaders | HLSL → **embedded byte-array headers** via MSBuild HLSL Compiler (var `g_p%(Filename)`, out `CompiledShaders\%(Filename).h`); no runtime HLSL on UWP |
+| Shaders | HLSL → **embedded SM6/DXIL headers** via `dxc` (var `g_p%(Filename)`, out `CompiledShaders\%(Filename).h`); root sigs in HLSL; no runtime HLSL on UWP |
 | Meshes / fonts | CMO (custom parser) / fixed-grid monospace atlas |
 | Headless/bots | **ERHeadless** — many NeuronClient sessions, render-free |
-| Tests | custom assert runner + ERHeadless multi-client harness |
+| Tests | custom assert runner + ERHeadless multi-client harness + **record/replay determinism harness** |
 
 ---
 
@@ -134,27 +162,28 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
   │  app shell: IFrameworkView      │        │  in Windows Server Core container │
   │  ┌───────────────────────────┐  │encrypt.│  ┌────────────────────────────┐  │
   │  │ NeuronRender (DX12)        │  │reliable│  │ Net (Winsock UDP+IOCP):    │  │
-  │  │  ├ SceneRenderer  (3D)     │  │  UDP   │  │ CNG handshake, reliability,│  │
-  │  │  └ CanvasRenderer (2D UI)  │  │◀──────▶│  │ frag, acks, auth/session   │  │
-  │  └───────────┬───────────────┘  │packets │  └─────────────┬──────────────┘  │
-  │  ┌───────────▼───────────────┐  │snap/   │  ┌─────────────▼──────────────┐  │
-  │  │ NeuronClient (lib)         │  │deltas  │  │ Simulation (60 Hz, auth.   │  │
-  │  │  session/replica/predict/  │◀─┼───────▶│  │ ECS, PvE AI, PvP, interest)│  │
-  │  │  interp/controller(human)  │  │        │  └─────────────┬──────────────┘  │
-  │  └────────────────────────────┘  │        │  ┌─────────────▼──────────────┐  │
-  └────────────────────────────────┘        │  │ Persistence (ODBC, write-  │  │
-                 ▲                            │  │ behind, accounts) ─────┐   │  │
-  ┌──────────────┴─────────────────┐ encrypt.│  └────────────────────────┼───┘  │
-  │ ERHeadless (exe)               │reliable │                           │      │
-  │  N× NeuronClient sessions,     │  UDP    └───────────────────────────┼──────┘
-  │  bot / scripted (no rendering) │◀────────▶          TCP 1433 (ODBC,  │
-  └──────────────┬─────────────────┘                     Encrypt=yes)    ▼
-                 ▼                            ┌───────────────────────────────────┐
-   ┌──────────────────────────────────────┐  │ Microsoft SQL Server (EXTERNAL,   │
-   │ NeuronCore (linked by ALL):          │  │ NETWORK SERVICE — not a container)│
-   │ math(DirectXMath)·ECS·world(uint64)· │  │ self-hosted host/VM now           │
-   │ sectors·net protocol·serde·sim rules │  │   → Azure SQL later               │
-   └──────────────────────────────────────┘  └───────────────────────────────────┘
+  │  │  ├ SceneRenderer  (3D)     │  │  UDP   │  │ CNG handshake (pinned key),│  │
+  │  │  └ CanvasRenderer (2D UI)  │  │◀──────▶│  │ reliability, frag, AEAD,   │  │
+  │  └───────────┬───────────────┘  │packets │  │ acks, auth/session         │  │
+  │  ┌───────────▼───────────────┐  │snap/   │  └─────────────┬──────────────┘  │
+  │  │ NeuronClient (lib)         │  │deltas  │  ┌─────────────▼──────────────┐  │
+  │  │  session/replica/interp/   │◀─┼───────▶│  │ Simulation (30 Hz fixed,   │  │
+  │  │  controller(human)         │  │        │  │ auth. ECS, PvE AI, PvP)    │  │
+  │  └────────────────────────────┘  │        │  └─────────────┬──────────────┘  │
+  └────────────────────────────────┘        │  ┌─────────────▼──────────────┐  │
+                 ▲                            │  │ Persistence (ODBC, write-  │  │
+  ┌──────────────┴─────────────────┐ encrypt.│  │ through outbox + write-    │  │
+  │ ERHeadless (exe)               │reliable │  │ behind, accounts) ─────┐   │  │
+  │  N× NeuronClient sessions,     │  UDP    │  └────────────────────────┼───┘  │
+  │  bot / scripted (no rendering) │◀────────▶                           │      │
+  └──────────────┬─────────────────┘         └───────────────────────────┼──────┘
+                 ▼                                       TCP 1433 (ODBC,  │
+   ┌──────────────────────────────────────┐              Encrypt=yes)    ▼
+   │ NeuronCore (linked by ALL):          │  ┌───────────────────────────────────┐
+   │ math(DirectXMath)·ECS·world(int64)·  │  │ Microsoft SQL Server (EXTERNAL,   │
+   │ sectors·net protocol·serde·sim rules │  │ NETWORK SERVICE — not a container)│
+   └──────────────────────────────────────┘  │ self-hosted now → Azure SQL later │
+                                              └───────────────────────────────────┘
 ```
 
 **Targets:** **NeuronCore** (lib, all) · **NeuronClient** (lib → UWP app +
@@ -169,14 +198,14 @@ ERHeadless) · **NeuronRender** (lib, UWP/DX12 → UWP app) · **ERServer** (exe
 /EarthRiseGame
 ├── masterplan.md   ·   EarthRise.sln   ·   docs/   ·   db/ (SQL schema+migrations)
 ├── NeuronCore/    math/ ecs/ world/ net/ serde/ sim/ platform/
-├── NeuronClient/  session/ replica/ predict/ control/ bots/
+├── NeuronClient/  session/ replica/ interp/ control/ bots/   (predict/ added later)
 ├── NeuronRender/  gfx/ scene/(3D) canvas/(2D) assets/(DDS,font,CMO)        [UWP]
 ├── ERServer/      netio/ simloop/ ai/(PvE) interest/ auth/ persist/(ODBC)
 ├── EarthRise.Client/  app/ ui/(HUD on CanvasRenderer)                      [UWP/MSIX]
-├── ERHeadless/    host/ (N sessions; load + integration tests)
+├── ERHeadless/    host/ (N sessions; load + integration + replay tests)
 ├── NeuronTools/   meshcook/ ddscheck/ fontpack/ testrunner/
 ├── assets/        .dds · monospace font bitmaps · your .cmo meshes
-├── shaders/       .hlsl sources → MSBuild HLSL Compiler → CompiledShaders/*.h (embedded)
+├── shaders/       .hlsl sources → dxc (SM6/DXIL) → CompiledShaders/*.h (embedded)
 └── deploy/        ERServer Dockerfile (Server Core) · k8s manifests · dev scripts
 ```
 > Generated `CompiledShaders/` headers live under each project that compiles shaders
@@ -186,30 +215,46 @@ ERHeadless) · **NeuronRender** (lib, UWP/DX12 → UWP app) · **ERServer** (exe
 
 ## 6. Coordinate System & World Model
 
-### 6.1 Absolute position — `uint64_t` per axis, **1 unit = 1 metre** 🔒
+### 6.1 Absolute position — `int64_t` per axis, **1 unit = 1 metre** 🔒
 ```cpp
-struct WorldPos { uint64_t x, y, z; };   // absolute metres, unsigned
+struct WorldPos { int64_t x, y, z; };   // absolute metres, signed, origin at 0
 ```
-- Extent ≈ **2⁶⁴ m ≈ 1949 light-years** per axis.
-- **Sub-metre motion:** each moving entity carries a server-side `float` residual
-  per axis; the integer `WorldPos` advances when it crosses 1 m. Clients
-  predict/interpolate in float, so visuals stay smooth below 1 m/tick.
-- Corner origin `(0,0,0)`; logical centre `2⁶³` for symmetric spawns.
+- Extent ≈ **±2⁶³ m ≈ ±975 light-years** per axis — far beyond any gameplay need;
+  the meaningful constraint is sector size vs. float precision (§6.3), not range.
+- **Signed, origin-centred:** symmetric spawns need no 2⁶³ bias; relative deltas are a
+  plain subtraction (§6.2).
+- **Sub-metre / smooth motion:** position is carried as **sector index + a
+  sector-local `float` offset** (§6.3). The offset integrates velocity each tick and
+  **rebases** into the integer sector when it leaves the sector. One representation
+  serves both the authoritative sim and floating-origin rendering (§6.4).
 
 ### 6.2 Relative math
 ```cpp
-inline int64_t axisDelta(uint64_t a, uint64_t b) { return int64_t(a - b); } // wrap-safe within ±2^63
+inline int64_t axisDelta(int64_t a, int64_t b) { return a - b; } // valid while |a-b| < 2^63
 ```
-Relative vectors use DirectXMath `float`/`double`; never raw `uint64_t` to the GPU.
+Relative vectors use DirectXMath `float`; never raw `int64_t` to the GPU. Pairs are
+only ever differenced within interest range, so the subtraction cannot overflow.
 
 ### 6.3 Sectors & interest grid
-`sector = pos >> S`, `local = pos & ((1<<S)-1)`, `key = morton3(...)`. **💡**
-default **S = 14 → ~16 km sectors** (tunable to sensor range). Players subscribe to
-nearby sectors; the server streams only those entities (§8.4).
+`sector = pos >> S` (arithmetic shift), `local = pos - (sector << S)`. **💡** default
+**S = 14 → ~16 km sectors** (tunable to sensor range). Float precision inside a sector
+is 16 384 m / 2²⁴ ≈ **1 mm** — ample.
+
+The interest map is keyed on a **`SectorId` struct**, *not* a packed Morton code: at
+S = 14 each sector index is ~50 bits, so a 3-axis Morton key would need 150 bits and
+cannot fit a `uint64_t`.
+```cpp
+struct SectorId { int64_t x, y, z; bool operator==(const SectorId&) const = default; };
+struct SectorHash { size_t operator()(const SectorId&) const noexcept; }; // mix of 3 axes
+```
+Players subscribe to nearby sectors; the server streams only those entities (§8.4).
+(If spatial-locality ordering is ever required, add a **128-bit** Morton key — never
+a 64-bit one.)
 
 ### 6.4 Floating-origin rendering
 Per frame, pick a render origin (camera sector corner); upload entities as
-camera-relative `float3` metres; **rebase** when the camera travels far.
+camera-relative `float3` metres; **rebase** when the camera travels far. Shares the
+sector-offset representation from §6.1, so no separate render-space conversion path.
 
 ---
 
@@ -218,17 +263,25 @@ camera-relative `float3` metres; **rebase** when the camera travels far.
 ### 7.1 Math — DirectXMath 🔒
 Compute in `XMVECTOR`/`XMMATRIX`; store `XMFLOAT*` for tight ECS packing. **💡**
 row-major, row-vector, right-handed (`*RH`). A `WorldPos` fixed-point layer bridges
-uint64 ↔ float.
+`int64` sector ↔ sector-local `float`.
 
 ### 7.2 Other subsystems
-- **ECS** (custom, data-oriented): 32-bit handles, packed archetypes, span systems;
-  identical client/server.
-- **Serialization:** versioned binary; bit-packing for the wire; same primitives
-  for warm-restart snapshots.
-- **Time:** fixed sim step **🔒 60 Hz (~16.67 ms)**; **snapshots 20 Hz**; bounded
-  catch-up; ticks are canonical. (See `platform/TimerCore.h`.)
+- **ECS** (custom, data-oriented): **32-bit handles = index + generation bits**
+  (stale-handle safe), packed archetypes, span systems; **deterministic system &
+  iteration order** (client and server must step identically). Identical client/server
+  code.
+- **Allocators:** the 30 Hz tick hot path (ECS, packet assembly, snapshot encoding)
+  uses a **per-frame arena + pools** (`std::pmr` monotonic/pool resources). STL is
+  allowed but must not allocate from the global heap inside the tick.
+- **Serialization:** versioned binary; bit-packing for the wire; same primitives for
+  warm-restart snapshots; carries a **protocol version** for the handshake gate (§8.5).
+- **Time:** fixed sim step **🔒 30 Hz (~33.3 ms)** via a **real accumulator** — the
+  loop accumulates real elapsed time and runs whole fixed steps, clamped to
+  `MaxCatchUpTicksPerFrame`, carrying the remainder. (The provided `TimerCore.h` is a
+  *variable*-step timer; the server loop must not advance by raw wall-clock delta.)
+  Ticks are canonical; **snapshots 20 Hz**. Core timing stays **WinRT-free**.
 - **Shared sim rules:** pure functions for movement, build costs, yields, combat
-  (PvE+PvP) — used by both client prediction and server authority.
+  (PvE+PvP) — used by client interpolation/validation and server authority.
 
 ---
 
@@ -246,27 +299,46 @@ uint64 ↔ float.
 
 ### 8.2 Channels
 `Unreliable` (snapshots) · `ReliableOrdered` (commands/chat/events) ·
-`ReliableUnordered` (notifications) · `Bulk` (fragmented world sync).
+`ReliableUnordered` (notifications) · `Bulk` (fragmented world sync). Per-channel
+16-bit sequences are for reliability/ordering only — **not** the AEAD nonce (§8.3).
 
 ### 8.3 Reliability & encryption
-16-bit per-channel sequences; **ack + 32-bit ack-bitfield**; RTT/RTO retransmit;
-dup detection; **fragmentation/reassembly** (~1200 B safe payload); connection
-token (anti-spoof); keepalive/timeout; congestion backoff.
-**Encryption (required):** the handshake performs a **CNG ECDH key agreement**;
-packets then use **AES-GCM (CNG)** AEAD — protecting the **login exchange** (§14)
-and, ideally, all reliable traffic.
+**Reliability:** 16-bit per-channel sequences; **ack + 32-bit ack-bitfield**; RTT/RTO
+retransmit; dup detection; **fragmentation/reassembly** (~1200 B safe payload);
+**64-bit connection token** (anti-spoof); keepalive/timeout; congestion backoff.
+
+**Encryption (required):**
+- Handshake performs a **CNG ECDH** key agreement; the server's ephemeral key is
+  **signed by a pinned static server key (ECDSA)** and the client verifies it, so an
+  active **MITM cannot sit in the login exchange** (§14). The client ships with the
+  server's static public key.
+- Packets then use **AES-GCM (CNG)** AEAD. **Nonce = direction-bit ‖ monotonic 64-bit
+  packet counter** (never random, never reused under a key); **rekey before the
+  counter can wrap**. This 64-bit packet number is separate from the 16-bit channel
+  sequences.
+- **Replay protection:** a sliding **replay window** on decrypt rejects stale/duplicate
+  packet numbers (independent of the reliability ack bitfield).
+- Protects the **login exchange** (§14) and, by default, **all reliable traffic**.
 
 ### 8.4 State replication
 Per tick, each player gets a snapshot of **only their subscribed sectors**,
 **delta-compressed vs the last acked baseline**. Clients **interpolate** remote
-entities (~100 ms back) and **predict + reconcile** their own units. Input is
-**intents/commands**; the server validates everything.
+entities (~100 ms back). **Own-unit prediction/reconciliation is deferred past M1**
+(§10.1) — until then own units are server-confirmed and **snap-corrected on ack**.
+Input is **intents/commands**; the server validates everything (speed/rate checks).
 
 ### 8.5 Connection sequence
-1. UDP handshake + **CNG ECDH** → shared key (anti-spoof connection token).
-2. **Login** (§14, custom username/password) over the encrypted channel → verify vs
-   SQL → **session token**.
-3. Initial world sync (`Bulk`) → enter the tick/snapshot loop.
+1. **Stateless cookie:** client → server hello; server replies with a token derived
+   from client addr + secret (no per-connection state, no crypto yet) — a
+   **handshake-DoS guard** so ECDH is only spent on cookie-returning clients.
+2. **Protocol-version gate:** client presents build/protocol version; mismatches are
+   rejected with a clear reason before any state is allocated.
+3. **CNG ECDH** handshake with **server-key signature verification** → shared key.
+4. **Clock sync:** RTT/offset estimation (timestamp echo) so interpolation delay and
+   later prediction share a common clock.
+5. **Login** (§14, custom username/password) over the encrypted channel → verify vs
+   SQL → expiring **session token**.
+6. Initial world sync (`Bulk`) → enter the tick/snapshot loop.
 
 ---
 
@@ -274,10 +346,16 @@ entities (~100 ms back) and **predict + reconcile** their own units. Input is
 - Single Win32 console exe (one shard, ~100 players) in a **Windows Server Core
   container** (§20); **stateless** (durable state in SQL Server).
 - **Threading (💡):** IOCP net threads → decode/reliability/decrypt → enqueue; a
-  **single-threaded 60 Hz simulation** owns state; a **persistence thread** does
-  write-behind via ODBC. MPSC queues.
+  **single-threaded 30 Hz simulation** owns state; a **persistence thread** does the
+  outbox + write-behind via ODBC. MPSC queues. Reliability/decrypt state is
+  **per-connection-affinitised** (or lock-free per-conn queues) so IOCP threads never
+  race on a connection's sequence/nonce/reassembly state.
 - **Tick:** commands → systems (movement, harvest, build, **PvE AI**, **PvP**) →
-  advance → per-player interest snapshots → net → periodic persistence batch.
+  advance fixed step → per-player interest snapshots → net → periodic persistence
+  batch.
+- **Snapshot encoding** (interest + delta for ~100 players) runs over a **read-only
+  job pool** against a frozen post-tick state — the first scaling lever if the single
+  sim thread saturates (M4). M1a may encode inline.
 - **PvE NPCs** are server ECS entities (`ERServer/ai/`), distinct from *bots*.
 - DB is **out of the tick hot path** — SQL latency never stalls the sim.
 
@@ -288,8 +366,10 @@ entities (~100 ms back) and **predict + reconcile** their own units. Input is
 ### 10.1 NeuronClient (render-agnostic) 🔒
 No rendering / no UWP dep; links into the UWP app **and** ERHeadless. Modules:
 **session** (encrypted reliable-UDP, login, command queue), **replica** (entity
-mirror), **predict** (prediction/reconciliation/interpolation), **control**
-(`IClientController` → intents: human / bot / scripted).
+mirror), **interp** (interpolation + snap-on-ack), **control** (`IClientController`
+→ intents: human / bot / scripted). A **`predict/`** module
+(prediction/reconciliation) is added **post-M1** only where input feel requires it
+(fast direct control); slow command-driven units stay interpolation-only.
 
 ### 10.2 EarthRise.Client (UWP)
 C++/WinRT shell (`IFrameworkView`+CoreWindow, no XAML). Loop: input → human
@@ -299,8 +379,8 @@ controller → step NeuronClient → hand state to NeuronRender. DX12 swap chain
 
 ### 10.3 ERHeadless (parallel clients & bots) 🔒
 Win32 host running **many NeuronClient sessions in one process** (each own UDP
-port), bot/scripted-driven, **no rendering** → integration tests, load tests
-(~100+ bots, §17 M4), and in-world bots.
+port), bot/scripted-driven, **no rendering** → integration tests, **record/replay
+determinism** runs, load tests (~100+ bots, §17 M4), and in-world bots.
 > **Bots ≠ PvE NPCs.** Bots are *client* sessions; PvE NPCs are *server* AI.
 
 ---
@@ -313,8 +393,8 @@ Separate subsystems 🔒 (own modules/PSOs/command lists; composited last).
 - **CanvasRenderer (2D UI):** immediate-mode orthographic pass — batched quads /
   monospace bitmap text / lines / rects; HUD & menus build on it, fully decoupled.
 
-Shaders are precompiled into embedded byte-array headers (no runtime HLSL on UWP);
-see §12.4.
+Shaders are precompiled into embedded SM6/DXIL byte-array headers (no runtime HLSL on
+UWP); see §12.4.
 
 ---
 
@@ -331,14 +411,17 @@ see §12.4.
   instancing.
 
 ### 12.4 Shaders — precompiled, embedded as headers 🔒
-`shaders/*.hlsl` are built by the **MSBuild HLSL Compiler task** with:
+`shaders/*.hlsl` are built to **SM6/DXIL via `dxc`** (the **DXCCompile** MSBuild item,
+**not** the legacy `fxc`/`FXCompile` task — fxc tops out at SM5.1 and cannot emit
+DXIL) with:
 - **Variable Name** → `g_p%(Filename)`
 - **Header File Output** → `$(ProjectDir)CompiledShaders\%(Filename).h`
+- **Root signatures authored in HLSL** (`[RootSignature(...)]`), versioned with the
+  embedded bytecode.
 
 Each shader becomes a generated header declaring a bytecode array
 `const BYTE g_p<Filename>[]`, `#include`d directly to build PSOs — **no runtime
-shader file I/O** (ideal for UWP). Target DXIL/SM6 via `dxc` where available, else
-`fxc`. Usage:
+shader file I/O** (ideal for UWP). Usage:
 ```cpp
 #include "CompiledShaders/SceneVS.h"
 #include "CompiledShaders/ScenePS.h"
@@ -357,7 +440,8 @@ psoDesc.PS = { g_pScenePS, sizeof(g_pScenePS) };
     defend; objectives (defend/hunt/salvage).
   - **PvP (zoned)** — universe split into **PvP vs safe zones**; **each base
     projects a safe-zone radius** (no PvP damage inside); **loot-on-kill** drops a
-    recoverable `LootContainer` with a fraction of cargo. Server-authoritative.
+    recoverable `LootContainer` with a fraction of cargo. Server-authoritative. Loot
+    and currency transfers are **economy events** (write-through; §15).
 
 **Entities:** `Base` (mobile; storage/shipyard/sensors/weapons; HP; safe-zone
 emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNode`,
@@ -367,14 +451,17 @@ emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNod
 
 ## 14. Accounts & Authentication 🔒 (real login at launch)
 - **Accounts** in SQL Server: username, **salted PBKDF2 password hash via CNG**
-  (per-user random salt, high iteration count — never plaintext), profile,
-  created/last-login, status.
-- **Registration & login** over the **encrypted** channel (§8.5): credentials sent
-  only after the ECDH handshake; server verifies and issues an expiring **session
-  token** bound to the connection.
+  (per-user random salt + **server-side pepper**, high iteration count — never
+  plaintext), profile, created/last-login, status. *(CNG offers no Argon2; PBKDF2-
+  HMAC-SHA512 with a high, tunable iteration count is the deliberate MS-only choice.)*
+- **Registration & login** over the **encrypted, server-authenticated** channel
+  (§8.5): credentials sent only after ECDH + server-key verification; server verifies
+  and issues an expiring **session token** bound to the connection.
+- **Abuse controls:** per-account and per-IP **login rate-limiting + lockout/backoff**
+  to blunt credential stuffing against custom auth.
 - **Sessions:** token validation on reliable traffic; reconnect support; **one
-  active session per account** (deny/kick duplicate); login binds the session to the
-  player's `Base`/entity.
+  active session per account** (deny/kick duplicate; reconnect handled atomically to
+  avoid races); login binds the session to the player's `Base`/entity.
 - **🔒 Launch = custom username/password.** Federated **Entra ID** remains a possible
   post-launch option (especially with Azure SQL).
 - **Dev stub:** a "pick a name" identity stays behind a dev flag for M1–M4
@@ -388,26 +475,40 @@ emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNod
   later**; migration is essentially a connection-string + auth change.
 - **Access:** **ODBC Driver 18** (`sql.h`/`odbc32.lib`, Windows SDK); thin custom
   ODBC wrapper in `ERServer/persist/`. Parameterized statements / stored procs;
-  **connection pooling**; **batched write-behind** on the persistence thread;
-  TVP/`bcp` for big checkpoints; **`Encrypt=yes`**.
+  **connection pooling**; the persistence thread runs both paths below; TVP/`bcp` for
+  big checkpoints; **`Encrypt=yes`**.
+- **Durability boundary 🔒:**
+  - **Economy events (write-through / transactional outbox):** trades, currency,
+    build completion, kills/**loot-on-kill**, account changes. Committed
+    transactionally (or staged to a durable outbox drained in order) **before** they
+    are considered authoritative — **zero-loss** on crash.
+  - **High-frequency state (write-behind):** position, velocity, transient AI state —
+    **batched**, with a stated **RPO** (e.g. ≤ a few seconds of movement may be lost
+    on hard crash; never an economy event).
+- **Warm restart:** a periodic **binary state snapshot (blob) + an event log since the
+  snapshot** (same serde primitives, §7.2) — restart replays the log onto the last
+  snapshot for a clean, verifiable state, rather than reconstructing the sim from
+  normalized rows.
 - **Schema (`/db/`, Azure-SQL-compatible):** accounts (§14), base state, build
-  queues, ships, world objects, resource nodes, zones/PvP. Avoid features absent in
-  Azure SQL DB (cross-DB queries, SQL Agent jobs → Elastic Jobs, FILESTREAM).
-  Versioned migrations.
+  queues, ships, world objects, resource nodes, zones/PvP, **outbox**, **snapshots**.
+  Avoid features absent in Azure SQL DB (cross-DB queries, SQL Agent jobs → Elastic
+  Jobs, FILESTREAM). Versioned migrations.
 - **App→DB auth:** **🔒 SQL login now → managed identity / Entra ID on Azure SQL.**
-- **Durability:** SQL transactions + log are authoritative (**no custom journal**);
-  an optional in-memory **snapshot** enables fast warm-restart.
-- **ERServer stateless** → restarts recover from SQL.
+- **ERServer stateless** → restarts recover from snapshot + log.
 
 ---
 
 ## 16. Build, Tooling, Testing
 - **MSBuild** 🔒 (`EarthRise.sln`): UWP `.vcxproj` → MSIX; others standard. The
-  **HLSL Compiler task** emits embedded shader headers (§12.4); asset cooking
-  (CMO/DDS) runs as pre-build steps via the VS content pipeline.
+  **`dxc` (DXCCompile) task** emits embedded SM6/DXIL shader headers (§12.4); asset
+  cooking (CMO/DDS) runs as pre-build steps via the VS content pipeline.
 - **Tests:** custom assert runner; units for math (DirectXMath), serialization,
-  reliability (loss/reorder/dup), **crypto handshake**, and CMO/DDS parsers.
-  **ERHeadless** = multi-client integration & load harness.
+  reliability (loss/reorder/dup), **crypto handshake (incl. MITM/nonce/replay
+  cases)**, and CMO/DDS parsers. **ERHeadless** = multi-client integration & load
+  harness plus an **input-log record/replay determinism harness** (same input →
+  identical sim, the primary netcode debugging tool).
+- **Per-milestone perf gates** are numeric: sim tick p50/p99 ms, per-client
+  bandwidth, render frame time (§17, App. B).
 - **CI / web sessions:** `SessionStart` hook builds NeuronCore/NeuronClient/
   ERServer/ERHeadless/NeuronTools and runs tests against a **dev SQL Server reached
   over the network** (UWP packaging stays local).
@@ -417,39 +518,47 @@ emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNod
 ## 17. Milestone Roadmap
 
 **M0 — Foundations** *(S–M)* — `EarthRise.sln`; NeuronCore skeleton (DirectXMath,
-ECS, world, serde, time, logging); NeuronClient + ERHeadless skeletons; test
-runner; HLSL-Compiler shader-header build wired. **Done:** all targets build;
-NeuronCore tests pass.
+ECS w/ generation handles, world [`int64`/sector], serde, **fixed-step time**,
+allocators, logging); NeuronClient + ERHeadless skeletons; test runner; `dxc`
+shader-header build wired. **Done:** all targets build; NeuronCore tests pass;
+fixed-step accumulator unit-tested.
 
-**M1 — Networked tech slice** 🔒 *(L)* ← first — ERServer (containerized) 60 Hz
-loop; reliable-UDP handshake (+ CNG encryption stub); **ERHeadless drives ≥3
-parallel bots**; UWP client renders base + a few ships with **3D Scene + 2D Canvas
-HUD** as separate passes; **move the base**; server-authoritative replication +
-interpolation + basic prediction. **Done:** 1 UWP + ≥3 bots see the base cross a
-sector boundary under simulated loss; no `uint64_t` reaches the GPU; 3D/2D split
-verified.
+**M1a — Networked transport (headless)** 🔒 *(M–L)* ← first — ERServer (containerized)
+30 Hz fixed loop; **stateless-cookie → version-gate → CNG ECDH w/ server-key
+verify → AES-GCM (nonce/replay)** handshake; reliable-UDP (acks, frag, resend);
+**ERHeadless drives ≥3 parallel bots**; server-authoritative replication +
+interpolation; **move the base**. No rendering. **Done:** ≥3 bots see the base cross
+a sector boundary under simulated loss/reorder/dup; MITM/replay tests pass; tick p99
+within budget (App. B).
+
+**M1b — Client tech slice** *(M)* — UWP client renders base + a few ships with **3D
+Scene + 2D Canvas HUD** as separate passes; snap-on-ack correction. **Done:** 1 UWP +
+≥3 bots share the world; no `int64_t` reaches the GPU; 3D/2D split verified; loopback
+path tested **and** a non-exempt run validated before Store.
 
 **M2 — Darwinia look** *(M–L)* — DDS + **CMO** loaders, monospace Canvas HUD, bloom
 + additive particles, instanced ships. **Done:** an instanced fleet (your CMO
-meshes) with thrusters + glow over a legible HUD at target frame rate.
+meshes) with thrusters + glow over a legible HUD at target frame time.
 
 **M3 — Core 4X loop** *(L)* — nodes, harvesting, storage, build queue, sensor/fog.
 **Done:** harvest → return → build a ship, server-authoritative.
 
-**M4 — Scale & interest** *(L)* — sector subscriptions, delta compression;
-**ERHeadless ~100 bots**. **Done:** 100-bot load test holds 60 Hz within bandwidth
-budget (App. B).
+**M4 — Scale & interest** *(L)* — sector subscriptions, delta compression, snapshot
+job pool; **ERHeadless ~100 bots**. **Done:** 100-bot load test holds 30 Hz within
+the bandwidth budget (App. B); per-client bandwidth measured vs the M0 estimate.
 
-**M5 — Accounts, auth & persistence** *(M–L)* — **CNG encrypted handshake + real
-login (custom username/password)**; ODBC persist layer + schema/migrations +
-write-behind + warm-restart; **SQL Server over the network (self-hosted)**; ERServer
-stateless. **Done:** register/login works; kill & restart the ERServer container →
-world + bases restore from SQL.
+**M5 — Accounts, auth & persistence** *(M–L)* — real login (custom username/password,
+PBKDF2 + pepper + rate-limit); ODBC persist layer + schema/migrations + **outbox
+(write-through) + write-behind + snapshot/log warm-restart**; **SQL Server over the
+network (self-hosted)**; ERServer stateless. **Done:** register/login works; kill &
+restart the ERServer container → world + bases + economy restore with **zero economy
+loss**.
 
-**M6 — Combat, deployment & polish** *(L)* — weapons/projectiles, PvE AI, **zones +
-base safe-zones + loot-on-kill**; **Kubernetes production deploy (Windows nodes +
-UDP LB)** and **Azure SQL migration**; economy/UI polish; Store-compliance pass.
-**Done:** full 4X session playable end-to-end by players + bots on the prod
+**M6 — Combat, deployment & polish** *(L)* — weapons/projectiles (local sub-stepping
+for fast shots), PvE AI, **zones + base safe-zones + loot-on-kill**; **Kubernetes
+production deploy (Windows nodes + UDP LB)** and **Azure SQL migration**; optional
+own-unit **prediction** where feel needs it; economy/UI polish; Store-compliance
+pass. **Done:** full 4X session playable end-to-end by players + bots on the prod
 topology.
 
 ---
@@ -458,34 +567,41 @@ topology.
 
 | # | Risk | Impact | Mitigation |
 | --- | --- | --- | --- |
-| R1 | UWP networking sandbox (caps, loopback) | High | §8.1; `ISocket`; headless Win32 dodges loopback; test Store path early. |
-| R2 | `uint64_t` vs float GPU precision | Med | Floating origin + sector-local floats; sub-metre residual (§6). |
-| R3 | Single-shard scaling to 100 | Med | Interest mgmt + delta compression; ERHeadless load tests (M4). |
-| R4 | **External DB latency/availability** | Med | DB out of tick hot path; in-memory sim; write-behind; co-locate ERServer near SQL/Azure SQL. |
+| R1 | **UWP networking sandbox / loopback / platform decline** | High | §8.1; `ISocket`; headless Win32 dodges loopback; test Store path early (M1b). **UWP kept for Store reach; revisit Win32/Windows App SDK if Store is dropped.** |
+| R2 | `int64`/sector vs float GPU precision | Med | Floating origin + sector-local floats (~1 mm @ S=14); single sector-offset representation (§6). |
+| R3 | Single-shard scaling to 100 | Med | 30 Hz sim; interest mgmt + delta compression + snapshot job pool; ERHeadless load tests (M4). |
+| R4 | **External DB latency/availability** | Med | DB out of tick hot path; in-memory sim; outbox + write-behind; co-locate ERServer near SQL/Azure SQL. |
 | R5 | **K8s + Windows containers + UDP** | Med | Windows node pool; **UDP-capable LoadBalancer**; one pod per shard + **client→pod affinity** (§20). |
-| R6 | Credential/session security | High | CNG ECDH + AES-GCM; PBKDF2 hashing; tokens; `Encrypt=yes` to SQL. |
+| R6 | **Credential/session security & active MITM** | High | **Server-key-pinned ECDH** + AES-GCM; **nonce-per-packet + replay window**; PBKDF2 + pepper; rate-limit/lockout; tokens; `Encrypt=yes` to SQL. |
 | R7 | Azure SQL feature parity | Low–Med | Keep schema Azure-SQL-compatible from day one (§15). |
-| R8 | "Custom everything" scope | High | Only MS platform components; strict milestone scoping. |
-| R9 | UWP no runtime HLSL | Low | Embedded shader headers from day one (§12.4). |
-| R10 | Reliable-UDP / crypto correctness | Med | Loss/reorder/dup + handshake tests; ERHeadless harness. |
+| R8 | "Custom everything" scope | High | Only MS platform components; strict milestone scoping; **prediction deferred**; M1 split M1a/M1b. |
+| R9 | UWP no runtime HLSL | Low | Embedded SM6/DXIL headers from day one (§12.4). |
+| R10 | Reliable-UDP / crypto correctness | Med | Loss/reorder/dup + handshake/MITM/nonce/replay tests; **record/replay determinism harness**; ERHeadless. |
 | R11 | CMO edge cases (skinning/anim) | Low–Med | Static meshes first; add skinning later; validate via meshcook. |
+| R12 | **Write-behind data loss on crash** | Med | Durability boundary: economy = write-through/outbox (zero loss); position = write-behind within a stated RPO; snapshot + log restart (§15). |
+| R13 | **GCM nonce reuse / handshake DoS** | High | Direction‖64-bit packet-counter nonce, rekey-before-wrap; stateless cookie before ECDH (§8.3/§8.5). |
+| R14 | **Fixed-step vs provided variable-step timer** | Med | Real accumulator with bounded catch-up, WinRT-free core; unit-tested in M0 (§7.2). |
 
 ---
 
 ## 19. Open Questions & Future Considerations
 
-**No open blocking questions — the architecture is fully specified for M0.**
+**Resolved this revision (v0.7):** sim tick = 30 Hz; coords = `int64` centred at 0
+with struct sector key; client prediction deferred past M1; durability boundary
+(economy write-through / position write-behind); shaders SM6/DXIL via `dxc`; M1 split
+M1a/M1b; crypto hardening (server-key pinning, nonce/replay).
 
-Deferred to post-launch (not needed now):
+**Live unknowns (track, don't pretend they're closed):**
+- **Per-client bandwidth budget** — estimated now (App. B) and *validated* at M4;
+  this number gates the single-shard 100-player premise.
+- Whether any subsystem actually needs **own-unit prediction** (decided by feel at M6).
+- AES-GCM **rekey interval** vs packet rate; replay-window width.
+
+**Deferred to post-launch:**
 - Federated **Entra ID** / social login (launch is custom username/password).
 - **Multi-shard** topology + directory/matchmaking service (launch is single shard).
-- Encrypting **all** traffic vs the auth exchange only (handshake supports either).
 - Azure SQL **tier sizing**, read-replicas, geo-redundancy.
-
-*(Resolved through v0.5: coordinate scale = m; CMO meshes; monospace fonts; STL;
-zoned PvP; SQL = external network service (self-hosted Developer/Standard → Azure
-SQL); real login (custom username/password); SQL login → managed identity on Azure;
-dev Docker Desktop / prod Kubernetes; 60 Hz sim / 20 Hz snapshot; shader precompile to embedded headers.)*
+- Revisiting **Win32 / Windows App SDK** if Microsoft Store distribution is dropped.
 
 ---
 
@@ -523,23 +639,46 @@ external network service — never containerized.**
 
 ---
 
+## 21. Observability & Telemetry
+You cannot hold the M4 bandwidth budget you cannot measure. ERServer exposes,
+per-shard and per-client:
+- **Sim:** tick time p50/p99, catch-up steps used, entity/system counts.
+- **Net:** per-client downstream/upstream bytes, packet loss / retransmit / reorder
+  rates, fragment counts, **AEAD-auth failures**, replay-window rejects.
+- **Persistence:** outbox depth & drain latency, write-behind batch size/lag, RPO
+  watermark.
+- **Auth:** login attempts / lockouts / rate-limit hits.
+
+Exported as structured logs + counters (lightweight, MS-only — perf counters / ETW /
+log lines), consumable by the headless harness for automated perf gates.
+
+---
+
 ## Appendix A — Packet format sketch
 ```
-UDP datagram (post-handshake: AES-GCM encrypted payload + auth tag)
-├── Header: protocol_id u32 · connection_token u32 · sequence u16 · ack u16 · ack_bits u32
-└── Payload: 1..N messages { channel u8, msg_type u8, length u16, body … }
+UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet number)
+├── Header (AAD): protocol_id u32 · connection_token u64 · packet_number u64
+│                 · per-channel: sequence u16 · ack u16 · ack_bits u32
+└── Payload (encrypted): 1..N messages { channel u8, msg_type u8, length u16, body … }
    (fragments: message_id, fragment_index, fragment_count)
 ```
+> The 64-bit `packet_number` doubles as the AEAD nonce input and feeds the replay
+> window; the 16-bit per-channel `sequence` is reliability/ordering only.
 
 ## Appendix B — Tick & timing budget
 | Quantity | Target |
 | --- | --- |
-| Sim tick | 60 Hz (~16.67 ms) |
+| Sim tick | 30 Hz (~33.3 ms) |
 | Snapshot send / client | 20 Hz |
 | Client render | display-rate (60+ fps), decoupled |
 | Interpolation delay | ~100 ms |
 | Safe UDP payload | ~1200 bytes |
-| Per-client downstream | TBD at M4 |
+| **Per-client downstream (estimate)** | **~100 visible entities × ~16 B delta × 20 Hz ≈ 32 KB/s (~256 kbit/s); validate at M4** |
+| Per-client upstream | intents only, ≪ downstream |
+
+> The downstream estimate is a *day-one sanity check* on the single-shard premise:
+> ~256 kbit/s/client × 100 ≈ 25 Mbit/s aggregate egress — comfortably within a single
+> pod. Delta size and visible-entity count are the variables to confirm at M4.
 
 ## Appendix C — Glossary
 - **Shard** — one server process / one contiguous world.
@@ -550,11 +689,12 @@ UDP datagram (post-handshake: AES-GCM encrypted payload + auth tag)
 - **Session token** — credential issued at login, validates reliable traffic.
 - **Interest set / Baseline** — entities told to a player / last acked snapshot.
 - **Floating origin** — per-frame render origin near the camera.
-- **Sector** — fixed cubic cell for spatial queries & interest.
+- **Sector** — fixed cubic cell for spatial queries & interest (keyed by `SectorId`).
+- **Outbox** — durable, ordered queue of economy events drained to SQL (write-through).
+- **RPO** — Recovery Point Objective: bounded data the system may lose on hard crash.
 - **Canvas** — the 2D immediate-mode UI subsystem (separate from the 3D scene).
 - **CMO** — VS "Compiled Mesh Object," output of the Mesh Content Pipeline.
 
 ---
 
-*End of DRAFT v0.6 — architecture specified end-to-end; M0 underway (NeuronCore
-scaffolded).*
+*End of DRAFT v0.7 — review pass applied; M0 underway (NeuronCore scaffolded).*
