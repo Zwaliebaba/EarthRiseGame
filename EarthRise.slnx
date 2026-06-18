@@ -1,0 +1,11 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM" />
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="EarthRise/EarthRise.vcxproj" Id="4aeb4d7e-319a-41a2-996b-ef51b7744761">
+    <Deploy />
+  </Project>
+</Solution>
