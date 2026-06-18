@@ -8,4 +8,5 @@
   <Project Path="EarthRise/EarthRise.vcxproj" Id="4aeb4d7e-319a-41a2-996b-ef51b7744761">
     <Deploy />
   </Project>
+  <Project Path="NeuronCore/NeuronCore.vcxproj" Id="7f3a9c42-5d18-4b0e-9e21-3c9a1f2d4b67" />
 </Solution>
