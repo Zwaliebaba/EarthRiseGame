@@ -735,4 +735,4 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 
 ---
 
-*End of DRAFT v0.8 — testing policy added (§16.1); M1a complete; M1b in progress.*
+*End of DRAFT v0.8 — testing policy added (§16.1); M0, M1a, M1b complete; all 12 projects retargeted to MSVC v145; M2 (Darwinia look) is next.*
