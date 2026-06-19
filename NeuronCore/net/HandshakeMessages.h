@@ -11,8 +11,10 @@
 #include "Protocol.h"
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace Neuron::Net

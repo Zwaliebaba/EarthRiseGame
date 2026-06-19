@@ -3,6 +3,7 @@
 // BitWriter appends N-bit fields to a byte buffer.
 // BitReader reads them back in the same order.
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -33,7 +34,7 @@ public:
                 m_buf.push_back(0);
                 m_bitsFree = 8;
             }
-            const int chunk = std::min(bitsLeft, m_bitsFree);
+            const int chunk = (std::min)(bitsLeft, m_bitsFree);
             const int shift = m_bitsFree - chunk;
             m_buf.back() |= static_cast<uint8_t>((value >> (bitsLeft - chunk)) << shift);
             bitsLeft    -= chunk;
@@ -97,7 +98,7 @@ public:
                 m_current  = m_data[m_bytePos++];
                 m_bitAvail = 8;
             }
-            const int chunk  = std::min(bitsLeft, m_bitAvail);
+            const int chunk  = (std::min)(bitsLeft, m_bitAvail);
             const int shift  = m_bitAvail - chunk;
             result    = (result << chunk) | ((m_current >> shift) & ((1u << chunk) - 1u));
             bitsLeft  -= chunk;

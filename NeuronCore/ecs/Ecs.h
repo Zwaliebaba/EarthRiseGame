@@ -55,7 +55,7 @@ template <typename T>
 struct ComponentId { static ComponentTypeId value; };
 
 #define NEURON_DEFINE_COMPONENT(Type, IdNum) \
-    template<> ::Neuron::ECS::ComponentTypeId ::Neuron::ECS::ComponentId<Type>::value = (IdNum)
+    template<> Neuron::ECS::ComponentTypeId Neuron::ECS::ComponentId<Type>::value = (IdNum)
 
 // ---------------------------------------------------------------------------
 // Type-erased component storage interface

@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-namespace
+namespace TestrunnerEcsComponents
 {
 
 // Sample components for testing.
@@ -14,12 +14,14 @@ struct Position { float x, y, z; };
 struct Velocity { float dx, dy, dz; };
 struct Tag      { uint8_t kind; };
 
-} // anonymous
+} // namespace TestrunnerEcsComponents
 
 // Register component IDs (one definition per TU).
-NEURON_DEFINE_COMPONENT(Position, 0);
-NEURON_DEFINE_COMPONENT(Velocity, 1);
-NEURON_DEFINE_COMPONENT(Tag,      2);
+NEURON_DEFINE_COMPONENT(TestrunnerEcsComponents::Position, 0);
+NEURON_DEFINE_COMPONENT(TestrunnerEcsComponents::Velocity, 1);
+NEURON_DEFINE_COMPONENT(TestrunnerEcsComponents::Tag,      2);
+
+using namespace TestrunnerEcsComponents;
 
 TEST_SUITE(ECS)
 {

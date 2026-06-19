@@ -21,6 +21,7 @@
 
 #include "net/CngCrypto.h"
 
+#define WIN32_NO_STATUS
 #include <windows.h>
 #include <bcrypt.h>
 #include <ntstatus.h>
@@ -390,7 +391,7 @@ bool CngCrypto::DeriveAeadKeys(const SharedSecret& secret,
     auto deriveOne = [&](const unsigned char* info, ULONG infoLen, AeadKey& key) -> bool {
         BCryptBuffer params[] = {
             { sizeof(saltBytes), KDF_SALT, saltBytes },
-            { infoLen, KDF_INFO, const_cast<PUCHAR>(info) },
+            { infoLen, KDF_HKDF_INFO, const_cast<PUCHAR>(info) },
         };
         BCryptBufferDesc desc{ BCRYPTBUFFER_VERSION, 2, params };
 
