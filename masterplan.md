@@ -1,17 +1,45 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.8 — for review
+> **Status:** DRAFT v0.9 — for review
 > **Date:** 2026-06-19
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
 > Microsoft SQL Server, a UWP/DirectX 12 client, and a headless client/bot host
-> (**ERHeadless**) — in the visual style of *Darwinia*.
+> (**ERHeadless**) — in the visual style of *Darwinia*. **Gameplay fantasy:
+> _Homeworld × EVE_** — each player is a **fleet commander** (RTS direct control)
+> operating a **mobile mothership-base** in a persistent, contested sandbox.
 
 ---
 
 ## Changelog
 
-**v0.8 (this revision) — testing policy**
+**v0.9 (this revision) — gameplay design pass (PvP/PvE depth)**
+- **Core fantasy fixed as _Homeworld × EVE_:** RTS-style direct **fleet command**
+  from a **mobile mothership-base**, inside a persistent EVE-like contested universe.
+  Updates §1 pillars, §13.
+- **§13 rewritten from a half-page sketch into a real game-design spec** with
+  subsections: 13.1 Player fantasy & fleet command, 13.2 Combat model
+  (role + fitting + damage-type counters), 13.3 Progression (hybrid tech-tree +
+  fitting + catch-up), 13.4 Player-driven crafting economy, 13.5 World structure
+  (tiered security high→low→null), 13.6 Territorial conquest, 13.7 PvE content
+  (dynamic faction invasions + procedural anomalies), 13.8 Social/parties &
+  ownership, 13.9 New-player onboarding & loss mitigation, 13.10 Retention loop.
+- **Base role decided:** capital-class, **disable-not-destroy** (forced retreat at
+  low HP + cargo loss; never a one-base-per-player total wipe). §13.1, §13.6.
+- **Fleet scale decided:** launch cap **6–12 ships/player**, architecture designed
+  to scale entity counts beyond the initial 100-player shard as the game grows.
+  Updates App. B and §13.1.
+- **App. B re-derived for fleets** — a contested sector is now players × fleet, not
+  a flat ~100 entities; adds entity-aggregation / hard interest-culling as the lever.
+- **Risk table:** added R15 (gameplay-design depth/retention), R16 (fleet entity
+  blow-up vs bandwidth), R17 (newcomer brutality in conquest), R18 (thin social
+  glue at small scale). §18.
+- **Milestones:** M3 expanded to the real 4X+combat loop; new **M7 (territorial
+  conquest, economy, PvE content, onboarding)**. §17.
+- **§19 updated** with the new live unknowns (fleet-cap balance, market shard model,
+  whether persistent corps must come forward).
+
+**v0.8 — testing policy**
 - **Microsoft Native Unit Test policy added (§16):** every project must have a
   corresponding `<project>Test` MSTest project (e.g., `NeuronCoreTest`,
   `NeuronClientTest`, `NeuronRenderTest`, `ERServerTest`, `ERHeadlessTest`). Each new
@@ -79,16 +107,29 @@ DirectXMath; MSBuild; Server Core container; PvE+PvP; user meshes.
 
 ## 1. Vision & Design Pillars
 
-**EarthRise** is a persistent, single-shard space MMO. Each player commands one
-**mobile home base** in a single contiguous universe: gather resources, build
-ships, explore, expand, and fight (PvE **and** zoned PvP) — a real-time 4X loop
-shared by ~100 concurrent players at launch.
+**EarthRise** is a persistent, single-shard space MMO whose fantasy is
+**_Homeworld × EVE_**: each player is a **fleet commander** who directs a small
+fleet of ships (RTS-style) from one **mobile mothership-base** through a single
+contiguous, contested universe — explore, harvest, craft, trade, expand, and wage
+**PvE _and_ territorial PvP** in a real-time 4X loop shared by ~100 concurrent
+players at launch and designed to grow well past that.
 
-**Pillars:** (1) one universe, one shard, signed `int64_t` coordinates; (2) the base
-is a mobile unit, not a tile; (3) the Darwinia look — dark void, neon glow, bloom,
-additive particles, minimalist bitmap-font HUD; (4) server-authoritative;
-(5) custom engine on Microsoft platform tech only; (6) testable by construction
-via headless clients/bots.
+**Pillars:**
+1. **Fleet command from a mobile home.** You don't fly one ship — you command a
+   fleet from a mobile mothership-base (a slow, powerful **capital** that is
+   *disabled, not destroyed* — §13.1). Base is a unit, not a tile.
+2. **A persistent, contested sandbox.** One universe, one shard, signed `int64_t`
+   coordinates; **tiered security (high→low→null, §13.5)** with player-claimable
+   **territory** in nullsec (§13.6). Risk scales with reward.
+3. **Depth through fitting & economy, not just numbers.** Role + module **fitting**
+   with **damage-type counters** (§13.2); a **player-driven crafting economy**
+   where destruction creates demand (§13.4); hybrid tech-tree progression (§13.3).
+4. **A living world.** Dynamic NPC **faction invasions** and procedural
+   **anomalies/expeditions** give PvE a pulse (§13.7).
+5. **The Darwinia look** — dark void, neon glow, bloom, additive particles,
+   minimalist bitmap-font HUD.
+6. **Server-authoritative**, on a **custom engine using Microsoft platform tech
+   only**, **testable by construction** via headless clients/bots.
 
 ---
 
@@ -112,7 +153,14 @@ via headless clients/bots.
 | Client app model | **UWP + CoreWindow + DX12** (Store reach). Loopback/sandbox toil accepted; see R1. |
 | Client rendering | **3D Scene** and **2D Canvas (UI)** are separate subsystems. |
 | Client prediction | **Deferred past M1** — interpolation + snap-on-ack first; predict/reconcile later. |
-| Combat | **PvE** + **zoned PvP** (base safe-zones, loot-on-kill). |
+| **Core fantasy** | **_Homeworld × EVE_** — RTS **fleet command** from a **mobile mothership-base** in a persistent contested sandbox (§13.1). |
+| **Combat** | **PvE + territorial PvP**; **role + fitting + damage-type counters** (§13.2); **loot-on-kill** (ships); **base = capital, disable-not-destroy** (§13.1). |
+| **World / PvP zones** | **Tiered security high→low→null**; **claimable nullsec territory** (§13.5–13.6). |
+| **Progression** | **Hybrid tech-tree + fitting**, with catch-up flattening (§13.3). |
+| **Economy** | **Player-driven crafting** (raw→refine→components→ships) + regional markets + sinks (§13.4). |
+| **PvE anchor** | **Dynamic faction invasions** + **procedural anomalies/expeditions** (§13.7). |
+| **Social** | **Light parties/fleets** at launch; **individual** asset/territory ownership; persistent corps tracked as first expansion (§13.8, §19). |
+| **Fleet scale** | **6–12 ships/player** at launch (💡 8), data-driven cap raised as scale grows (§13.1, App. B). |
 | Meshes / Fonts | **CMO** meshes / **fixed-grid monospace** bitmap fonts (you provide both). |
 | STL | **Allowed** (but tick hot path uses arena/pool/`pmr` allocators — §7.2). |
 | Sim tick / snapshot | **30 Hz sim (~33.3 ms) / 20 Hz snapshot**; true fixed-step accumulator. |
@@ -438,21 +486,197 @@ psoDesc.PS = { g_pScenePS, sizeof(g_pScenePS) };
 
 ---
 
-## 13. Gameplay Systems (4X) — PvE & zoned PvP 🔒
-- **eXplore** — sensor/fog range; discover resources, anomalies, NPCs, players.
-- **eXpand** — the **mobile base** relocates, projecting range; later outposts.
-- **eXploit** — nodes → harvested → base storage → **build queue** → ships/modules.
-- **eXterminate:**
-  - **PvE** — server AI entities (factions/creatures/hazards): patrol/aggro/flee/
-    defend; objectives (defend/hunt/salvage).
-  - **PvP (zoned)** — universe split into **PvP vs safe zones**; **each base
-    projects a safe-zone radius** (no PvP damage inside); **loot-on-kill** drops a
-    recoverable `LootContainer` with a fraction of cargo. Server-authoritative. Loot
-    and currency transfers are **economy events** (write-through; §15).
+## 13. Gameplay Systems (4X) — Fleet Command, PvE & Territorial PvP
 
-**Entities:** `Base` (mobile; storage/shipyard/sensors/weapons; HP; safe-zone
-emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNode`,
-`Projectile`, `LootContainer`, `Player`.
+> **This section is the game design.** v0.8 had only a half-page sketch; v0.9
+> expands it after a design pass. Decisions below marked 🔒 were chosen in the v0.9
+> discussion; 💡 are defaults to validate; ❓ are tracked open questions (§19).
+
+### 13.0 The 4X loop, restated
+- **eXplore** — sensor/fog range; scan **anomalies/expeditions** (§13.7), discover
+  resources, NPCs, players, and territory objectives.
+- **eXpand** — relocate the **mobile base**, project sensor/build range; in nullsec,
+  **claim and hold territory** (§13.6); later, outposts/structures.
+- **eXploit** — harvest nodes → **refine → components → ships/modules** via the
+  player crafting economy (§13.4) and the base's build queue.
+- **eXterminate** — **fleet-vs-fleet** combat (§13.2): PvE faction invasions &
+  site-clearing (§13.7) and territorial PvP (§13.6).
+
+### 13.1 Player fantasy & fleet command 🔒
+Each player commands **one mobile mothership-base + a small fleet of ships**,
+controlled **RTS-style** (select, order move/attack/harvest/guard/retreat;
+control groups; formations). This is the **Homeworld** half of the fantasy; the
+persistent, contested, fitting-driven universe is the **EVE** half.
+
+- **Mobile base = capital, _disable-not-destroy_ 🔒.** The base is slow and powerful;
+  it can mount weapons and tank, but **cannot be permanently destroyed**. At low HP
+  it is forced into an **emergency jump/retreat** (cooldown + **cargo loss**),
+  protecting the one-base-per-player investment while keeping it genuinely
+  vulnerable and worth defending. Capturing territory means *driving off* the
+  defender's base + fleet, not deleting their account's core asset.
+- **Fleet size cap (launch) 🔒 = 6–12 ships/player (💡 start at 8).** Chosen so a
+  20-player contested sector stays RTS-readable and within the bandwidth budget
+  (App. B). The cap is **data-driven** and raised deliberately as the shard/engine
+  scale up (the game is expected to grow well past 100 players — §App. B, R16).
+- **Ship roles (💡):** *scout* (sensors/tackle), *fighter* (DPS), *harvester*
+  (eXploit), *builder/logistics* (repair + construction), *hauler* (cargo),
+  *EWAR* (jam/web/disrupt). Roles map to combat archetypes in §13.2.
+
+### 13.2 Combat model — role + fitting + damage-type counters 🔒
+Combat is **fleet-vs-fleet**, server-authoritative, and resolved by the shared sim
+rules (§7.2). Depth comes from **composition and fitting**, not raw numbers.
+
+- **Defense layers:** **shield / armor / hull**, each with per-**damage-type
+  resists**. Shields regenerate; armor is repaired by logistics ships; hull damage
+  is the danger zone.
+- **Damage types (💡):** **kinetic / thermal / EM** (+ *explosive* later) — a
+  rock-paper-scissors against resist profiles, so the *right* fit beats a bigger
+  *wrong* fit. Rewards scouting the enemy before committing.
+- **Fitting grid 🔒:** each hull has slots (high/mid/low + rig-equivalents) and a
+  **power/CPU budget**; modules = weapons, tank, propulsion, **EWAR**
+  (jam/web/scram/disrupt), reps, sensors. Fitting is the join between the **tech
+  tree** (§13.3) and moment-to-moment play.
+- **Tactical archetypes:** *tackle* (hold targets in place), *DPS*, *logistics*
+  (remote repair), *EWAR*, *tank/anchor*. A balanced fleet beats an unbalanced one
+  — the core skill expression.
+- **Range/positioning:** weapons have optimal/falloff and tracking; positioning,
+  focus-fire, and target-calling matter (RTS layer).
+- **Active abilities (💡, post-launch lever):** overheat, MWD burst, EWAR bursts —
+  added later **only where feel demands it** and gated by the prediction work (R-set,
+  §8.4/§10.1), since they raise netcode/UI cost.
+- **Loot-on-kill (economy event, §15):** a destroyed *ship* drops a recoverable
+  `LootContainer` with a fraction of fit/cargo. Insurance (§13.9) softens the loss.
+
+### 13.3 Progression — hybrid tech-tree + fitting 🔒
+- **Vertical (tech tree):** **research** unlocks new **hull classes** and **module
+  tiers**. Research is fed by resources + data salvaged from anomalies/NPCs (§13.7),
+  giving exploration a progression payoff.
+- **Horizontal (fitting + tactics):** *which* modules you fit and *how* you fly the
+  fleet decide fights. A fully-researched player still loses to a better-fit,
+  better-piloted smaller fleet.
+- **Catch-up / flattened curve 💡:** diminishing returns on top tiers and accessible
+  competitive hulls so newcomers reach *relevance* fast (full mastery still takes
+  time). Counters the EVE "veterans permanently dominate" failure mode (R17).
+- **❓ Time-gated training** (EVE-style passive skill points) is **not** in the
+  launch model; tracked as a possible future axis (§19).
+
+### 13.4 Economy — player-driven crafting 🔒
+Destruction must create **demand**, or conquest and loot are hollow.
+
+- **Production chain:** **raw resources → refine → components → ships/modules.**
+  Most player-flown ships and modules are **player-built**; NPC seeding is minimal
+  and exists mainly to bootstrap and to act as a price floor/ceiling.
+- **Resources (💡):** a handful of raw types with **regional scarcity** (rarer/richer
+  in low/null), so the security gradient (§13.5) drives trade and risk-taking.
+- **Markets (💡):** **player-driven regional markets** (buy/sell orders at trade
+  hubs), not a single global auction house — regional price differences create
+  **hauling/trade gameplay** (and targets for piracy in low/null).
+- **Single currency + sinks 🔒-intent:** fees, **ship insurance** (§13.9), refit
+  costs, structure upkeep/territory tax (§13.6), fuel. Sinks keep the loot/destruction
+  economy from inflating.
+- **Persistence:** all trades/currency/loot/build-completion are **economy events**
+  → **write-through / outbox, zero-loss** (§15).
+
+### 13.5 World structure — tiered security (high → low → null) 🔒
+The universe is a **risk→reward gradient**, replacing v0.8's "safe-zone bubbles
+only" model (which doesn't support conquest):
+
+| Tier | PvP | Territory | Role |
+| --- | --- | --- | --- |
+| **High-sec** | **Off** (NPC-enforced; aggressors disabled by response fleets) | None | **Protected onboarding & safe industry.** Lower yields. |
+| **Low-sec** | **On**, no claims | None | Contested resource/PvP space; piracy; gateway to null. Better yields. |
+| **Null-sec** | **On**, full | **Claimable (§13.6)** | Territorial conquest endgame. Best yields, anomalies, invasions. |
+
+- **Base safe-zone emitter** from v0.8 is retained **only as a high-sec/low-sec
+  defensive bubble around your own base** (no-PvP-inside in high-sec; a defensive
+  bonus in low/null), not as the universe-wide PvP gate.
+- Security tier is a property of a region/sector cluster, enforced server-side.
+
+### 13.6 Territorial conquest (null-sec) 🔒
+The PvP endgame, fitted to the **Homeworld×EVE individual-commander** model.
+
+- **Objectives:** nullsec sectors contain **capturable structures** (e.g.
+  resource-extractors, sensor arrays, jump beacons) that yield **income / buffs /
+  build bonuses** to whoever holds them.
+- **Ownership (💡, individual-first):** capture is by the **player (and their fleet)**
+  who clears and holds it — consistent with "persons own fleets and use them to
+  protect." Ownership is **persistent**, banked to the owner's account, and
+  defended by parking/garrisoning fleet + base presence.
+- **Contest mechanic 💡:** capturing requires **clearing defenders + a hold timer**
+  (no instant flips); defenders get **reinforcement/retreat windows** so conquest
+  is a campaign, not a drive-by. The owner's base **disable-not-destroy** rule
+  (§13.1) is how a defender is ultimately pushed off a holding.
+- **Upkeep / tax:** held structures cost upkeep (currency sink, §13.4) and pay out
+  while held — use-it-or-lose-it pressure that keeps territory fought over.
+- **⚠️ Social-glue caveat (R18):** with only **light parties/fleets** (§13.8) and no
+  persistent corps, *individuals* hold territory. At ~100 players this is workable,
+  but coordinated defense of large holdings is hard solo. **§19 tracks promoting
+  persistent corporations forward** if conquest proves to need shared
+  ownership/wallet/defense scheduling — the most likely first social expansion.
+
+### 13.7 PvE content — invasions + anomalies 🔒
+PvE is a **first-class anchor**, not just ambient AI.
+
+- **Dynamic faction invasions/events 🔒:** NPC factions launch **escalating
+  incursions** into sectors — server-driven events that **degrade local
+  yields/safety until repelled**, pulling players (even rivals) into temporary
+  cooperation. Tie escalation to the world clock and to how heavily a region is
+  exploited (a built-in coupling of PvE pressure to the 4X loop).
+- **Procedural anomalies / expeditions 🔒:** **scannable sites** (combat /
+  exploration / salvage) that spawn across the world with **scaling difficulty and
+  loot**, gated by sensor/scan skill — repeatable PvE income, research-data source
+  (§13.3), and the main exploration gameplay. Harder/richer sites cluster in
+  low/null (risk→reward, §13.5).
+- **NPC AI** stays server ECS (`ERServer/ai/`): patrol/aggro/flee/defend/escalate;
+  invasions and site guardians are scripted on top.
+- **❓ World bosses / capital threats** and **escalating-territory-heat** were
+  considered and **deferred** (not selected) — tracked in §19 as natural post-launch
+  PvE expansions that fit this frame.
+
+### 13.8 Social, parties & fleets 🔒 (light) — ownership model
+- **Launch social layer = light parties/fleets 🔒:** ad-hoc **squads** for shared
+  vision, fleet-up, voice-adjacent coordination, and **friendly-fire rules**; plus
+  global/local/party **chat**. No persistent corporations/alliances/shared wallet
+  at launch.
+- **Ownership stays individual** (territory §13.6, base, fleet, assets) — the
+  Homeworld "you command your own fleet" identity.
+- **Diplomacy (lightweight 💡):** per-player/party standings (ally / neutral /
+  hostile) drive the friendly-fire and engagement rules; no formal war-dec system
+  at launch.
+- **⚠️ Retention risk (R18):** MMО stickiness comes from social bonds. The plan
+  **must** revisit persistent corps early if retention or conquest coordination
+  suffers — see §19. This is the single biggest open *design* risk in v0.9.
+
+### 13.9 New-player onboarding & loss mitigation 🔒
+EVE-style conquest is brutal to newcomers; growth depends on a soft landing.
+
+- **Protected starter / high-sec space 🔒 (§13.5):** new players spawn into no-PvP
+  high-sec to learn the loop (move base, harvest, refine, fit, run an anomaly,
+  fleet up) before choosing to venture into low/null.
+- **Ship insurance / loss mitigation 🔒:** opt-in **insurance** partially reimburses
+  destroyed *ships* (currency sink + risk buffer), keeping players willing to fight.
+  The base's **disable-not-destroy** rule (§13.1) means the *core* asset is never
+  fully lost.
+- **Onboarding objective chain (💡):** a guided early sequence that teaches the loop
+  and seeds first goals (considered; recommended to include with M3/M7).
+
+### 13.10 Retention / session loop 💡
+A healthy MMO needs daily reasons to log in:
+- **Short loop (a session):** run anomalies / haul a trade route / defend against an
+  invasion / skirmish in low-sec → earn resources + currency + research data.
+- **Mid loop (days–weeks):** research up the tech tree, refit, grow the fleet, push
+  into low/null.
+- **Long loop (weeks–months):** claim and hold nullsec territory; build the regional
+  economy; rivalries. ❓ Seasons/leaderboards tracked for post-launch (§19).
+
+### 13.11 Entities (updated)
+`Base` (mobile **capital**; storage/shipyard/sensors/weapons; HP+resists; safe-zone
+emitter; **disable-not-destroy** retreat state), `Ship` (🔒 roles: scout / fighter /
+harvester / builder-logistics / hauler / EWAR; **fitting grid** of `Module`s),
+`Module` (weapon/tank/prop/EWAR/rep/sensor with power-CPU cost + damage-type/resist
+stats), `ResourceNode`, `Projectile`, `LootContainer`, `MarketOrder`,
+`TerritoryStructure` (claimable, owner, upkeep, yield), `AnomalySite`,
+`InvasionEvent`, `NpcUnit` (PvE AI), `Player`, `Party/Fleet` (light squad).
 
 ---
 
@@ -578,8 +802,10 @@ path tested **and** a non-exempt run validated before Store.
 + additive particles, instanced ships. **Done:** an instanced fleet (your CMO
 meshes) with thrusters + glow over a legible HUD at target frame time.
 
-**M3 — Core 4X loop** *(L)* — nodes, harvesting, storage, build queue, sensor/fog.
-**Done:** harvest → return → build a ship, server-authoritative.
+**M3 — Core 4X loop + fleet command** *(L)* — nodes, harvesting, storage, build
+queue, sensor/fog; **RTS fleet control** (select/move/attack/guard/control-groups)
+over a 6–12-ship fleet + mobile base. **Done:** harvest → return → build a ship and
+**command a multi-ship fleet** to clear a basic NPC site, server-authoritative.
 
 **M4 — Scale & interest** *(L)* — sector subscriptions, delta compression, snapshot
 job pool; **ERHeadless ~100 bots**. **Done:** 100-bot load test holds 30 Hz within
@@ -592,12 +818,25 @@ network (self-hosted)**; ERServer stateless. **Done:** register/login works; kil
 restart the ERServer container → world + bases + economy restore with **zero economy
 loss**.
 
-**M6 — Combat, deployment & polish** *(L)* — weapons/projectiles (local sub-stepping
-for fast shots), PvE AI, **zones + base safe-zones + loot-on-kill**; **Kubernetes
-production deploy (Windows nodes + UDP LB)** and **Azure SQL migration**; optional
-own-unit **prediction** where feel needs it; economy/UI polish; Store-compliance
-pass. **Done:** full 4X session playable end-to-end by players + bots on the prod
-topology.
+**M6 — Combat model & deployment** *(L)* — **role + fitting + damage-type combat**
+(shield/armor/hull + resists, module fitting grid, EWAR/logistics archetypes),
+weapons/projectiles (local sub-stepping for fast shots), PvE AI, **loot-on-kill +
+base disable-not-destroy**; **Kubernetes production deploy (Windows nodes + UDP LB)**
+and **Azure SQL migration**; optional own-unit/fleet **prediction** where feel needs
+it; Store-compliance pass. **Done:** balanced fleet-vs-fleet fights where fit &
+composition beat raw numbers, playable on the prod topology.
+
+**M7 — Sandbox: conquest, economy, PvE content & onboarding** *(L–XL)* —
+**tiered security (high→low→null)**; **territorial conquest** (claimable structures,
+capture/hold timers, upkeep/yield, ownership persistence); **player crafting economy**
+(refine→components→build) + **regional markets** + currency sinks + **ship
+insurance**; **dynamic faction invasions** + **procedural anomalies/expeditions**;
+**protected starter onboarding** + objective chain; retention loop. **Interest at
+scale:** entity aggregation/LOD validated for contested sectors (App. B, R16).
+**Done:** a full sandbox session — onboard in high-sec, build & fit a fleet, run
+anomalies, trade, push into null, and **claim & hold territory** through a contested
+fight — playable end-to-end by players + bots, with zero economy loss across a
+server restart.
 
 ---
 
@@ -619,25 +858,52 @@ topology.
 | R12 | **Write-behind data loss on crash** | Med | Durability boundary: economy = write-through/outbox (zero loss); position = write-behind within a stated RPO; snapshot + log restart (§15). |
 | R13 | **GCM nonce reuse / handshake DoS** | High | Direction‖64-bit packet-counter nonce, rekey-before-wrap; stateless cookie before ECDH (§8.3/§8.5). |
 | R14 | **Fixed-step vs provided variable-step timer** | Med | Real accumulator with bounded catch-up, WinRT-free core; unit-tested in M0 (§7.2). |
+| R15 | **Gameplay depth / retention thin** (was: no real game design) | **High** | §13 rewritten to a full spec (combat/progression/economy/conquest/PvE/onboarding); retention loop defined (§13.10); validate the *fun* with bots + a closed playtest before M7 polish. |
+| R16 | **Fleet entity-count blows the bandwidth/sim budget** | **High** | Launch fleet cap 6–12; **interest-bounded** per-client visible set + entity aggregation/LOD + projectile batching; load-test the *contested-sector* case at M4 (App. B). |
+| R17 | **Conquest too brutal for newcomers → no growth** | High | High-sec protected onboarding (§13.5/13.9); ship insurance + base disable-not-destroy; catch-up/flattened power curve (§13.3); onboarding objective chain. |
+| R18 | **Thin social glue (light fleets only) hurts retention & conquest defense** | Med–High | Individual ownership works at ~100 players; **persistent corporations tracked as the first social expansion** (§13.8/§19) — promote forward if retention or coordinated defense suffers. |
 
 ---
 
 ## 19. Open Questions & Future Considerations
 
-**Resolved this revision (v0.7):** sim tick = 30 Hz; coords = `int64` centred at 0
-with struct sector key; client prediction deferred past M1; durability boundary
-(economy write-through / position write-behind); shaders SM6/DXIL via `dxc`; M1 split
-M1a/M1b; crypto hardening (server-key pinning, nonce/replay).
+**Resolved this revision (v0.9 — gameplay):** core fantasy = Homeworld × EVE fleet
+command; combat = role + fitting + damage-type counters; progression = hybrid
+tech-tree + fitting; economy = player-driven crafting; world = tiered security
+high→low→null with claimable nullsec territory; PvE = invasions + procedural
+anomalies; social = light parties/fleets w/ individual ownership; base = capital,
+disable-not-destroy; launch fleet cap 6–12.
+
+**Resolved earlier (v0.7):** sim tick = 30 Hz; coords = `int64` centred at 0 with
+struct sector key; client prediction deferred past M1; durability boundary; shaders
+SM6/DXIL via `dxc`; M1 split M1a/M1b; crypto hardening.
 
 **Live unknowns (track, don't pretend they're closed):**
-- **Per-client bandwidth budget** — estimated now (App. B) and *validated* at M4;
-  this number gates the single-shard 100-player premise.
-- Whether any subsystem actually needs **own-unit prediction** (decided by feel at M6).
+- **Fleet entity counts vs bandwidth** — the *contested-sector* case (players × fleet),
+  not the flat-100 case, must be validated at M4 (App. B, R16); fleet cap is the dial.
+- **Whether persistent corporations must be promoted forward** from post-launch into
+  the conquest milestone (R18) — likeliest first social expansion if territorial
+  defense/retention needs shared ownership/wallet/scheduling at light-fleet scale.
+- **Fleet-cap balance** (6 vs 8 vs 12) — RTS readability + combat feel vs entity cost.
+- **Market model:** regional hubs vs a smaller number of trade centers; how order
+  matching/persistence scales as an economy event.
+- **Economy balance:** resource scarcity by tier, sink/faucet tuning, insurance payout
+  rate — needs live data; expect post-M7 iteration.
+- **Onboarding objective chain** scope (recommended for M3/M7).
+- Whether any subsystem needs **own-unit/fleet prediction** (decided by feel at M6).
 - AES-GCM **rekey interval** vs packet rate; replay-window width.
 
-**Deferred to post-launch:**
+**Deferred to post-launch (fit the v0.9 frame, not selected now):**
+- **Persistent corporations / alliances + diplomacy & shared wallet** (launch = light
+  fleets) — see R18; may be pulled forward.
+- **Time-gated skill training** as a progression axis (§13.3).
+- **World bosses / capital-class PvE threats** and **escalating-territory-heat** PvE
+  (§13.7).
+- **Active combat abilities** (overheat/EWAR bursts) where feel/prediction allow (§13.2).
+- **Seasons / leaderboards** and other meta-retention (§13.10).
 - Federated **Entra ID** / social login (launch is custom username/password).
-- **Multi-shard** topology + directory/matchmaking service (launch is single shard).
+- **Multi-shard** topology + directory/matchmaking — the main lever to grow well past
+  100 players (§13.1 growth intent).
 - Azure SQL **tier sizing**, read-replicas, geo-redundancy.
 - Revisiting **Win32 / Windows App SDK** if Microsoft Store distribution is dropped.
 
@@ -711,19 +977,41 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 | Client render | display-rate (60+ fps), decoupled |
 | Interpolation delay | ~100 ms |
 | Safe UDP payload | ~1200 bytes |
-| **Per-client downstream (estimate)** | **~100 visible entities × ~16 B delta × 20 Hz ≈ 32 KB/s (~256 kbit/s); validate at M4** |
-| Per-client upstream | intents only, ≪ downstream |
+| Launch fleet cap | **6–12 ships/player (💡 8)** — data-driven (§13.1) |
+| **Per-client downstream (re-derived for fleets)** | see below — **interest-bounded**, not flat 100 |
+| Per-client upstream | RTS intents/orders only, ≪ downstream |
 
-> The downstream estimate is a *day-one sanity check* on the single-shard premise:
-> ~256 kbit/s/client × 100 ≈ 25 Mbit/s aggregate egress — comfortably within a single
-> pod. Delta size and visible-entity count are the variables to confirm at M4.
+> **v0.9 — fleets change the entity math.** v0.8 assumed a flat ~100 visible
+> entities. With fleet command, a *contested sector* is roughly
+> **(players in interest) × (base 1 + fleet ≈ 8) + NPCs + projectiles**. A 20-player
+> brawl is therefore on the order of **~180–250 ship/base entities** (plus
+> short-lived projectiles), **not 100** — and a worst-case "everyone in one sector"
+> blows the budget. So:
+> - **Per-client downstream is bounded by _interest_, not headcount:** cap the
+>   visible-entity set per client (sector subscription + max-N nearest + LOD), e.g.
+>   target **≤ ~250 visible entities × ~16 B delta × 20 Hz ≈ 80 KB/s (~640 kbit/s)**
+>   in a big fight, ≪ that when dispersed.
+> - **Levers (M4/M7, R16):** hard interest culling; **entity aggregation/LOD** for
+>   distant fleets (send a fleet as a cluster, not N ships); projectile batching;
+>   per-client visible-entity cap; fleet-cap tuning. Validate the *contested-sector*
+>   case — not just the dispersed case — in the M4 load test.
+> - **Growth:** the shard is sized for ~100 now but the fleet cap, interest budget,
+>   and (later) multi-shard (§19) are the knobs to grow "much more" when successful.
 
 ## Appendix C — Glossary
 - **Shard** — one server process / one contiguous world.
 - **Bot** — automated *client* session (NeuronClient), render-free.
 - **PvE NPC** — *server-side* AI entity.
-- **Safe zone** — radius around a base where PvP damage is off.
-- **Loot-on-kill** — destroyed units drop a recoverable container.
+- **Safe zone** — radius around a base where PvP damage is off (high/low-sec defensive bubble).
+- **Loot-on-kill** — destroyed *ships* drop a recoverable container with a fraction of fit/cargo.
+- **Fleet command** — RTS-style direct control of a player's multi-ship fleet (Homeworld layer).
+- **Mothership-base** — a player's single mobile **capital** base; *disable-not-destroy* (forced retreat at low HP, never permanently lost).
+- **Fitting** — slotting modules onto a hull within a power/CPU budget; the join between tech tree and combat.
+- **Damage-type counters** — kinetic/thermal/EM vs per-layer resists; the right fit beats a bigger wrong fit.
+- **Security tier** — high (no PvP) → low (PvP, no claims) → null (PvP + claimable territory).
+- **Territory structure** — claimable nullsec object with an owner, upkeep, and yield.
+- **Anomaly / expedition** — scannable procedural PvE site (combat/exploration/salvage), scaling difficulty & loot.
+- **Invasion** — server-driven NPC-faction incursion event that degrades a region until repelled.
 - **Session token** — credential issued at login, validates reliable traffic.
 - **Interest set / Baseline** — entities told to a player / last acked snapshot.
 - **Floating origin** — per-frame render origin near the camera.
@@ -735,4 +1023,9 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 
 ---
 
-*End of DRAFT v0.8 — testing policy added (§16.1); M0, M1a, M1b complete; all 12 projects retargeted to MSVC v145; M2 (Darwinia look) is next.*
+*End of DRAFT v0.9 — gameplay design pass: §13 expanded to a full PvP/PvE spec
+(Homeworld × EVE fleet command, role+fitting combat, hybrid progression, player
+crafting economy, tiered security + territorial conquest, dynamic invasions +
+anomalies, onboarding); App. B re-derived for fleets; risks R15–R18 added; M3
+expanded, M7 added. M0, M1a, M1b complete; M2 (Darwinia look) is next on the
+engineering track.*
