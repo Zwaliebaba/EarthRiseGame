@@ -491,6 +491,12 @@ psoDesc.PS = { g_pScenePS, sizeof(g_pScenePS) };
 > **This section is the game design.** v0.8 had only a half-page sketch; v0.9
 > expands it after a design pass. Decisions below marked 🔒 were chosen in the v0.9
 > discussion; 💡 are defaults to validate; ❓ are tracked open questions (§19).
+>
+> **Companion design docs** (`docs/design/`, tuned against ERHeadless bots):
+> [`combat-balance.md`](docs/design/combat-balance.md) (ship-role spreadsheet,
+> damage model, fitting), [`tech-tree.md`](docs/design/tech-tree.md) (research
+> progression), [`economy-crafting.md`](docs/design/economy-crafting.md)
+> (resource/crafting dependency graph).
 
 ### 13.0 The 4X loop, restated
 - **eXplore** — sensor/fog range; scan **anomalies/expeditions** (§13.7), discover
