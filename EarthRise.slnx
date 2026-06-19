@@ -7,12 +7,12 @@
   <Project Path="NeuronCore/NeuronCore.vcxproj" Id="7f3a9c42-5d18-4b0e-9e21-3c9a1f2d4b67" />
   <Project Path="NeuronClient/NeuronClient.vcxproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
   <Project Path="NeuronRender/NeuronRender.vcxproj" Id="E5F6A7B8-C9D0-1234-EF01-23456789ABCD" />
-  <Folder Name="/Test/">
-    <Project Path="ERHeadlessTest/ERHeadlessTest.vcxproj" Id="e5f6a7b8-c9d0-1234-ef01-567890000005" />
-    <Project Path="ERServerTest/ERServerTest.vcxproj" Id="d4e5f6a7-b8c9-0123-def0-456789000004" />
-    <Project Path="NeuronClientTest/NeuronClientTest.vcxproj" Id="b2c3d4e5-f6a7-8901-bcde-f23456780002" />
-    <Project Path="NeuronCoreTest/NeuronCoreTest.vcxproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234560001" />
-    <Project Path="NeuronRenderTest/NeuronRenderTest.vcxproj" Id="c3d4e5f6-a7b8-9012-cdef-345678000003" />
+  <Folder Name="/Testing/">
+    <Project Path="Testing/ERHeadlessTest/ERHeadlessTest.vcxproj" />
+    <Project Path="Testing/ERServerTest/ERServerTest.vcxproj" />
+    <Project Path="Testing/NeuronClientTest/NeuronClientTest.vcxproj" />
+    <Project Path="Testing/NeuronCoreTest/NeuronCoreTest.vcxproj" />
+    <Project Path="Testing/NeuronRenderTest/NeuronRenderTest.vcxproj" />
   </Folder>
 
   <!-- UWP client application -->

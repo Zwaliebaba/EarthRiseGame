@@ -41,17 +41,18 @@
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeader>Use</PrecompiledHeader>
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)math;$(ProjectDir)platform;$(ProjectDir)ecs;$(ProjectDir)world;$(ProjectDir)serde;$(ProjectDir)sim;$(ProjectDir)net;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)platform;$(ProjectDir)ecs;$(ProjectDir)world;$(ProjectDir)serde;$(ProjectDir)sim;$(ProjectDir)net;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;WINRT_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">pch.h</PrecompiledHeaderFile>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
@@ -61,8 +62,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="ecs\Ecs.h" />
-    <ClInclude Include="math\GameMath.h" />
-    <ClInclude Include="math\MathCommon.h" />
+    <ClInclude Include="GameMath.h" />
+    <ClInclude Include="MathCommon.h" />
     <ClInclude Include="net\Protocol.h" />
     <ClInclude Include="net\SequenceMath.h" />
     <ClInclude Include="net\ReplayWindow.h" />
@@ -78,6 +79,8 @@
     <ClInclude Include="net\CngCrypto.h" />
     <ClInclude Include="net\WinsockSocket.h" />
     <ClInclude Include="net\LoopbackNetwork.h" />
+    <ClInclude Include="NeuronCore.h" />
+    <ClInclude Include="pch.h" />
     <ClInclude Include="platform\Allocators.h" />
     <ClInclude Include="platform\Debug.h" />
     <ClInclude Include="platform\TimerCore.h" />
@@ -93,10 +96,12 @@
     <ClCompile Include="NeuronCore.cpp" />
     <ClCompile Include="net\CngCrypto.cpp" />
     <ClCompile Include="net\WinsockSocket.cpp" />
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="sim\SimComponents.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="NeuronCore_Clean.vcxproj" />
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

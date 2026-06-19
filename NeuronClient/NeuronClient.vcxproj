@@ -72,6 +72,7 @@
   </ItemDefinitionGroup>
   <!-- Header files -->
   <ItemGroup>
+    <ClInclude Include="pch.h" />
     <ClInclude Include="session\Session.h" />
     <ClInclude Include="replica\Replica.h" />
     <ClInclude Include="interp\Interpolator.h" />
@@ -80,6 +81,7 @@
   <!-- Source files -->
   <ItemGroup>
     <ClCompile Include="NeuronClient.cpp" />
+    <ClCompile Include="pch.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

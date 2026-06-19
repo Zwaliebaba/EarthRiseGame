@@ -5,6 +5,7 @@
 // produces a linkable .lib. Each subsystem is header-only at M0; implementations
 // land in later milestones as .cpp files are added.
 
+#include "pch.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -20,10 +21,6 @@
 #include "platform/Debug.h"
 #include "platform/TimerCore.h"
 #include "platform/Allocators.h"
-
-// Math
-#include "math/MathCommon.h"
-#include "math/GameMath.h"
 
 // ECS
 #include "ecs/Ecs.h"

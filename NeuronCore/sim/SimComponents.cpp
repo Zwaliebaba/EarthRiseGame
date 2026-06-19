@@ -3,6 +3,7 @@
 // ERHeadless and the UWP client get them by compiling this file (the test runner
 // uses Tests_Sim.h instead).
 
+#include "pch.h"
 #include "sim/Components.h"
 
 NEURON_DEFINE_COMPONENT(Neuron::Sim::Transform, Neuron::Sim::Slot_Transform);

@@ -18,11 +18,9 @@
 //   - BCryptDeriveKeyPBKDF2
 //   - BCryptCreateHash (HMAC-SHA256 for the cookie)
 //   - BCryptGenRandom (BCRYPT_USE_SYSTEM_PREFERRED_RNG)
-
+#include "pch.h"
 #include "net/CngCrypto.h"
 
-#define WIN32_NO_STATUS
-#include <windows.h>
 #include <bcrypt.h>
 #include <ntstatus.h>
 

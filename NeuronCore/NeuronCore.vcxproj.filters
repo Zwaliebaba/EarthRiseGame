@@ -1,25 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="math">
+    <Filter Include="Platform">
+      <UniqueIdentifier>{1a2b3c4d-0002-4e5f-8a9b-0c1d2e3f4a51}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="GameMath">
       <UniqueIdentifier>{1a2b3c4d-0001-4e5f-8a9b-0c1d2e3f4a50}</UniqueIdentifier>
     </Filter>
-    <Filter Include="platform">
-      <UniqueIdentifier>{1a2b3c4d-0002-4e5f-8a9b-0c1d2e3f4a51}</UniqueIdentifier>
+    <Filter Include="Project Files">
+      <UniqueIdentifier>{84054ee8-59b5-432a-867e-43d3b3e6d624}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="math\MathCommon.h">
-      <Filter>math</Filter>
-    </ClInclude>
-    <ClInclude Include="math\GameMath.h">
-      <Filter>math</Filter>
-    </ClInclude>
     <ClInclude Include="platform\Debug.h">
-      <Filter>platform</Filter>
+      <Filter>Platform</Filter>
     </ClInclude>
     <ClInclude Include="platform\TimerCore.h">
-      <Filter>platform</Filter>
+      <Filter>Platform</Filter>
     </ClInclude>
     <ClInclude Include="ecs\Ecs.h" />
     <ClInclude Include="net\Protocol.h" />
@@ -45,15 +42,25 @@
     <ClInclude Include="sim\Movement.h" />
     <ClInclude Include="sim\Snapshot.h" />
     <ClInclude Include="world\WorldPos.h" />
+    <ClInclude Include="NeuronCore.h" />
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="GameMath.h">
+      <Filter>GameMath</Filter>
+    </ClInclude>
+    <ClInclude Include="MathCommon.h">
+      <Filter>GameMath</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="NeuronCore.cpp" />
     <ClCompile Include="net\CngCrypto.cpp" />
     <ClCompile Include="net\WinsockSocket.cpp" />
     <ClCompile Include="sim\SimComponents.cpp" />
+    <ClCompile Include="pch.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
-    <None Include="NeuronCore_Clean.vcxproj" />
+    <None Include="packages.config">
+      <Filter>Project Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

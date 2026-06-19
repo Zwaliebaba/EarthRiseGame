@@ -10,19 +10,12 @@
 //   RecvFrom: returns >0 bytes received, 0 when no datagram is ready
 //             (WSAEWOULDBLOCK), or -1 on a real error.
 
-#ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-#endif
+#include "pch.h"
 
 #include "net/WinsockSocket.h"
 
-#include <winsock2.h>
-#include <ws2tcpip.h> // inet_ntop / inet_pton / sockaddr_in6
-
 #include <cstring>
 #include <utility>
-
-#pragma comment(lib, "ws2_32.lib")
 
 // Confirm our portable handle type matches the platform SOCKET type so the
 // reinterpret in this file is well-defined.

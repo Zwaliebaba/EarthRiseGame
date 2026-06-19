@@ -5,11 +5,13 @@
     <ClCompile Include="gfx\DeviceResources.cpp" />
     <ClCompile Include="scene\SceneRenderer.cpp" />
     <ClCompile Include="canvas\CanvasRenderer.cpp" />
+    <ClCompile Include="pch.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="gfx\DeviceResources.h" />
     <ClInclude Include="scene\SceneRenderer.h" />
     <ClInclude Include="canvas\CanvasRenderer.h" />
+    <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shaders">

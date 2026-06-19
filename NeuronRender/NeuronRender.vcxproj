@@ -101,6 +101,7 @@
   <!-- Header files -->
   <ItemGroup>
     <ClInclude Include="gfx\DeviceResources.h" />
+    <ClInclude Include="pch.h" />
     <ClInclude Include="scene\SceneRenderer.h" />
     <ClInclude Include="canvas\CanvasRenderer.h" />
   </ItemGroup>
@@ -108,6 +109,7 @@
   <ItemGroup>
     <ClCompile Include="NeuronRender.cpp" />
     <ClCompile Include="gfx\DeviceResources.cpp" />
+    <ClCompile Include="pch.cpp" />
     <ClCompile Include="scene\SceneRenderer.cpp" />
     <ClCompile Include="canvas\CanvasRenderer.cpp" />
   </ItemGroup>
