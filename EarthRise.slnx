@@ -9,6 +9,7 @@
   <!-- Core libraries -->
   <Project Path="NeuronCore/NeuronCore.vcxproj" Id="7f3a9c42-5d18-4b0e-9e21-3c9a1f2d4b67" />
   <Project Path="NeuronClient/NeuronClient.vcxproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
+  <Project Path="NeuronRender/NeuronRender.vcxproj" Id="E5F6A7B8-C9D0-1234-EF01-23456789ABCD" />
 
   <!-- UWP client application -->
   <Project Path="EarthRise/EarthRise.vcxproj" Id="4aeb4d7e-319a-41a2-996b-ef51b7744761">

@@ -44,8 +44,8 @@
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <!-- NeuronCore headers are accessed from the NeuronCore project directory -->
-      <AdditionalIncludeDirectories>$(ProjectDir);..\..\NeuronCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- NeuronCore and NeuronClient headers (for Tests_ClientInterp) -->
+      <AdditionalIncludeDirectories>$(ProjectDir);..\..\NeuronCore;..\..\NeuronClient;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -74,6 +74,7 @@
     <ClInclude Include="Tests_Loopback.h" />
     <ClInclude Include="Tests_Sim.h" />
     <ClInclude Include="Tests_Handshake.h" />
+    <ClInclude Include="Tests_ClientInterp.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="TestRunner.cpp" />

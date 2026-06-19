@@ -1,7 +1,7 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.7 — for review
-> **Date:** 2026-06-18
+> **Status:** DRAFT v0.8 — for review
+> **Date:** 2026-06-19
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
 > Microsoft SQL Server, a UWP/DirectX 12 client, and a headless client/bot host
@@ -11,7 +11,14 @@
 
 ## Changelog
 
-**v0.7 (this revision) — engine/netcode review pass**
+**v0.8 (this revision) — testing policy**
+- **Microsoft Native Unit Test policy added (§16):** every project must have a
+  corresponding `<project>Test` MSTest project (e.g., `NeuronCoreTest`,
+  `NeuronClientTest`, `NeuronRenderTest`, `ERServerTest`, `ERHeadlessTest`). Each new
+  feature ships with tests in the matching `<project>Test` project. All test projects
+  are included in `EarthRise.sln`.
+
+**v0.7 — engine/netcode review pass**
 - **Simulation tick reset to 30 Hz** (snapshot stays 20 Hz). 60 Hz in v0.6 only
   mirrored a scaffold constant; 30 Hz halves per-tick CPU/delta-encoding cost and
   is ample for a command-driven 4X. Fast projectiles sub-step locally. Updates §2,
@@ -149,7 +156,7 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | Shaders | HLSL → **embedded SM6/DXIL headers** via `dxc` (var `g_p%(Filename)`, out `CompiledShaders\%(Filename).h`); root sigs in HLSL; no runtime HLSL on UWP |
 | Meshes / fonts | CMO (custom parser) / fixed-grid monospace atlas |
 | Headless/bots | **ERHeadless** — many NeuronClient sessions, render-free |
-| Tests | custom assert runner + ERHeadless multi-client harness + **record/replay determinism harness** |
+| Tests | **Microsoft Native Unit Test** (`<project>Test`) per project (§16.1) + custom headless assert runner + ERHeadless multi-client harness + **record/replay determinism harness** |
 
 ---
 
@@ -502,16 +509,47 @@ emitter), `Ship` (💡 scout/harvester/fighter/builder), `NpcUnit`, `ResourceNod
 - **MSBuild** 🔒 (`EarthRise.sln`): UWP `.vcxproj` → MSIX; others standard. The
   **`dxc` (DXCCompile) task** emits embedded SM6/DXIL shader headers (§12.4); asset
   cooking (CMO/DDS) runs as pre-build steps via the VS content pipeline.
-- **Tests:** custom assert runner; units for math (DirectXMath), serialization,
-  reliability (loss/reorder/dup), **crypto handshake (incl. MITM/nonce/replay
-  cases)**, and CMO/DDS parsers. **ERHeadless** = multi-client integration & load
-  harness plus an **input-log record/replay determinism harness** (same input →
-  identical sim, the primary netcode debugging tool).
+
+### 16.1 Microsoft Native Unit Test projects 🔒
+
+**Policy: every feature must have a test in the matching `<project>Test` project.**
+
+| Project under test | Test project | Scope |
+| --- | --- | --- |
+| **NeuronCore** | **NeuronCoreTest** | ECS, WorldPos/sectors, serde, sim rules, fixed-step timer, allocators |
+| **NeuronClient** | **NeuronClientTest** | Session, ReplicaManager, InterpBuffer, controller logic |
+| **NeuronRender** | **NeuronRenderTest** | DeviceResources init/teardown, SceneRenderer/CanvasRenderer unit logic |
+| **ERServer** | **ERServerTest** | Net I/O, handshake, reliability, sim loop, persistence layer |
+| **ERHeadless** | **ERHeadlessTest** | Multi-session host, bot harness, record/replay determinism |
+
+- Each `<project>Test` is a **Microsoft Native Unit Test project** (`.vcxproj` with
+  `<UseOfMfc>false</UseOfMfc>` and the native test framework; includes
+  `<ProjectReference>` to the project under test).
+- Every `<project>Test` is added to **`EarthRise.sln`** alongside its project.
+- A feature is not complete until its `<project>Test` tests pass. New feature code and
+  its test cases land in the **same commit**.
+- Tests that require Windows platform APIs (CNG, IOCP, D3D12) live in the matching
+  `<project>Test`; platform-independent logic also gets a Linux-compatible test in
+  `NeuronTools/testrunner/` (see §16.2) so CI can catch regressions without a Windows
+  build.
+
+### 16.2 Custom headless runner (Linux-compatible)
+
+- **Tests:** custom assert runner in `NeuronTools/testrunner/`; units for math
+  (DirectXMath), serialization, reliability (loss/reorder/dup), **crypto handshake
+  (incl. MITM/nonce/replay cases)**, CMO/DDS parsers, and InterpBuffer.
+  **ERHeadless** = multi-client integration & load harness plus an **input-log
+  record/replay determinism harness** (same input → identical sim, the primary
+  netcode debugging tool).
+
+### 16.3 Perf gates & CI
+
 - **Per-milestone perf gates** are numeric: sim tick p50/p99 ms, per-client
   bandwidth, render frame time (§17, App. B).
 - **CI / web sessions:** `SessionStart` hook builds NeuronCore/NeuronClient/
   ERServer/ERHeadless/NeuronTools and runs tests against a **dev SQL Server reached
-  over the network** (UWP packaging stays local).
+  over the network** (UWP packaging stays local). Native Unit Test projects run on the
+  Windows build agent.
 
 ---
 
@@ -697,4 +735,4 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 
 ---
 
-*End of DRAFT v0.7 — review pass applied; M0 underway (NeuronCore scaffolded).*
+*End of DRAFT v0.8 — testing policy added (§16.1); M1a complete; M1b in progress.*

@@ -1,13 +1,14 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.220531.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.220531.1\build\native\Microsoft.Windows.CppWinRT.props')" />
+
   <PropertyGroup Label="Globals">
     <CppWinRTOptimized>true</CppWinRTOptimized>
     <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
     <MinimalCoreWin>true</MinimalCoreWin>
-    <ProjectGuid>{4aeb4d7e-319a-41a2-996b-ef51b7744761}</ProjectGuid>
-    <ProjectName>EarthRise</ProjectName>
-    <RootNamespace>EarthRise</RootNamespace>
+    <ProjectGuid>{E5F6A7B8-C9D0-1234-EF01-23456789ABCD}</ProjectGuid>
+    <ProjectName>NeuronRender</ProjectName>
+    <RootNamespace>Neuron</RootNamespace>
     <DefaultLanguage>en-US</DefaultLanguage>
     <MinimumVisualStudioVersion>15.0</MinimumVisualStudioVersion>
     <AppContainerApplication>true</AppContainerApplication>
@@ -16,138 +17,143 @@
     <WindowsTargetPlatformVersion Condition=" '$(WindowsTargetPlatformVersion)' == '' ">10.0.26100.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformMinVersion>10.0.17134.0</WindowsTargetPlatformMinVersion>
   </PropertyGroup>
+
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM">
-      <Configuration>Debug</Configuration>
-      <Platform>ARM</Platform>
+      <Configuration>Debug</Configuration><Platform>ARM</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|ARM64">
-      <Configuration>Debug</Configuration>
-      <Platform>ARM64</Platform>
+      <Configuration>Debug</Configuration><Platform>ARM64</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|Win32">
-      <Configuration>Debug</Configuration>
-      <Platform>Win32</Platform>
+      <Configuration>Debug</Configuration><Platform>Win32</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|x64">
-      <Configuration>Debug</Configuration>
-      <Platform>x64</Platform>
+      <Configuration>Debug</Configuration><Platform>x64</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Release|ARM">
-      <Configuration>Release</Configuration>
-      <Platform>ARM</Platform>
+      <Configuration>Release</Configuration><Platform>ARM</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Release|ARM64">
-      <Configuration>Release</Configuration>
-      <Platform>ARM64</Platform>
+      <Configuration>Release</Configuration><Platform>ARM64</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Release|Win32">
-      <Configuration>Release</Configuration>
-      <Platform>Win32</Platform>
+      <Configuration>Release</Configuration><Platform>Win32</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Release|x64">
-      <Configuration>Release</Configuration>
-      <Platform>x64</Platform>
+      <Configuration>Release</Configuration><Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+
   <PropertyGroup Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <PlatformToolset>v145</PlatformToolset>
     <PlatformToolset Condition="'$(VisualStudioVersion)' == '16.0'">v142</PlatformToolset>
     <PlatformToolset Condition="'$(VisualStudioVersion)' == '15.0'">v141</PlatformToolset>
-    <PlatformToolset Condition="'$(VisualStudioVersion)' == '14.0'">v140</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
     <UseDebugLibraries>true</UseDebugLibraries>
-    <LinkIncremental>true</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
+
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <ImportGroup Label="ExtensionSettings">
-  </ImportGroup>
+  <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="PropertySheets">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"
+            Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')"
+            Label="LocalAppDataPlatform" />
   </ImportGroup>
-  <ImportGroup Label="PropertySheets">
-    <Import Project="PropertySheet.props" />
-  </ImportGroup>
+
   <PropertyGroup Label="UserMacros" />
+
+  <!-- Common compiler settings -->
   <ItemDefinitionGroup>
     <ClCompile>
-      <PrecompiledHeader>Use</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderOutputFile>$(IntDir)pch.pch</PrecompiledHeaderOutputFile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
+      <!-- NeuronRender sources see their own project root + NeuronCore headers -->
+      <AdditionalIncludeDirectories>$(ProjectDir);..\NeuronCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;WINRT_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <!-- NeuronRender headers live under their project root; NeuronClient and NeuronCore likewise -->
-      <AdditionalIncludeDirectories>..\NeuronRender;..\NeuronClient;..\NeuronCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
-    <Link>
-      <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
-      <AdditionalDependencies>d3d12.lib;dxgi.lib;bcrypt.lib;Ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-    </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
     <ClCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
-    <Link>
-      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <OptimizeReferences>true</OptimizeReferences>
-    </Link>
   </ItemDefinitionGroup>
+
+  <!-- HLSL shaders → embedded SM6/DXIL bytecode headers (§12.4).
+       DXCCompile items run before ClCompile and generate
+       CompiledShaders/%.h (not checked in; listed in .gitignore). -->
   <ItemGroup>
-    <ClInclude Include="pch.h" />
+    <DXCCompile Include="shaders\SceneVS.hlsl">
+      <ShaderType>Vertex</ShaderType>
+      <ShaderModel>6_0</ShaderModel>
+      <VariableName>g_pSceneVS</VariableName>
+      <HeaderFileOutput>$(ProjectDir)CompiledShaders\SceneVS.h</HeaderFileOutput>
+      <ObjectFileOutput>$(IntDir)SceneVS.dxil</ObjectFileOutput>
+    </DXCCompile>
+    <DXCCompile Include="shaders\ScenePS.hlsl">
+      <ShaderType>Pixel</ShaderType>
+      <ShaderModel>6_0</ShaderModel>
+      <VariableName>g_pScenePS</VariableName>
+      <HeaderFileOutput>$(ProjectDir)CompiledShaders\ScenePS.h</HeaderFileOutput>
+      <ObjectFileOutput>$(IntDir)ScenePS.dxil</ObjectFileOutput>
+    </DXCCompile>
+    <DXCCompile Include="shaders\CanvasVS.hlsl">
+      <ShaderType>Vertex</ShaderType>
+      <ShaderModel>6_0</ShaderModel>
+      <VariableName>g_pCanvasVS</VariableName>
+      <HeaderFileOutput>$(ProjectDir)CompiledShaders\CanvasVS.h</HeaderFileOutput>
+      <ObjectFileOutput>$(IntDir)CanvasVS.dxil</ObjectFileOutput>
+    </DXCCompile>
+    <DXCCompile Include="shaders\CanvasPS.hlsl">
+      <ShaderType>Pixel</ShaderType>
+      <ShaderModel>6_0</ShaderModel>
+      <VariableName>g_pCanvasPS</VariableName>
+      <HeaderFileOutput>$(ProjectDir)CompiledShaders\CanvasPS.h</HeaderFileOutput>
+      <ObjectFileOutput>$(IntDir)CanvasPS.dxil</ObjectFileOutput>
+    </DXCCompile>
   </ItemGroup>
+
+  <!-- Header files -->
   <ItemGroup>
-    <AppxManifest Include="Package.appxmanifest">
-      <SubType>Designer</SubType>
-    </AppxManifest>
+    <ClInclude Include="gfx\DeviceResources.h" />
+    <ClInclude Include="scene\SceneRenderer.h" />
+    <ClInclude Include="canvas\CanvasRenderer.h" />
   </ItemGroup>
+
+  <!-- Source files -->
   <ItemGroup>
-    <Image Include="Assets\LockScreenLogo.scale-200.png" />
-    <Image Include="Assets\SplashScreen.scale-200.png" />
-    <Image Include="Assets\Square150x150Logo.scale-200.png" />
-    <Image Include="Assets\Square44x44Logo.scale-200.png" />
-    <Image Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
-    <Image Include="Assets\StoreLogo.png" />
-    <Image Include="Assets\Wide310x150Logo.scale-200.png" />
+    <ClCompile Include="NeuronRender.cpp" />
+    <ClCompile Include="gfx\DeviceResources.cpp" />
+    <ClCompile Include="scene\SceneRenderer.cpp" />
+    <ClCompile Include="canvas\CanvasRenderer.cpp" />
   </ItemGroup>
+
   <ItemGroup>
-    <ClCompile Include="App.cpp" />
-    <ClCompile Include="pch.cpp">
-      <PrecompiledHeader>Create</PrecompiledHeader>
-    </ClCompile>
+    <None Include="..\packages.config" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="packages.config" />
-    <None Include="PropertySheet.props" />
-  </ItemGroup>
-  <!-- Static library references -->
-  <ItemGroup>
-    <ProjectReference Include="..\NeuronCore\NeuronCore.vcxproj">
-      <Project>{7f3a9c42-5d18-4b0e-9e21-3c9a1f2d4b67}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\NeuronClient\NeuronClient.vcxproj">
-      <Project>{a1b2c3d4-e5f6-7890-abcd-ef1234567890}</Project>
-    </ProjectReference>
-    <ProjectReference Include="..\NeuronRender\NeuronRender.vcxproj">
-      <Project>{E5F6A7B8-C9D0-1234-EF01-23456789ABCD}</Project>
-    </ProjectReference>
-  </ItemGroup>
+
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.220531.1\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.220531.1\build\native\Microsoft.Windows.CppWinRT.targets')" />

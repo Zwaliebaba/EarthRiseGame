@@ -1,0 +1,271 @@
+// DeviceResources.cpp — D3D12 device + swap chain implementation.
+
+#include "gfx/DeviceResources.h"
+
+#pragma comment(lib, "d3d12.lib")
+#pragma comment(lib, "dxgi.lib")
+
+namespace Neuron::Render
+{
+
+bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
+{
+    m_width  = width;
+    m_height = height;
+
+    // -----------------------------------------------------------------------
+    // Debug layer (debug builds only)
+    // -----------------------------------------------------------------------
+#ifdef _DEBUG
+    winrt::com_ptr<ID3D12Debug> debugCtrl;
+    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(debugCtrl.put()))))
+        debugCtrl->EnableDebugLayer();
+#endif
+
+    // -----------------------------------------------------------------------
+    // DXGI factory
+    // -----------------------------------------------------------------------
+    UINT dxgiFlags = 0;
+#ifdef _DEBUG
+    dxgiFlags = DXGI_CREATE_FACTORY_DEBUG;
+#endif
+    winrt::com_ptr<IDXGIFactory4> factory;
+    winrt::check_hresult(CreateDXGIFactory2(dxgiFlags, IID_PPV_ARGS(factory.put())));
+
+    // -----------------------------------------------------------------------
+    // Hardware adapter → D3D12 device
+    // -----------------------------------------------------------------------
+    winrt::com_ptr<IDXGIAdapter1> adapter;
+    for (UINT i = 0; factory->EnumAdapters1(i, adapter.put()) != DXGI_ERROR_NOT_FOUND; ++i) {
+        DXGI_ADAPTER_DESC1 desc{};
+        adapter->GetDesc1(&desc);
+        if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) { adapter = nullptr; continue; }
+        if (SUCCEEDED(D3D12CreateDevice(adapter.get(), D3D_FEATURE_LEVEL_11_0,
+                                        IID_PPV_ARGS(m_device.put()))))
+            break;
+        adapter = nullptr;
+    }
+    if (!m_device) {
+        // WARP fallback — always works; slower than hardware
+        winrt::com_ptr<IDXGIAdapter> warp;
+        winrt::check_hresult(factory->EnumWarpAdapter(IID_PPV_ARGS(warp.put())));
+        winrt::check_hresult(D3D12CreateDevice(warp.get(), D3D_FEATURE_LEVEL_11_0,
+                                                IID_PPV_ARGS(m_device.put())));
+    }
+
+    // -----------------------------------------------------------------------
+    // Direct command queue
+    // -----------------------------------------------------------------------
+    D3D12_COMMAND_QUEUE_DESC qDesc{};
+    qDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    winrt::check_hresult(m_device->CreateCommandQueue(&qDesc, IID_PPV_ARGS(m_cmdQueue.put())));
+
+    // -----------------------------------------------------------------------
+    // Swap chain for CoreWindow (UWP flip-discard)
+    // -----------------------------------------------------------------------
+    DXGI_SWAP_CHAIN_DESC1 scDesc{};
+    scDesc.Width       = width;
+    scDesc.Height      = height;
+    scDesc.Format      = DXGI_FORMAT_B8G8R8A8_UNORM;
+    scDesc.SampleDesc  = { 1, 0 };
+    scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scDesc.BufferCount = kFrameCount;
+    scDesc.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    scDesc.AlphaMode   = DXGI_ALPHA_MODE_IGNORE;
+    scDesc.Scaling     = DXGI_SCALING_NONE;
+
+    winrt::com_ptr<IDXGISwapChain1> sc1;
+    winrt::check_hresult(factory->CreateSwapChainForCoreWindow(
+        m_cmdQueue.get(), coreWindow, &scDesc, nullptr, sc1.put()));
+    m_swapChain = sc1.as<IDXGISwapChain3>();
+
+    // -----------------------------------------------------------------------
+    // Descriptor heaps
+    // -----------------------------------------------------------------------
+    D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
+    rtvDesc.NumDescriptors = kFrameCount;
+    rtvDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    winrt::check_hresult(m_device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(m_rtvHeap.put())));
+    m_rtvDescSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+    D3D12_DESCRIPTOR_HEAP_DESC dsvDesc{};
+    dsvDesc.NumDescriptors = 1;
+    dsvDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    winrt::check_hresult(m_device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(m_dsvHeap.put())));
+
+    // -----------------------------------------------------------------------
+    // Per-frame command allocators + single command list
+    // -----------------------------------------------------------------------
+    for (UINT i = 0; i < kFrameCount; ++i)
+        winrt::check_hresult(m_device->CreateCommandAllocator(
+            D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(m_cmdAllocators[i].put())));
+
+    winrt::check_hresult(m_device->CreateCommandList(
+        0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+        m_cmdAllocators[0].get(), nullptr, IID_PPV_ARGS(m_cmdList.put())));
+    winrt::check_hresult(m_cmdList->Close()); // start closed
+
+    // -----------------------------------------------------------------------
+    // Frame fence
+    // -----------------------------------------------------------------------
+    winrt::check_hresult(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
+                                                IID_PPV_ARGS(m_fence.put())));
+    m_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!m_fenceEvent) winrt::throw_last_error();
+
+    // -----------------------------------------------------------------------
+    // Render targets + depth buffer
+    // -----------------------------------------------------------------------
+    CreateRenderTargetViews();
+    CreateDepthStencil();
+
+    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+    return true;
+}
+
+void DeviceResources::CreateRenderTargetViews()
+{
+    D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle =
+        m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    for (UINT i = 0; i < kFrameCount; ++i) {
+        winrt::check_hresult(m_swapChain->GetBuffer(i, IID_PPV_ARGS(m_renderTargets[i].put())));
+        m_device->CreateRenderTargetView(m_renderTargets[i].get(), nullptr, rtvHandle);
+        rtvHandle.ptr += m_rtvDescSize;
+        m_fenceValues[i] = 0;
+    }
+}
+
+void DeviceResources::CreateDepthStencil()
+{
+    D3D12_HEAP_PROPERTIES hp{};
+    hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    D3D12_RESOURCE_DESC rd{};
+    rd.Dimension          = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    rd.Width              = m_width;
+    rd.Height             = m_height;
+    rd.DepthOrArraySize   = 1;
+    rd.MipLevels          = 1;
+    rd.Format             = DXGI_FORMAT_D32_FLOAT;
+    rd.SampleDesc.Count   = 1;
+    rd.Flags              = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+    D3D12_CLEAR_VALUE cv{};
+    cv.Format               = DXGI_FORMAT_D32_FLOAT;
+    cv.DepthStencil.Depth   = 1.0f;
+
+    winrt::check_hresult(m_device->CreateCommittedResource(
+        &hp, D3D12_HEAP_FLAG_NONE, &rd,
+        D3D12_RESOURCE_STATE_DEPTH_WRITE, &cv,
+        IID_PPV_ARGS(m_depthStencil.put())));
+
+    D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc{};
+    dsvDesc.Format        = DXGI_FORMAT_D32_FLOAT;
+    dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    m_device->CreateDepthStencilView(
+        m_depthStencil.get(), &dsvDesc,
+        m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+}
+
+void DeviceResources::BeginFrame()
+{
+    // Wait until the GPU is done with this frame's previous resources.
+    const UINT64 completedValue = m_fence->GetCompletedValue();
+    if (completedValue < m_fenceValues[m_frameIndex]) {
+        winrt::check_hresult(m_fence->SetEventOnCompletion(
+            m_fenceValues[m_frameIndex], m_fenceEvent));
+        WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+    }
+
+    winrt::check_hresult(m_cmdAllocators[m_frameIndex]->Reset());
+    winrt::check_hresult(m_cmdList->Reset(m_cmdAllocators[m_frameIndex].get(), nullptr));
+
+    // Transition back buffer: PRESENT → RENDER_TARGET
+    D3D12_RESOURCE_BARRIER rb{};
+    rb.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    rb.Transition.pResource   = m_renderTargets[m_frameIndex].get();
+    rb.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+    rb.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    rb.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_cmdList->ResourceBarrier(1, &rb);
+
+    // Clear render target and depth.
+    const D3D12_CPU_DESCRIPTOR_HANDLE rtv = CurrentRtv();
+    const D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+    constexpr float kSkyColor[] = { 0.02f, 0.02f, 0.08f, 1.0f }; // dark space void
+    m_cmdList->ClearRenderTargetView(rtv, kSkyColor, 0, nullptr);
+    m_cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+
+    m_cmdList->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+
+    D3D12_VIEWPORT vp{ 0.f, 0.f, static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 1.f };
+    D3D12_RECT     sr{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
+    m_cmdList->RSSetViewports(1, &vp);
+    m_cmdList->RSSetScissorRects(1, &sr);
+}
+
+void DeviceResources::EndFrame()
+{
+    // Transition back buffer: RENDER_TARGET → PRESENT
+    D3D12_RESOURCE_BARRIER rb{};
+    rb.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    rb.Transition.pResource   = m_renderTargets[m_frameIndex].get();
+    rb.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    rb.Transition.StateAfter  = D3D12_RESOURCE_STATE_PRESENT;
+    rb.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_cmdList->ResourceBarrier(1, &rb);
+
+    winrt::check_hresult(m_cmdList->Close());
+
+    ID3D12CommandList* lists[] = { m_cmdList.get() };
+    m_cmdQueue->ExecuteCommandLists(1, lists);
+
+    winrt::check_hresult(m_swapChain->Present(1, 0));
+
+    // Signal fence for this frame and advance to next back buffer.
+    m_fenceValues[m_frameIndex] = m_nextFenceValue;
+    winrt::check_hresult(m_cmdQueue->Signal(m_fence.get(), m_nextFenceValue++));
+    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+}
+
+void DeviceResources::Resize(UINT width, UINT height)
+{
+    if (width == m_width && height == m_height) return;
+    m_width = width; m_height = height;
+    WaitForGpu();
+    for (auto& rt : m_renderTargets) rt = nullptr;
+    m_depthStencil = nullptr;
+    winrt::check_hresult(m_swapChain->ResizeBuffers(
+        kFrameCount, width, height, DXGI_FORMAT_B8G8R8A8_UNORM, 0));
+    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+    CreateRenderTargetViews();
+    CreateDepthStencil();
+}
+
+void DeviceResources::Uninitialize()
+{
+    WaitForGpu();
+    if (m_fenceEvent) { CloseHandle(m_fenceEvent); m_fenceEvent = nullptr; }
+}
+
+void DeviceResources::WaitForGpu()
+{
+    winrt::check_hresult(m_cmdQueue->Signal(m_fence.get(), m_nextFenceValue));
+    winrt::check_hresult(m_fence->SetEventOnCompletion(m_nextFenceValue, m_fenceEvent));
+    WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+    m_fenceValues[m_frameIndex] = m_nextFenceValue++;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE DeviceResources::CurrentRtv() const noexcept
+{
+    D3D12_CPU_DESCRIPTOR_HANDLE h = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    h.ptr += static_cast<SIZE_T>(m_frameIndex) * m_rtvDescSize;
+    return h;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE DeviceResources::DsvHandle() const noexcept
+{
+    return m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
+}
+
+} // namespace Neuron::Render
