@@ -45,7 +45,7 @@ namespace Neuron::Math
   constexpr T DivideByMultiple(T value, size_t alignment) { return static_cast<T>((value + alignment - 1) / alignment); }
 
   template <typename T>
-  constexpr bool IsPowerOfTwo(T value) { return 0 == (value & (value - 1)); }
+  constexpr bool IsPowerOfTwo(T value) { return value != 0 && 0 == (value & (value - 1)); }
 
   template <typename T>
   constexpr bool IsDivisible(T value, T divisor) { return (value / divisor) * divisor == value; }

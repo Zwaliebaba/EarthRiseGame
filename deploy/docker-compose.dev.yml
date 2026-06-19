@@ -1,0 +1,31 @@
+# Dev inner-loop compose — runs ERServer in a Windows container.
+# SQL Server is an external network service (host machine or LAN); not containerised.
+#
+# Prerequisites:
+#   - Docker Desktop with Windows containers mode
+#   - A SQL Server instance on the host (Developer edition is free)
+#     with a database named 'EarthRise' and schema from db/schema.sql applied.
+#   - Set ER_DB_CONNSTR and ER_SERVER_PEPPER in a .env file (never commit secrets).
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.dev.yml up
+
+version: "3.9"
+
+services:
+  erserver:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: earthrise-server:dev
+    ports:
+      - "7777:7777/udp"
+    environment:
+      # Override via .env or inline
+      ER_DB_CONNSTR: "${ER_DB_CONNSTR:?Set ER_DB_CONNSTR in .env}"
+      ER_SERVER_PEPPER: "${ER_SERVER_PEPPER:?Set ER_SERVER_PEPPER in .env}"
+      ER_LISTEN_PORT: "7777"
+    # host.docker.internal resolves to the host machine on Docker Desktop
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
