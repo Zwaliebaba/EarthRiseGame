@@ -20,6 +20,11 @@
 #include "Tests_ECS.h"
 #include "Tests_Serde.h"
 #include "Tests_FixedStep.h"
+#include "Tests_Net.h"
+#include "Tests_Crypto.h"
+#include "Tests_Loopback.h"
+#include "Tests_Sim.h"
+#include "Tests_Handshake.h"
 
 // Test runner framework.
 #include "TestRunner.h"

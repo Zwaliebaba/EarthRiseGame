@@ -272,7 +272,9 @@ public:
     template <typename... Ts, typename Fn>
     void ForEach(Fn&& fn)
     {
-        constexpr uint64_t required = (... | (uint64_t(1) << ComponentId<Ts>::value));
+        // Component IDs are runtime statics (set by NEURON_DEFINE_COMPONENT),
+        // so the required mask is computed at run time, not constexpr.
+        const uint64_t required = (... | (uint64_t(1) << ComponentId<Ts>::value));
 
         const uint32_t n = static_cast<uint32_t>(m_records.size());
         for (uint32_t idx = 1; idx < n; ++idx) {
@@ -287,7 +289,9 @@ public:
     template <typename... Ts, typename Fn>
     void ForEach(Fn&& fn) const
     {
-        constexpr uint64_t required = (... | (uint64_t(1) << ComponentId<Ts>::value));
+        // Component IDs are runtime statics (set by NEURON_DEFINE_COMPONENT),
+        // so the required mask is computed at run time, not constexpr.
+        const uint64_t required = (... | (uint64_t(1) << ComponentId<Ts>::value));
         const uint32_t n = static_cast<uint32_t>(m_records.size());
         for (uint32_t idx = 1; idx < n; ++idx) {
             const auto& rec = m_records[idx];

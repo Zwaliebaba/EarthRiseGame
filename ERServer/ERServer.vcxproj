@@ -97,9 +97,14 @@
     </Link>
   </ItemDefinitionGroup>
 
-  <!-- Source files -->
+  <!-- Source files. ERServer is a Win32 console exe and does not link the
+       (Windows-Store) NeuronCore.lib, so it compiles the NeuronCore platform TUs
+       it needs directly. -->
   <ItemGroup>
     <ClCompile Include="ERServer.cpp" />
+    <ClCompile Include="..\NeuronCore\net\CngCrypto.cpp" />
+    <ClCompile Include="..\NeuronCore\net\WinsockSocket.cpp" />
+    <ClCompile Include="..\NeuronCore\sim\SimComponents.cpp" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -35,8 +35,24 @@
 #include "serde/BitStream.h"
 #include "serde/Serde.h"
 
-// Simulation time
+// Networking (platform-independent protocol/reliability/crypto-channel)
+#include "net/Protocol.h"
+#include "net/SequenceMath.h"
+#include "net/ReplayWindow.h"
+#include "net/Reliability.h"
+#include "net/Fragmentation.h"
+#include "net/PacketCodec.h"
+#include "net/ICrypto.h"
+#include "net/ISocket.h"
+#include "net/SecureChannel.h"
+#include "net/HandshakeMessages.h"
+#include "net/Handshake.h"
+
+// Simulation (shared sim rules + fixed-step time)
+#include "sim/Components.h"
 #include "sim/FixedStepAccumulator.h"
+#include "sim/Movement.h"
+#include "sim/Snapshot.h"
 
 namespace Neuron
 {

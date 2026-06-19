@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <stdexcept>
 #include <string_view>
 #include <vector>
 

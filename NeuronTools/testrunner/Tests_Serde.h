@@ -48,7 +48,7 @@ TEST_SUITE(Serde)
 
         Neuron::Serde::BitReader r(w.Data());
         const float v = r.ReadFloat();
-        CHECK(std::fabsf(v - 3.14159f) < 1e-6f);
+        CHECK(std::fabs(v - 3.14159f) < 1e-6f);
         CHECK(!r.HasError());
     });
 
@@ -105,7 +105,7 @@ TEST_SUITE(Serde)
         CHECK_EQ(rb.ReadUint8(),  uint8_t(42));
         CHECK_EQ(rb.ReadUint16(), uint16_t(1234));
         CHECK_EQ(rb.ReadInt64(),  INT64_MIN);
-        CHECK(std::fabsf(rb.ReadFloat() - 2.718f) < 1e-5f);
+        CHECK(std::fabs(rb.ReadFloat() - 2.718f) < 1e-5f);
         CHECK_EQ(rb.ReadBool(), true);
         CHECK(rb.IsGood());
     });

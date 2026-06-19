@@ -79,7 +79,7 @@
       <WarningLevel>Level4</WarningLevel>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)math;$(ProjectDir)platform;$(ProjectDir)ecs;$(ProjectDir)world;$(ProjectDir)serde;$(ProjectDir)sim;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)math;$(ProjectDir)platform;$(ProjectDir)ecs;$(ProjectDir)world;$(ProjectDir)serde;$(ProjectDir)sim;$(ProjectDir)net;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;WINRT_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
@@ -97,16 +97,37 @@
     <ClInclude Include="ecs\Ecs.h" />
     <ClInclude Include="math\GameMath.h" />
     <ClInclude Include="math\MathCommon.h" />
+    <ClInclude Include="net\Protocol.h" />
+    <ClInclude Include="net\SequenceMath.h" />
+    <ClInclude Include="net\ReplayWindow.h" />
+    <ClInclude Include="net\Reliability.h" />
+    <ClInclude Include="net\Fragmentation.h" />
+    <ClInclude Include="net\PacketCodec.h" />
+    <ClInclude Include="net\ICrypto.h" />
+    <ClInclude Include="net\ISocket.h" />
+    <ClInclude Include="net\SecureChannel.h" />
+    <ClInclude Include="net\HandshakeMessages.h" />
+    <ClInclude Include="net\Handshake.h" />
+    <ClInclude Include="net\FakeCrypto.h" />
+    <ClInclude Include="net\CngCrypto.h" />
+    <ClInclude Include="net\WinsockSocket.h" />
+    <ClInclude Include="net\LoopbackNetwork.h" />
     <ClInclude Include="platform\Allocators.h" />
     <ClInclude Include="platform\Debug.h" />
     <ClInclude Include="platform\TimerCore.h" />
     <ClInclude Include="serde\BitStream.h" />
     <ClInclude Include="serde\Serde.h" />
+    <ClInclude Include="sim\Components.h" />
     <ClInclude Include="sim\FixedStepAccumulator.h" />
+    <ClInclude Include="sim\Movement.h" />
+    <ClInclude Include="sim\Snapshot.h" />
     <ClInclude Include="world\WorldPos.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="NeuronCore.cpp" />
+    <ClCompile Include="net\CngCrypto.cpp" />
+    <ClCompile Include="net\WinsockSocket.cpp" />
+    <ClCompile Include="sim\SimComponents.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

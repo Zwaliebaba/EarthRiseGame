@@ -65,7 +65,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 
@@ -97,9 +97,13 @@
     </Link>
   </ItemDefinitionGroup>
 
-  <!-- Source files -->
+  <!-- Source files. Like ERServer, ERHeadless is a Win32 console exe that does
+       not link NeuronCore.lib, so it compiles the platform TUs it needs. -->
   <ItemGroup>
     <ClCompile Include="ERHeadless.cpp" />
+    <ClCompile Include="..\NeuronCore\net\CngCrypto.cpp" />
+    <ClCompile Include="..\NeuronCore\net\WinsockSocket.cpp" />
+    <ClCompile Include="..\NeuronCore\sim\SimComponents.cpp" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

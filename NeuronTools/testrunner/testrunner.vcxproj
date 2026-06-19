@@ -45,7 +45,7 @@
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <!-- NeuronCore headers are accessed from the NeuronCore project directory -->
-      <AdditionalIncludeDirectories>$(ProjectDir);..\..\..\NeuronCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);..\..\NeuronCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;WIN32;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -69,6 +69,11 @@
     <ClInclude Include="Tests_ECS.h" />
     <ClInclude Include="Tests_Serde.h" />
     <ClInclude Include="Tests_FixedStep.h" />
+    <ClInclude Include="Tests_Net.h" />
+    <ClInclude Include="Tests_Crypto.h" />
+    <ClInclude Include="Tests_Loopback.h" />
+    <ClInclude Include="Tests_Sim.h" />
+    <ClInclude Include="Tests_Handshake.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="TestRunner.cpp" />
