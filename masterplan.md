@@ -726,10 +726,24 @@ stats), `ResourceNode`, `Projectile`, `LootContainer`, `MarketOrder`,
   snapshot** (same serde primitives, §7.2) — restart replays the log onto the last
   snapshot for a clean, verifiable state, rather than reconstructing the sim from
   normalized rows.
-- **Schema (`/db/`, Azure-SQL-compatible):** accounts (§14), base state, build
-  queues, ships, world objects, resource nodes, zones/PvP, **outbox**, **snapshots**.
-  Avoid features absent in Azure SQL DB (cross-DB queries, SQL Agent jobs → Elastic
-  Jobs, FILESTREAM). Versioned migrations.
+- **Schema (`/db/`, Azure-SQL-compatible — see `db/schema.sql`):** accounts/sessions
+  (§14); **wallet + append-only currency ledger**; **player standings**; the
+  **`ItemDefs` catalog** (canonical item-id space); **tiered-security regions**
+  (§13.5); **bases** (layered HP + disable-not-destroy state, §13.1); **ships**
+  (hull/role + layered HP) and **fitting** (`ShipModules`/`FitTemplates`, §13.2);
+  **itemized inventory** (`BaseInventory`/`ShipCargo`) + build queue; **research +
+  unlocked blueprints** (§13.3); **markets** (`MarketOrders`/`MarketTrades`, §13.4);
+  **territory** (`TerritoryStructures` + capture log, §13.6); **insurance** (§13.9);
+  itemized **loot**; **killmail log**; **outbox**, **snapshots**.
+  **Catalog/balance boundary:** item/hull/module *stats*, crafting *recipes*,
+  research *costs/prereqs*, and anomaly/invasion *definitions* are **game data**
+  (versioned with the build, loaded by NeuronCore) — **not** SQL; SQL keeps only the
+  canonical item ids + mutable player/economy/world state.
+  **Transient sim state** (NPC units, projectiles, anomaly sites, invasion events,
+  live parties) is **never normalized** — it lives only in the warm-restart
+  `SimSnapshots` blob (§9, §13.7). Avoid features absent in Azure SQL DB (cross-DB
+  queries, SQL Agent jobs → Elastic Jobs, FILESTREAM). Versioned migrations
+  (`db/migrations/`, forward-only).
 - **App→DB auth:** **🔒 SQL login now → managed identity / Entra ID on Azure SQL.**
 - **ERServer stateless** → restarts recover from snapshot + log.
 
