@@ -171,33 +171,45 @@
   (allow-list, NeuronAudio sibling lib), §16.1 (add `NeuronAudioTest` → 14 projects).
   **Design doc:** [`docs/design/neuronaudio-api.md`](../docs/design/neuronaudio-api.md) —
   follow its class layout.
-- **Current state:** does not exist.
+- **Current state:** library scaffolded this branch (see Progress below); device path
+  written but unverified (needs a Windows build).
 - **Work:**
-  - [ ] Create `NeuronAudio/` (`engine/` XAudio2, `spatial/` X3DAudio, `wav/` RIFF reader,
-        `mixer/` buses) + `NeuronAudioTest`. Links NeuronCore (math/types), **not**
-        NeuronRender. Add both to `EarthRise.sln`/`.slnx`.
-  - [ ] **WAV/RIFF reader** — parse `RIFF`/`fmt `/`data` → `WAVEFORMATEX` + PCM-16 samples;
-        mono (3D emitters) / stereo (music/ambient/UI). No MP3/OGG/ADPCM.
-  - [ ] **Voice graph** — mastering voice → 4 submix buses → pooled source voices; per-bus +
-        master volume. Event SFX loaded fully; ambient beds + music **streamed** via
-        buffer-queue `IXAudio2VoiceCallback`.
-  - [ ] **X3DAudio** — listener = scene camera (pos/orient/velocity, camera-relative /
-        floating-origin — **no `int64` reaches audio**, R2); emitters compute output matrix +
-        Doppler + distance LPF (`SetOutputMatrix`/`SetFrequencyRatio`/filter).
-  - [ ] **Event sounds = client-side feedback** off replicated sim events (NeuronClient
-        replica/interp) — no audio on the wire, no determinism requirement.
-  - [ ] UWP **suspend/resume**: stop/restart engine, release/reacquire voices.
+  - [x] Create `NeuronAudio/` (`Engine`/`Spatial`/`Wav`/`Mixer` VS Filters) + `NeuronAudioTest`.
+        Links NeuronCore (math/types) + NeuronTools (`WavParse.h`), **not** NeuronRender. Both
+        added to `EarthRise.slnx` → **14 projects**.
+  - [x] **WAV/RIFF reader** — `WavClip`/`WavReader.h` wraps the tested `er::format::parseWav`
+        core → `WAVEFORMATEX` + PCM-16 (mono 3D / stereo). No MP3/OGG/ADPCM.
+  - [~] **Voice graph** — mastering voice → 4 submix buses → pooled source voices (`VoicePool`,
+        generation-checked) + per-bus/master volume (`Mixer`) **done**; event SFX loaded fully
+        **done**. *Ambient/music currently loop **in-memory**; buffer-queue
+        `IXAudio2VoiceCallback` **streaming** is the next increment.*
+  - [x] **X3DAudio** — `Spatializer`: listener = camera (camera-relative, **no `int64`**, R2);
+        emitters → output matrix + Doppler + distance LPF (`SetOutputMatrix`/`SetFrequencyRatio`/
+        `SetFilterParameters`).
+  - [ ] **Event sounds = client-side feedback** off replicated sim events — needs the
+        data-driven `CueCatalog`/`AudioEventRouter` + NeuronClient wiring (next increment).
+  - [x] UWP **suspend/resume**: `AudioEngine::suspend/resume` → `StopEngine`/`StartEngine`.
   - [ ] `wavcheck` tool (area A/NeuronTools) validates assets at build time.
 - **Tests (`NeuronAudioTest`, §16.1):**
-  - [ ] WAV/RIFF parser — valid PCM-16 mono/stereo, invalid/compressed rejected, truncated
-        chunk handled, edge cases.
-  - [ ] Bus/volume logic (per-bus + master gain composition).
-  - [ ] X3DAudio emitter math (pan/Doppler/distance) on known listener/emitter setups.
-  - [ ] XAudio2 device init/teardown (Windows-only; lives in `NeuronAudioTest`).
-  - [ ] Platform-independent WAV-parser cases also in `NeuronTools/testrunner/` (§16.2).
-- **Depends on:** A (wavcheck), camera (M1b, exists). **Blocks:** Done gate audio clauses.
-- **⚠️ Guard:** confirm **ERHeadless still builds and runs with no audio** after this lands
-  (CI must build ERHeadless without linking NeuronAudio) — an explicit M2 *Done* clause.
+  - [x] WAV/RIFF parser — valid PCM-16 mono/stereo, invalid/compressed rejected, truncated
+        (covered in `testrunner` + `NeuronAudioTest::WavReaderTests`).
+  - [x] Bus/volume logic (per-bus + master gain composition) — `MixerMathTests`.
+  - [x] X3DAudio emitter math (Doppler/distance/attenuation) — `SpatialMathTests` (also
+        Linux-verified against a DirectXMath stub; caught a Doppler sign bug).
+  - [ ] XAudio2 device init/teardown (Windows-agent smoke test) — needs an audio device.
+  - [x] Platform-independent WAV-parser cases also in `NeuronTools/testrunner/` (§16.2).
+- **Depends on:** A (WavParse), camera (M1b, exists). **Blocks:** Done gate audio clauses.
+- **⚠️ Guard:** confirm **ERHeadless still builds and runs with no audio** after this lands —
+  NeuronAudio is a standalone project NOT referenced by ERHeadless; the guard holds by
+  construction, to be re-confirmed on the Windows build.
+
+> **Progress (this branch):** `NeuronAudio` library landed — `AudioTypes`/`Mixer`/`Spatializer`/
+> `SpatialMath`/`VoicePool`/`VoiceHandle`/`WavReader`/`AudioEngine` + `NeuronAudio.vcxproj`
+> (+ filters) and `Testing/NeuronAudioTest` (+ `.vcxproj`), both wired into `EarthRise.slnx`.
+> Device-free math (mixer/handle/spatial) is unit-tested and Linux-verified; the XAudio2/
+> X3DAudio device path is written blind and **must be built/run on Windows** to verify.
+> **Next increment:** buffer-queue streaming (`WavStream`/`OpenMusic`), the data-driven
+> `CueCatalog`/`AudioEventRouter`, the `wavcheck` tool, and the Windows device smoke test.
 
 ### F. Canvas HUD — monospace text + radar/overview basics
 

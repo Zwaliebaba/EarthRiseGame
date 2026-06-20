@@ -7,10 +7,13 @@ Current top-level projects in the solution:
 - `NeuronCore/` - shared core for platform, ECS, world math, serialization, networking, and simulation. Packaged as a **shared items project** (`NeuronCore.vcxitems`); its sources compile directly into each consumer rather than building a standalone `.lib`.
 - `NeuronClient/` - client-side session, replica, interpolation, and controller code (static library).
 - `NeuronRender/` - rendering library with D3D12 device, scene, and canvas/HUD systems (static library).
+- `NeuronAudio/` - **client-only** audio library: XAudio2 (2.9) voice graph + four submix buses, custom WAV/PCM-16 reader, X3DAudio 3D (static library). Links `NeuronCore` + `NeuronTools` (`WavParse.h`), **not** `NeuronRender`. ERHeadless/NeuronClient do **not** link it.
 - `ERServer/` - dedicated server host (executable).
 - `ERHeadless/` - headless bot client host for live/dev validation (executable).
 - `EarthRise/` - UWP client shell that wires client + render together (executable; this is the `EarthRise.Client` referred to in `docs/`).
-- `Testing/` - MSTest projects, one per major area (`NeuronCoreTest`, `NeuronClientTest`, `NeuronRenderTest`, `ERServerTest`, `ERHeadlessTest`).
+- `Testing/` - MSTest projects, one per major area (`NeuronCoreTest`, `NeuronClientTest`, `NeuronRenderTest`, `NeuronAudioTest`, `ERServerTest`, `ERHeadlessTest`).
+
+Outside the solution, `NeuronTools/` holds platform-independent asset parsers (`WavParse.h`, `DdsParse.h`, `CmoParse.h`, `FontAtlasLayout.h`) consumed by the runtime loaders and `*check` tools, plus `testrunner/` — a dependency-free harness (built with `make`) that exercises the parser logic on Linux CI without a Windows build.
 
 Supporting files outside the solution:
 - `Config/db/` - SQL schema and ordered, forward-only migrations.

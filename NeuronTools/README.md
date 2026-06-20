@@ -45,7 +45,9 @@ CI runs this so parser regressions are caught without a Windows toolchain.
 ## Status
 
 - **Done:** platform-independent parser cores (WAV/DDS/CMO/font) + Linux
-  `testrunner` (30 cases passing, `-Werror` clean).
-- **Next (needs the Windows build):** the runtime loaders that wrap these cores
-  in NeuronRender/NeuronAudio, the `*check`/cook tool executables and their
-  `.vcxproj` wiring, and the matching MSTest cases.
+  `testrunner` (30 cases passing, `-Werror` clean). `WavParse.h` is now consumed
+  by the `NeuronAudio` library's `WavReader` (Area E).
+- **Next (needs the Windows build):** the remaining runtime loaders that wrap
+  these cores in NeuronRender (`DdsLoader`/`CmoLoader`/`FontAtlas`), the
+  `*check`/cook tool executables and their `.vcxproj` wiring, and the matching
+  Windows MSTest cases.
