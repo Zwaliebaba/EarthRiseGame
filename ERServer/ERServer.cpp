@@ -82,6 +82,57 @@ namespace
     }
     return 7777;
   }
+
+  // Exercise the real CNG crypto along the exact sequence the server handshake
+  // uses (ECDH keygen -> shared secret -> ECDSA sign/verify -> HKDF -> AES-GCM).
+  // The connection layer's own tests use FakeCrypto (Handshake.h), so this is the
+  // first place the production primitives run end-to-end; a FAIL here is exactly
+  // why a client's CookieResponse never yields a HandshakeResponse.
+  bool RunCryptoSelfTest(Neuron::Net::CngCrypto& crypto, const std::vector<uint8_t>& staticPriv,
+                         const Neuron::Net::EcPubKey& staticPub)
+  {
+    using namespace Neuron::Net;
+    ConsoleLog("[INFO] Crypto self-test (real CNG handshake path)...\n");
+
+    bool allOk = true;
+    auto step = [&](const char* name, bool ok) {
+      ConsoleLog("[{}] self-test {}: {}\n", ok ? "INFO" : "ERROR", name, ok ? "PASS" : "FAIL");
+      allOk = allOk && ok;
+      return ok;
+    };
+
+    EcdhKeyPair clientKp = crypto.GenerateEcdhKeyPair();
+    EcdhKeyPair serverKp = crypto.GenerateEcdhKeyPair();
+    step("ECDH keygen", !clientKp.privateBlob.empty() && !serverKp.privateBlob.empty());
+
+    SharedSecret sA{}, sB{};
+    const bool dhOk = crypto.DeriveSharedSecret(serverKp, clientKp.publicKey, sA) &&
+                      crypto.DeriveSharedSecret(clientKp, serverKp.publicKey, sB);
+    step("ECDH shared-secret agreement", dhOk && sA == sB);
+
+    const std::span<const uint8_t> serverPub(serverKp.publicKey.data(), serverKp.publicKey.size());
+    EcSignature sig{};
+    step("ECDSA sign (server static key)", crypto.Sign(staticPriv, serverPub, sig));
+    step("ECDSA verify (pinned static key)", crypto.Verify(staticPub, serverPub, sig));
+
+    AeadKey c2s{}, s2c{};
+    step("HKDF AEAD key derivation", crypto.DeriveAeadKeys(sA, 0, c2s, s2c));
+
+    const std::array<uint8_t, 4> aad{0xDE, 0xAD, 0xBE, 0xEF};
+    const std::vector<uint8_t> msg{'h', 'e', 'l', 'l', 'o'};
+    std::vector<uint8_t> ct, pt;
+    const std::span<const uint8_t> aadSpan(aad.data(), aad.size());
+    const bool encOk = crypto.Encrypt(c2s, Direction::ClientToServer, 1, aadSpan, msg, ct);
+    const bool decOk = encOk && crypto.Decrypt(c2s, Direction::ClientToServer, 1, aadSpan, ct, pt);
+    step("AES-256-GCM round-trip", encOk && decOk && pt == msg);
+
+    if (allOk)
+      ConsoleLog("[INFO] Crypto self-test PASSED - handshake crypto path is healthy.\n");
+    else
+      ConsoleLog("[ERROR] Crypto self-test FAILED - the FAIL step(s) above are why clients "
+                 "cannot complete the handshake.\n");
+    return allOk;
+  }
 } // namespace
 
 int main()
@@ -126,9 +177,14 @@ int main()
   std::vector<uint8_t> serverSecret(32);
   crypto.RandomBytes(serverSecret);
 
+  // Validate the production crypto path up front (see RunCryptoSelfTest).
+  const std::vector<uint8_t> staticPriv(crypto.GetStaticPrivateBlob().begin(),
+                                        crypto.GetStaticPrivateBlob().end());
+  const Neuron::Net::EcPubKey staticPub = crypto.GetStaticPublicKey();
+  RunCryptoSelfTest(crypto, staticPriv, staticPub);
+
   Neuron::Sim::ServerWorld world;
-  Neuron::Net::ServerHost host(&crypto, std::vector<uint8_t>(crypto.GetStaticPrivateBlob().begin(), crypto.GetStaticPrivateBlob().end()),
-                               serverSecret, &world);
+  Neuron::Net::ServerHost host(&crypto, staticPriv, serverSecret, &world);
 
   Neuron::Net::WinsockSocket sock;
   if (!sock.Open(port))
