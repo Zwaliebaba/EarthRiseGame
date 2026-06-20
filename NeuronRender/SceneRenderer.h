@@ -20,10 +20,10 @@
 #include <array>
 #include <cstdint>
 
+#include "DeviceResources.h"
+
 namespace Neuron::Render
 {
-
-class DeviceResources;
 
 // Public description of one renderable entity (sector-relative coordinates).
 struct SceneEntity
@@ -65,16 +65,20 @@ private:
 
     struct Vertex { float px, py, pz, nx, ny, nz; };
 
+    DeviceResources*                    m_dr{ nullptr };
     ID3D12Device*                       m_device{ nullptr };
     winrt::com_ptr<ID3D12RootSignature> m_rootSig;
     winrt::com_ptr<ID3D12PipelineState> m_pso;
     winrt::com_ptr<ID3D12Resource>      m_vb;
     winrt::com_ptr<ID3D12Resource>      m_ib;
-    winrt::com_ptr<ID3D12Resource>      m_instBuf; // upload heap, CPU-mapped
-    InstanceData*                       m_instPtr{ nullptr };
+
+    // One CPU-mapped instance buffer PER in-flight frame — writing a single
+    // shared buffer races the GPU still reading the previous frame (flicker).
+    std::array<winrt::com_ptr<ID3D12Resource>, DeviceResources::kFrameCount> m_instBuf;
+    std::array<InstanceData*, DeviceResources::kFrameCount>                  m_instPtr{};
+    std::array<D3D12_VERTEX_BUFFER_VIEW, DeviceResources::kFrameCount>       m_instView{};
 
     D3D12_VERTEX_BUFFER_VIEW m_vbView{};
-    D3D12_VERTEX_BUFFER_VIEW m_instView{};
     D3D12_INDEX_BUFFER_VIEW  m_ibView{};
     UINT m_indexCount{ 0 };
 };

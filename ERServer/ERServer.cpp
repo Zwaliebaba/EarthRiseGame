@@ -1,10 +1,10 @@
-// ERServer.cpp — EarthRise dedicated server entry point (M1a).
+// ERServer.cpp - EarthRise dedicated server entry point (M1a).
 //
 // Architecture (§9):
 //   net I/O -> decode/reliability/decrypt -> sim -> snapshots -> net
 //   Single-threaded 30 Hz fixed-step sim owns the authoritative ECS state.
 //   (IOCP multi-threading via ERServer/IocpUdpListener is the M4 scaling
-//    lever; M1a uses a correct single-threaded non-blocking Winsock loop — the
+//    lever; M1a uses a correct single-threaded non-blocking Winsock loop - the
 //    same logic verified end-to-end over the loopback integration tests.)
 //   Persistence (ODBC outbox + write-behind) lands in M5.
 //
@@ -15,7 +15,7 @@
 // Logging: ERServer is a console daemon, so operational logs go to stdout via
 // ConsoleLog() (below) in *all* build configs. (EARTHRISE_LOG_* routes through
 // Neuron::DebugTrace -> OutputDebugString, which is debugger-only and compiled
-// out in Release — useless for watching a running server, so it's not used for
+// out in Release - useless for watching a running server, so it's not used for
 // the operational path here.)
 
 #include "pch.h"
@@ -51,7 +51,7 @@ namespace
     return FALSE;
   }
 
-  // Operational console logging (stdout, timestamped, flushed) — visible in
+  // Operational console logging (stdout, timestamped, flushed) - visible in
   // every build config, unlike the debugger-only EARTHRISE_LOG_* shim.
   template <class... Types>
   void ConsoleLog(std::string_view fmt, Types&&... args)
@@ -139,7 +139,7 @@ int main()
 {
   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
   const uint16_t port = ListenPortFromEnv();
-  ConsoleLog("[INFO] ERServer starting (M1a) — 30 Hz sim, 20 Hz snapshots.\n");
+  ConsoleLog("[INFO] ERServer starting (M1a) - 30 Hz sim, 20 Hz snapshots.\n");
 
   if (!Neuron::Net::WinsockSocket::GlobalStartup())
   {
@@ -189,7 +189,7 @@ int main()
   Neuron::Net::WinsockSocket sock;
   if (!sock.Open(port))
   {
-    ConsoleLog("[ERROR] Failed to bind UDP port {} — is it already in use?\n", port);
+    ConsoleLog("[ERROR] Failed to bind UDP port {} - is it already in use?\n", port);
     return 1;
   }
   ConsoleLog("[INFO] Listening on UDP 0.0.0.0:{}. Waiting for clients (Ctrl+C to stop)...\n", port);
@@ -224,7 +224,7 @@ int main()
       rxBytes += static_cast<uint64_t>(n);
       // First contact from a new endpoint is the key signal the client reached us.
       if (seenEndpoints.insert(EndpointStr(from)).second)
-        ConsoleLog("[INFO] First datagram from {} ({} bytes) — beginning handshake.\n",
+        ConsoleLog("[INFO] First datagram from {} ({} bytes) - beginning handshake.\n",
                    EndpointStr(from), n);
       host.OnDatagram(from, std::span<const uint8_t>(buf.data(), static_cast<size_t>(n)), out);
     }
@@ -273,7 +273,7 @@ int main()
     // 6) Periodic heartbeat (~every 5 s at 30 Hz) so it's obvious the server is alive.
     if (simTick - lastLogTick >= 150)
     {
-      ConsoleLog("[INFO] alive — sim tick {}, conns {}/{}, rx {} dgrams ({} B), tx {} dgrams ({} B).\n",
+      ConsoleLog("[INFO] alive - sim tick {}, conns {}/{}, rx {} dgrams ({} B), tx {} dgrams ({} B).\n",
                  simTick, connected, connections, rxDatagrams, rxBytes, txDatagrams, txBytes);
       if (rxDatagrams == 0)
         ConsoleLog("[WARN] No datagrams received yet. If a client is running, check: UWP loopback "
