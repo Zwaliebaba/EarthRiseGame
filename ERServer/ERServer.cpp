@@ -11,11 +11,23 @@
 // Connection sequence (§8.5): stateless cookie -> version gate -> CNG ECDH with
 // server-key signature -> clock sync -> login -> snapshot loop. Driven by the
 // platform-independent Neuron::Net::ServerHost over a real WinsockSocket.
+//
+// Logging: ERServer is a console daemon, so operational logs go to stdout via
+// ConsoleLog() (below) in *all* build configs. (EARTHRISE_LOG_* routes through
+// Neuron::DebugTrace -> OutputDebugString, which is debugger-only and compiled
+// out in Release — useless for watching a running server, so it's not used for
+// the operational path here.)
 
 #include "pch.h"
 #include <array>
+#include <cstdint>
+#include <cstdio>
+#include <format>
 #include <fstream>
 #include <span>
+#include <string>
+#include <string_view>
+#include <unordered_set>
 #include <vector>
 
 // NeuronCore
@@ -39,6 +51,25 @@ namespace
     return FALSE;
   }
 
+  // Operational console logging (stdout, timestamped, flushed) — visible in
+  // every build config, unlike the debugger-only EARTHRISE_LOG_* shim.
+  template <class... Types>
+  void ConsoleLog(std::string_view fmt, Types&&... args)
+  {
+    SYSTEMTIME t{};
+    GetLocalTime(&t);
+    const std::string body = std::vformat(fmt, std::make_format_args(args...));
+    std::printf("[%02u:%02u:%02u.%03u] %s", static_cast<unsigned>(t.wHour),
+                static_cast<unsigned>(t.wMinute), static_cast<unsigned>(t.wSecond),
+                static_cast<unsigned>(t.wMilliseconds), body.c_str());
+    std::fflush(stdout);
+  }
+
+  std::string EndpointStr(const Neuron::Net::Endpoint& e)
+  {
+    return e.ip + ":" + std::to_string(e.port);
+  }
+
   uint16_t ListenPortFromEnv()
   {
     char buf[16]{};
@@ -57,11 +88,11 @@ int main()
 {
   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
   const uint16_t port = ListenPortFromEnv();
-  EARTHRISE_LOG_INFO("ERServer starting (M1a) — 30 Hz, UDP port {}.\n", port);
+  ConsoleLog("[INFO] ERServer starting (M1a) — 30 Hz sim, 20 Hz snapshots.\n");
 
   if (!Neuron::Net::WinsockSocket::GlobalStartup())
   {
-    EARTHRISE_LOG_ERROR("WSAStartup failed.\n");
+    ConsoleLog("[ERROR] WSAStartup failed.\n");
     return 1;
   }
 
@@ -69,7 +100,7 @@ int main()
   Neuron::Net::CngCrypto crypto;
   if (!crypto.Initialize())
   {
-    EARTHRISE_LOG_ERROR("CNG init failed.\n");
+    ConsoleLog("[ERROR] CNG init failed.\n");
     return 1;
   }
   crypto.LoadOrGenerateStaticKey({}); // M1a: ephemeral static key; M5 persists it.
@@ -79,8 +110,16 @@ int main()
   {
     const auto pub = crypto.GetStaticPublicKey();
     std::ofstream f("er_server_pub.bin", std::ios::binary);
-    if (f) { f.write(reinterpret_cast<const char*>(pub.data()), pub.size()); }
-    EARTHRISE_LOG_INFO("Wrote pinned static public key to er_server_pub.bin.\n");
+    if (f)
+    {
+      f.write(reinterpret_cast<const char*>(pub.data()), pub.size());
+      ConsoleLog("[INFO] Wrote pinned static public key to er_server_pub.bin ({} bytes).\n",
+                 pub.size());
+    }
+    else
+    {
+      ConsoleLog("[WARN] Could not write er_server_pub.bin (cwd not writable?).\n");
+    }
   }
 
   // Server secret for stateless cookies; random per process for M1a.
@@ -94,9 +133,10 @@ int main()
   Neuron::Net::WinsockSocket sock;
   if (!sock.Open(port))
   {
-    EARTHRISE_LOG_ERROR("Failed to bind UDP port {}.\n", port);
+    ConsoleLog("[ERROR] Failed to bind UDP port {} — is it already in use?\n", port);
     return 1;
   }
+  ConsoleLog("[INFO] Listening on UDP 0.0.0.0:{}. Waiting for clients (Ctrl+C to stop)...\n", port);
 
   Neuron::Sim::FixedStepAccumulator acc;
   acc.Start();
@@ -105,13 +145,27 @@ int main()
   uint64_t lastSnapshotTick = 0;
   uint64_t lastLogTick = 0;
 
+  // Diagnostics: cumulative traffic + connection-state tracking.
+  uint64_t rxDatagrams = 0, rxBytes = 0, txDatagrams = 0, txBytes = 0;
+  std::unordered_set<std::string> seenEndpoints;
+  int prevConnections = -1, prevConnected = -1;
+
   while (g_running)
   {
     // 1) Drain inbound datagrams and route them through the host.
     std::vector<Neuron::Net::OutDatagram> out;
     Neuron::Net::Endpoint from;
     int n;
-    while ((n = sock.RecvFrom(from, buf)) > 0) { host.OnDatagram(from, std::span<const uint8_t>(buf.data(), static_cast<size_t>(n)), out); }
+    while ((n = sock.RecvFrom(from, buf)) > 0)
+    {
+      ++rxDatagrams;
+      rxBytes += static_cast<uint64_t>(n);
+      // First contact from a new endpoint is the key signal the client reached us.
+      if (seenEndpoints.insert(EndpointStr(from)).second)
+        ConsoleLog("[INFO] First datagram from {} ({} bytes) — beginning handshake.\n",
+                   EndpointStr(from), n);
+      host.OnDatagram(from, std::span<const uint8_t>(buf.data(), static_cast<size_t>(n)), out);
+    }
 
     // 2) Advance the fixed-step simulation.
     acc.Tick();
@@ -132,11 +186,33 @@ int main()
 
     // 4) Flush all queued outbound datagrams.
     for (auto& od : out)
-      sock.SendTo(od.to, od.data);
-
-    if (simTick - lastLogTick >= 300)
     {
-      EARTHRISE_LOG_INFO("ERServer tick {} — {} connections ({} connected).\n", simTick, host.ConnectionCount(), host.ConnectedCount());
+      sock.SendTo(od.to, od.data);
+      ++txDatagrams;
+      txBytes += od.data.size();
+    }
+
+    // 5) Log connection-state transitions immediately (the interesting events).
+    const int connections = static_cast<int>(host.ConnectionCount());
+    const int connected = static_cast<int>(host.ConnectedCount());
+    if (connections != prevConnections || connected != prevConnected)
+    {
+      ConsoleLog("[INFO] Connections: {} pending/active, {} fully connected.\n", connections,
+                 connected);
+      prevConnections = connections;
+      prevConnected = connected;
+    }
+
+    // 6) Periodic heartbeat (~every 5 s at 30 Hz) so it's obvious the server is alive.
+    if (simTick - lastLogTick >= 150)
+    {
+      ConsoleLog("[INFO] alive — sim tick {}, conns {}/{}, rx {} dgrams ({} B), tx {} dgrams ({} B).\n",
+                 simTick, connected, connections, rxDatagrams, rxBytes, txDatagrams, txBytes);
+      if (rxDatagrams == 0)
+        ConsoleLog("[WARN] No datagrams received yet. If a client is running, check: UWP loopback "
+                   "exemption (CheckNetIsolation.exe LoopbackExempt -a -n=<PackageFamilyName>), "
+                   "Windows Firewall, and that the client targets UDP {}.\n",
+                   port);
       lastLogTick = simTick;
     }
 
@@ -145,6 +221,7 @@ int main()
 
   sock.Close();
   Neuron::Net::WinsockSocket::GlobalCleanup();
-  EARTHRISE_LOG_INFO("ERServer shutting down.\n");
+  ConsoleLog("[INFO] ERServer shutting down (rx {} dgrams / tx {} dgrams).\n", rxDatagrams,
+             txDatagrams);
   return 0;
 }
