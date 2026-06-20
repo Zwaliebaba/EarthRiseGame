@@ -13,6 +13,9 @@
 
 #include "pch.h"
 
+#include <chrono>
+#include <cstdio>
+
 // NeuronRender
 #include "DeviceResources.h"
 #include "SceneRenderer.h"
@@ -182,9 +185,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       se.y = re.y;
       se.z = re.z;
       se.yaw = 0.f;
-      se.scale = (re.entityType == 0) ? 4.f : 1.f; // base = larger
+      // entityType carries EntityKind (Components.h): Base = 1, Ship = 2.
+      const bool isBase = (re.entityType == 1);
+      se.scale = isBase ? 10.f : 3.f; // half-extent metres (base larger; visible at the M1b camera)
       // Darwinia palette: base = neon blue, ship = neon orange.
-      if (re.entityType == 0)
+      if (isBase)
       {
         se.r = 0.2f;
         se.g = 0.6f;
@@ -197,6 +202,23 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         se.b = 0.1f;
       }
       se.kind = re.entityType;
+    }
+
+    // Once-per-second diagnostic (VS Output / DebugView; the on-screen HUD font
+    // is still placeholder blocks). Shows where the player's base actually is.
+    {
+      static auto lastDbg = std::chrono::steady_clock::now();
+      const auto nowDbg = std::chrono::steady_clock::now();
+      if (nowDbg - lastDbg >= std::chrono::seconds(1))
+      {
+        char buf[192];
+        std::snprintf(buf, sizeof(buf),
+                      "[EarthRise] state=%d entities=%u playerNet=%u cameraCenter=(%.1f,%.1f,%.1f)\n",
+                      static_cast<int>(m_session->GetState()), entCount, m_session->PlayerNetId(),
+                      cx, cy, cz);
+        OutputDebugStringA(buf);
+        lastDbg = nowDbg;
+      }
     }
 
     m_dr.BeginFrame();
@@ -228,7 +250,14 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_running = false;
   }
 
-  void OnClosed(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::CoreWindowEventArgs&) { m_running = false; }
+  void OnClosed(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::CoreWindowEventArgs&)
+  {
+    // Tell the server we're leaving before the loop unwinds (UWP may not call
+    // Uninitialize on a window close). The 8 s server idle timeout is the backstop.
+    if (m_session)
+      m_session->Disconnect();
+    m_running = false;
+  }
 };
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) { Windows::ApplicationModel::Core::CoreApplication::Run(winrt::make<App>()); }
