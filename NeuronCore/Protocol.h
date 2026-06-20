@@ -13,7 +13,10 @@
 //   Payload (encrypted): 1..N messages
 //     each message: channel u8, msg_type u8, length u16, body[length]
 //     reliability framing per channel: sequence u16, ack u16, ack_bits u32
-//   Fragments carry: message_id u16, fragment_index u16, fragment_count u16
+//
+// There is no fragmentation: every message fits one safe-MTU datagram by
+// construction (§8.4 — no bulk world sync; cold-start streams interest-scoped
+// delta snapshots from an empty baseline).
 //
 // The 64-bit packet_number is the AEAD nonce input and feeds the replay window.
 // The 16-bit per-channel sequence is reliability/ordering only (Appendix A note).
@@ -53,8 +56,8 @@ enum class Channel : uint8_t
     Unreliable       = 0, // snapshots
     ReliableOrdered  = 1, // commands / chat / events
     ReliableUnordered= 2, // notifications
-    Bulk             = 3, // fragmented world sync
     Count
+    // No Bulk channel: the world is never shipped as one large artifact (§8.4).
 };
 inline constexpr uint8_t kChannelCount = static_cast<uint8_t>(Channel::Count);
 
@@ -76,9 +79,8 @@ enum class MsgType : uint8_t
     // -- Post-encryption (over the encrypted channel) --
     LoginRequest      = 20, // step 5: username/password (dev: name only)
     LoginResponse     = 21, // step 5: session token or failure
-    WorldSyncStart    = 30, // step 6: initial world sync (Bulk)
-    WorldSyncChunk    = 31,
-    WorldSyncEnd      = 32,
+    // No WorldSync* messages: a fresh client enters the snapshot loop directly with
+    // an empty baseline and converges via interest-scoped delta snapshots (§8.4).
 
     Snapshot          = 40, // server → client per-tick delta snapshot
     Command           = 41, // client → server intent
@@ -115,14 +117,6 @@ struct ReliabilityHeader
     uint32_t ackBits{ 0 };   // bitfield of the 32 sequences before 'ack'
 };
 
-// Fragment framing (carried when a message is fragmented across datagrams).
-struct FragmentHeader
-{
-    uint16_t messageId{ 0 };
-    uint16_t fragmentIndex{ 0 };
-    uint16_t fragmentCount{ 0 };
-};
-
 // ---------------------------------------------------------------------------
 // Connection lifecycle states (server + client share this enum; §8.5)
 // ---------------------------------------------------------------------------
@@ -134,8 +128,7 @@ enum class ConnState : uint8_t
     Handshaking,      // ECDH in flight
     ClockSyncing,     // step 4
     Authenticating,   // login in flight (encrypted)
-    WorldSync,        // initial bulk sync
-    Connected,        // in tick/snapshot loop
+    Connected,        // in tick/snapshot loop (cold-start = empty baseline, §8.4)
     Disconnected,
 };
 

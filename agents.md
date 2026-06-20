@@ -31,7 +31,7 @@ All projects keep their source and header files **flat** in the project director
 - ECS: `Ecs.h`
 - World/math: `WorldPos.h`, `GameMath.h`, `MathCommon.h`
 - Serialization: `BitStream.h`, `Serde.h`
-- Networking: protocol, sequencing, replay, reliability, fragmentation, packet codec, crypto/socket abstractions, secure channel, handshake, connection
+- Networking: protocol, sequencing, replay, reliability, packet codec, crypto/socket abstractions, secure channel, handshake, connection
 - Simulation/server: components, fixed-step accumulation, movement, snapshot, command, server world/host
 
 ### Client
