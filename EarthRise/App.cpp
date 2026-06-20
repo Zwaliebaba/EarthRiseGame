@@ -107,6 +107,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   void Uninitialize()
   {
     m_canvas.Uninitialize();
+    if (m_session)
+      m_session->Disconnect(); // best-effort graceful notice while the socket is alive
     m_session.reset();
     m_socket.reset();
     Neuron::Net::WinsockSocket::GlobalCleanup();
@@ -132,8 +134,26 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     // Build per-frame view-proj: simple fixed look-at for M1b.
     using namespace DirectX;
-    const XMVECTOR eye = XMVectorSet(0.f, 50.f, -120.f, 0.f);
-    const XMVECTOR at = XMVectorSet(0.f, 0.f, 0.f, 0.f);
+    // Center the camera on the player's own base — it drifts, so a fixed look-at
+    // at the world origin lets it slide off screen. Fall back to first entity.
+    float cx = 0.f, cy = 0.f, cz = 0.f;
+    {
+      const Neuron::Client::ReplicaSet& cam = m_interp.curr;
+      const uint32_t pid = m_session->PlayerNetId();
+      for (uint32_t i = 0; i < cam.count; ++i)
+      {
+        const auto& ce = cam.entities[i];
+        if (ce.valid && (ce.networkId == pid || pid == 0))
+        {
+          cx = ce.x;
+          cy = ce.y;
+          cz = ce.z;
+          break;
+        }
+      }
+    }
+    const XMVECTOR eye = XMVectorSet(cx, cy + 50.f, cz - 120.f, 0.f);
+    const XMVECTOR at = XMVectorSet(cx, cy, cz, 0.f);
     const XMVECTOR up = XMVectorSet(0.f, 1.f, 0.f, 0.f);
     constexpr float fov = XM_PIDIV4;
     const float asp = (h > 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.f;

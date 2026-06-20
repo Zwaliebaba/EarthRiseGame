@@ -62,6 +62,17 @@ public:
             v->metresPerSecond = ClampSpeed(vel, kMaxBaseSpeed);
     }
 
+    // Remove a player's base from the world (on disconnect/timeout). Returns
+    // true if a base for that net id existed.
+    bool DespawnBase(uint32_t netId)
+    {
+        auto it = m_netIdToEntity.find(netId);
+        if (it == m_netIdToEntity.end()) return false;
+        m_world.DestroyEntity(it->second);
+        m_netIdToEntity.erase(it);
+        return true;
+    }
+
     // Advance the simulation one fixed step.
     void Step(float dtSeconds)
     {

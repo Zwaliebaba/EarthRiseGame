@@ -206,8 +206,14 @@ int main()
   std::unordered_set<std::string> seenEndpoints;
   int prevConnections = -1, prevConnected = -1;
 
+  // Reap peers silent for longer than this (clients send a keepalive every 1 s;
+  // a graceful Disconnect frees the slot immediately).
+  constexpr uint64_t kIdleTimeoutMs = 8000;
+
   while (g_running)
   {
+    host.SetClockMs(GetTickCount64());
+
     // 1) Drain inbound datagrams and route them through the host.
     std::vector<Neuron::Net::OutDatagram> out;
     Neuron::Net::Endpoint from;
@@ -247,6 +253,11 @@ int main()
       ++txDatagrams;
       txBytes += od.data.size();
     }
+
+    // 4b) Reap gone clients (graceful Disconnect or idle timeout); despawn bases.
+    for (const auto& c : host.PruneStale(kIdleTimeoutMs))
+      ConsoleLog("[INFO] Connection closed: {} (netId {}) - {}.\n", c.endpoint, c.netId,
+                 c.timedOut ? "idle timeout" : "graceful disconnect");
 
     // 5) Log connection-state transitions immediately (the interesting events).
     const int connections = static_cast<int>(host.ConnectionCount());

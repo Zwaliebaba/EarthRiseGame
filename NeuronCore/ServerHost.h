@@ -55,7 +55,11 @@ public:
 
         // Route to an existing connection first.
         if (auto it = m_conns.find(key); it != m_conns.end()) {
+            m_lastSeenMs[key] = m_nowMs;
             DispatchToConnection(*it->second, from, dg, out);
+            // A client that sent a graceful Disconnect is freed immediately.
+            if (it->second->State() == ConnState::Disconnected)
+                RemoveConnection(key);
             return;
         }
 
@@ -95,6 +99,7 @@ public:
             for (auto& d : sendOut) out.push_back({ from, std::move(d) });
 
             m_conns.emplace(key, std::move(conn));
+            m_lastSeenMs[key] = m_nowMs;
             return;
         }
     }
@@ -121,7 +126,55 @@ public:
         return n;
     }
 
+    // The host supplies a monotonic clock (ms) so stale peers can be reaped.
+    void SetClockMs(uint64_t nowMs) noexcept { m_nowMs = nowMs; }
+
+    struct ClosedConn
+    {
+        std::string endpoint;
+        uint32_t    netId{ 0 };
+        bool        timedOut{ false }; // true = idle timeout, false = graceful Disconnect
+    };
+
+    // Remove connections that gracefully disconnected or have sent no traffic
+    // within 'timeoutMs' (0 disables the idle timeout). Despawns each base and
+    // returns the removed peers for logging.
+    std::vector<ClosedConn> PruneStale(uint64_t timeoutMs)
+    {
+        std::vector<ClosedConn> closed;
+        for (auto it = m_conns.begin(); it != m_conns.end();) {
+            const bool disconnected = it->second->State() == ConnState::Disconnected;
+            bool timedOut = false;
+            if (!disconnected && timeoutMs != 0) {
+                auto ls = m_lastSeenMs.find(it->first);
+                if (ls != m_lastSeenMs.end() && m_nowMs >= ls->second &&
+                    (m_nowMs - ls->second) > timeoutMs)
+                    timedOut = true;
+            }
+            if (disconnected || timedOut) {
+                const uint32_t netId = it->second->PlayerNetId();
+                if (m_world) m_world->DespawnBase(netId);
+                closed.push_back({ it->first, netId, timedOut });
+                m_lastSeenMs.erase(it->first);
+                it = m_conns.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        return closed;
+    }
+
 private:
+    // Despawn the base and drop all per-connection state for one peer.
+    void RemoveConnection(const std::string& key)
+    {
+        auto it = m_conns.find(key);
+        if (it == m_conns.end()) return;
+        if (m_world) m_world->DespawnBase(it->second->PlayerNetId());
+        m_conns.erase(it);
+        m_lastSeenMs.erase(key);
+    }
+
     void DispatchToConnection(ServerConnection& conn, const Endpoint& from,
                               std::span<const uint8_t> dg, std::vector<OutDatagram>& out)
     {
@@ -179,6 +232,8 @@ private:
     uint64_t                  m_serverTime{ 0 };
     HandshakeServerStateless  m_stateless;
     std::unordered_map<std::string, std::unique_ptr<ServerConnection>> m_conns;
+    std::unordered_map<std::string, uint64_t> m_lastSeenMs; // peer key -> last activity (host clock)
+    uint64_t                  m_nowMs{ 0 };
     uint64_t                  m_tokenCounter{ 0 };
 };
 
