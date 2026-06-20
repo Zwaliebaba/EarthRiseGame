@@ -54,7 +54,9 @@
 - Design docs already written and should be followed:
   [`docs/design/neuronrender-architecture.md`](../docs/design/neuronrender-architecture.md),
   [`docs/design/neuronaudio-api.md`](../docs/design/neuronaudio-api.md),
-  [`docs/design/ui-hud-layout.md`](../docs/design/ui-hud-layout.md).
+  [`docs/design/ui-hud-layout.md`](../docs/design/ui-hud-layout.md),
+  [`docs/design/darwinia-menu-ui.md`](../docs/design/darwinia-menu-ui.md) (windowed
+  menu/options UI — folded into areas **F**/**G** below).
 
 ---
 
@@ -193,11 +195,19 @@
   3D bracket overlay + sortable overview list + 2D radar disc.
 - **Masterplan refs:** §11 (Canvas), §22 (UI/HUD/radar/accessibility), §22.3 (radar/overview),
   §23.1 (overview is the primary selection surface — basics only at M2).
-  **Design doc:** [`docs/design/ui-hud-layout.md`](../docs/design/ui-hud-layout.md).
+  **Design docs:** [`docs/design/ui-hud-layout.md`](../docs/design/ui-hud-layout.md),
+  [`docs/design/darwinia-menu-ui.md`](../docs/design/darwinia-menu-ui.md) (windowed menu/options UI).
 - **Current state:** `CanvasRenderer` exists (quads/lines/text primitives); no HUD/widgets yet.
 - **Work:**
+  - [ ] **Canvas texture+font foundation** — shader-visible SRV heap + static sampler,
+        uncompressed-32-bit DDS loader, `FontAtlas` (EditorFont: 16×16 cells, cp 32–255),
+        textured/tinted quads + real `DrawText` + triangle prim (`darwinia-menu-ui.md` MU-1).
   - [ ] Monospace bitmap text draw on Canvas (font atlas from area A); string-id indirection
         via a localization string table (§22.4) — **no hard-coded display strings**.
+  - [ ] **Windowed menu/options UI** — reusable immediate-mode toolkit (Window/Button/
+        DropDown/Label) on the InterfaceGrey/InterfaceRed skins; reproduce the reference
+        Main Menu + Screen/Graphics/Other Options windows (draggable/closable, interactive)
+        per [`docs/design/darwinia-menu-ui.md`](../docs/design/darwinia-menu-ui.md) (MU-1..MU-4).
   - [ ] Thin immediate-mode widget toolkit (panels/lists/text) — enough for HUD + settings.
   - [ ] **Radar/overview basics:** 3D IFF brackets + off-screen arrows; sortable overview
         list (type/distance/velocity/IFF); 2D radar disc (bearing + range rings + IFF).
@@ -221,7 +231,9 @@
         VSync/frame cap, HUD scale; audio: per-bus + master volume; keybinds stub) with sane
         defaults + reset.
   - [ ] Wire settings → render (C/D budgets), audio (E bus volumes), HUD scale (F).
-  - [ ] Settings UI built on the area-F widget toolkit.
+  - [ ] Settings UI built on the area-F **windowed menu/options toolkit**
+        ([`docs/design/darwinia-menu-ui.md`](../docs/design/darwinia-menu-ui.md)) — the
+        Screen/Graphics/Other Options windows *are* the settings screen.
 - **Tests:**
   - [ ] `NeuronRenderTest` or client logic test: settings serialize/deserialize round-trip;
         defaults/reset; out-of-range clamps.
@@ -267,4 +279,7 @@ Parallelizable: **{A} → then {E} ∥ {B→C→D} ∥ {F after font}**, converg
 - [ ] **ERHeadless still builds/runs with no audio** (E guard, H).
 - [ ] **GPU-compute particles** working (D).
 - [ ] **Settings screen** present and wired (G).
+- [ ] **Windowed menu/options UI** reproduces the reference canvas (Main Menu +
+      Screen/Graphics/Other Options), interactive, strings via the §22.4 table
+      ([`docs/design/darwinia-menu-ui.md`](../docs/design/darwinia-menu-ui.md)) (F).
 - [ ] All 14 `<project>Test` suites green, incl. new **NeuronAudioTest** (§16.1).
