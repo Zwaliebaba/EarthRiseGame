@@ -1,19 +1,37 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.9 — for review
+> **Status:** DRAFT v0.10 — for review
 > **Date:** 2026-06-19
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
-> Microsoft SQL Server, a UWP/DirectX 12 client, and a headless client/bot host
-> (**ERHeadless**) — in the visual style of *Darwinia*. **Gameplay fantasy:
-> _Homeworld × EVE_** — each player is a **fleet commander** (RTS direct control)
-> operating a **mobile mothership-base** in a persistent, contested sandbox.
+> Microsoft SQL Server, a UWP/DirectX 12 client with **XAudio2/X3DAudio audio
+> (NeuronAudio)**, and a headless client/bot host (**ERHeadless**) — in the visual
+> style of *Darwinia*. **Gameplay fantasy: _Homeworld × EVE_** — each player is a
+> **fleet commander** (RTS direct control) operating a **mobile mothership-base** in
+> a persistent, contested sandbox.
 
 ---
 
 ## Changelog
 
-**v0.9 (this revision) — gameplay design pass (PvP/PvE depth)**
+**v0.10 (this revision) — audio subsystem**
+- **Audio added (new §11.3, `NeuronAudio`):** **XAudio2 (2.9)** for playback +
+  **X3DAudio** for 3D positional sound, **WAV (PCM 16-bit) only** via a custom
+  RIFF/WAVE reader (mirrors the CMO/DDS custom-parser approach). Both are Windows-SDK
+  components — fits the MS-only allow-list (§2).
+- **Dedicated `NeuronAudio` client library** (sibling to NeuronRender), used only by
+  the UWP client; **ERHeadless/bots link no audio**. Adds `NeuronAudioTest` per the
+  §16.1 per-project test policy → **14 projects**. Updates §2, §3, §4, §5, §16.1.
+- **Four mixer buses** (Master → **Music / Ambient / SFX / UI**): **ambient
+  background beds**, **event SFX**, **UI**, and a **musical score**.
+- **3D from day one:** X3DAudio listener = scene camera; mono emitters positioned in
+  **camera-relative / floating-origin** space (§6.4) — no `int64` reaches audio.
+- **Event sounds are client-side feedback** off replicated sim events — **no audio on
+  the wire**, no determinism requirement (presentation only).
+- **Delivered in M2 (Darwinia look)**; risk **R19** added; glossary + allow-list
+  updated.
+
+**v0.9 — gameplay design pass (PvP/PvE depth)**
 - **Core fantasy fixed as _Homeworld × EVE_:** RTS-style direct **fleet command**
   from a **mobile mothership-base**, inside a persistent EVE-like contested universe.
   Updates §1 pillars, §13.
@@ -152,6 +170,7 @@ players at launch and designed to grow well past that.
 | Headless host / bots | **ERHeadless**. |
 | Client app model | **UWP + CoreWindow + DX12** (Store reach). Loopback/sandbox toil accepted; see R1. |
 | Client rendering | **3D Scene** and **2D Canvas (UI)** are separate subsystems. |
+| **Audio** | **XAudio2 (2.9)** playback + **X3DAudio** 3D sound; **WAV / PCM-16 only** (custom RIFF reader). Dedicated **`NeuronAudio`** lib (client-only; ERHeadless has none). Buses: **Master→Music/Ambient/SFX/UI**. 3D from day one (§11.3). |
 | Client prediction | **Deferred past M1** — interpolation + snap-on-ack first; predict/reconcile later. |
 | **Core fantasy** | **_Homeworld × EVE_** — RTS **fleet command** from a **mobile mothership-base** in a persistent contested sandbox (§13.1). |
 | **Combat** | **PvE + territorial PvP**; **role + fitting + damage-type counters** (§13.2); **loot-on-kill** (ships); **base = capital, disable-not-destroy** (§13.1). |
@@ -184,6 +203,8 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | Winsock | all | UDP sockets |
 | ODBC (Driver 18) + SQL Server | ERServer | `sql.h`/`odbc32.lib` (SDK); driver installed in the container |
 | Windows CNG (`bcrypt.h`) | ERServer + client | ECDH, **ECDSA (server-key sign)**, AES-GCM, PBKDF2 hashing |
+| **XAudio2 (2.9)** (`xaudio2.h`) | NeuronAudio (client) | Low-level audio playback / voice graph (SDK; UWP-supported) |
+| **X3DAudio** (`x3daudio.h`) | NeuronAudio (client) | 3D positional audio (DSP settings for XAudio2 voices) |
 | MSBuild HLSL Compiler (`dxc`) | build-time | HLSL → embedded **SM6/DXIL** bytecode headers |
 | STL | all | 🔒 allowed |
 
@@ -202,6 +223,7 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | Client app | `CoreApplication` + `IFrameworkView` (CoreWindow), C++/WinRT, no XAML |
 | Rendering | DX12 + DXGI flip-model; **Scene (3D)** + **Canvas (2D)** split |
 | Shaders | HLSL → **embedded SM6/DXIL headers** via `dxc` (var `g_p%(Filename)`, out `CompiledShaders\%(Filename).h`); root sigs in HLSL; no runtime HLSL on UWP |
+| **Audio** | **NeuronAudio** (client-only lib): **XAudio2 (2.9)** voice graph + **X3DAudio** 3D; **WAV/PCM-16** via custom RIFF reader; buses Master→Music/Ambient/SFX/UI (§11.3) |
 | Meshes / fonts | CMO (custom parser) / fixed-grid monospace atlas |
 | Headless/bots | **ERHeadless** — many NeuronClient sessions, render-free |
 | Tests | **Microsoft Native Unit Test** (`<project>Test`) per project (§16.1) + custom headless assert runner + ERHeadless multi-client harness + **record/replay determinism harness** |
@@ -242,7 +264,8 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 ```
 
 **Targets:** **NeuronCore** (lib, all) · **NeuronClient** (lib → UWP app +
-ERHeadless) · **NeuronRender** (lib, UWP/DX12 → UWP app) · **ERServer** (exe) ·
+ERHeadless) · **NeuronRender** (lib, UWP/DX12 → UWP app) · **NeuronAudio** (lib,
+XAudio2/X3DAudio → UWP app **only**; ERHeadless links none) · **ERServer** (exe) ·
 **EarthRise.Client** (UWP/MSIX) · **ERHeadless** (exe) · **NeuronTools** (exes).
 
 ---
@@ -255,11 +278,12 @@ ERHeadless) · **NeuronRender** (lib, UWP/DX12 → UWP app) · **ERServer** (exe
 ├── NeuronCore/    math/ ecs/ world/ net/ serde/ sim/ platform/
 ├── NeuronClient/  session/ replica/ interp/ control/ bots/   (predict/ added later)
 ├── NeuronRender/  gfx/ scene/(3D) canvas/(2D) assets/(DDS,font,CMO)        [UWP]
+├── NeuronAudio/   engine/(XAudio2) spatial/(X3DAudio) wav/(RIFF reader) mixer/(buses) [client]
 ├── ERServer/      netio/ simloop/ ai/(PvE) interest/ auth/ persist/(ODBC)
 ├── EarthRise.Client/  app/ ui/(HUD on CanvasRenderer)                      [UWP/MSIX]
-├── ERHeadless/    host/ (N sessions; load + integration + replay tests)
-├── NeuronTools/   meshcook/ ddscheck/ fontpack/ testrunner/
-├── assets/        .dds · monospace font bitmaps · your .cmo meshes
+├── ERHeadless/    host/ (N sessions; load + integration + replay tests)    [no audio]
+├── NeuronTools/   meshcook/ ddscheck/ fontpack/ wavcheck/ testrunner/
+├── assets/        .dds · monospace font bitmaps · your .cmo meshes · audio/*.wav (PCM-16)
 ├── shaders/       .hlsl sources → dxc (SM6/DXIL) → CompiledShaders/*.h (embedded)
 └── deploy/        ERServer Dockerfile (Server Core) · k8s manifests · dev scripts
 ```
@@ -451,6 +475,44 @@ Separate subsystems 🔒 (own modules/PSOs/command lists; composited last).
 Shaders are precompiled into embedded SM6/DXIL byte-array headers (no runtime HLSL on
 UWP); see §12.4.
 
+### 11.3 Audio — XAudio2 / X3DAudio (NeuronAudio) 🔒
+A dedicated **client-only** `NeuronAudio` library (sibling to NeuronRender). It links
+**NeuronCore** (math/types) but **not** NeuronRender; the UWP client owns both and
+feeds the audio listener from the **same camera** it renders with. **ERHeadless/bots
+link no audio** (presentation only). MS-platform components only — no third-party.
+
+- **Playback — XAudio2 (2.9) 🔒** (`xaudio2.h`, UWP-supported): a mastering voice →
+  **four submix buses 🔒 — Music · Ambient · SFX · UI** → pooled source voices.
+  Per-bus + master volume. Short **event SFX** are loaded fully into memory; long
+  **ambient beds** and the **music score** are **streamed** via a buffer-queue
+  `IXAudio2VoiceCallback`.
+- **Format — WAV / PCM-16 only 🔒.** A **custom RIFF/WAVE reader** (in `NeuronAudio/
+  wav/`) parses `RIFF`/`fmt `/`data` chunks → `WAVEFORMATEX` + PCM samples. **No
+  MP3/OGG/ADPCM** (keeps it MS-only and simple, mirroring the custom CMO/DDS
+  parsers). **Mono** sources for 3D-positioned emitters (X3DAudio pans mono);
+  **stereo** for music/ambient/UI. A `wavcheck` tool validates assets at build time.
+- **3D positional — X3DAudio 🔒 (from day one)** (`x3daudio.h`): the
+  `X3DAUDIO_LISTENER` is the scene **camera** (position/orientation/velocity);
+  each positional sound is an `X3DAUDIO_EMITTER`. Per audio-update, compute the
+  output matrix + **Doppler** + distance LPF and apply via `SetOutputMatrix` /
+  `SetFrequencyRatio` / filter on the source voice. Emitter & listener positions are
+  **camera-relative / floating-origin** (§6.4) — **no `int64` reaches audio**, same
+  as the GPU rule (R2).
+- **Content categories (the four buses):**
+  - **Ambient background** — looping environmental beds (space drones, nebula hum,
+    proximity-to-hazard ambience), cross-faded by region/security tier (§13.5).
+  - **Event SFX** — gameplay feedback: weapons fire/impacts, shield/armor/hull hits,
+    explosions, thrusters, mining, **build-complete**, loot pickup, alerts/warnings
+    (e.g. base low-hull → retreat, §13.1).
+  - **UI** — Canvas/HUD interaction sounds (2D, non-positional).
+  - **Music** — adaptive/looping score (streamed).
+- **Event sounds are client-side feedback** triggered by **replicated sim events /
+  state changes** (NeuronClient replica/interp), not by the server sending audio:
+  **no audio on the wire**, and **no determinism requirement** (unlike the sim).
+- **Lifetime/threading:** XAudio2 runs its own audio thread; the client submits
+  buffers and updates 3D params from the game/render thread at a fixed audio cadence.
+  On UWP **suspend/resume**, stop/restart the engine and release/reacquire voices.
+
 ---
 
 ## 12. Asset Pipeline
@@ -483,6 +545,14 @@ shader file I/O** (ideal for UWP). Usage:
 psoDesc.VS = { g_pSceneVS, sizeof(g_pSceneVS) };
 psoDesc.PS = { g_pScenePS, sizeof(g_pScenePS) };
 ```
+
+### 12.5 Audio assets — WAV / PCM-16 🔒
+- **`assets/audio/*.wav`** — **PCM 16-bit** only (mono for 3D emitters, stereo for
+  music/ambient/UI). Parsed at load by the `NeuronAudio` custom RIFF reader (§11.3);
+  no runtime decode of compressed formats.
+- **`wavcheck` (NeuronTools):** build-time validation — confirms RIFF/WAVE + PCM-16,
+  flags non-PCM/compressed files, warns if a 3D-tagged cue is stereo (X3DAudio needs
+  mono). Long streamed assets (music/ambient) are loaded incrementally, not embedded.
 
 ---
 
@@ -763,6 +833,7 @@ stats), `ResourceNode`, `Projectile`, `LootContainer`, `MarketOrder`,
 | **NeuronCore** | **NeuronCoreTest** | ECS, WorldPos/sectors, serde, sim rules, fixed-step timer, allocators |
 | **NeuronClient** | **NeuronClientTest** | Session, ReplicaManager, InterpBuffer, controller logic |
 | **NeuronRender** | **NeuronRenderTest** | DeviceResources init/teardown, SceneRenderer/CanvasRenderer unit logic |
+| **NeuronAudio** | **NeuronAudioTest** | WAV/RIFF parser (valid/invalid/edge), bus/volume logic, X3DAudio emitter math, XAudio2 device init/teardown |
 | **ERServer** | **ERServerTest** | Net I/O, handshake, reliability, sim loop, persistence layer |
 | **ERHeadless** | **ERHeadlessTest** | Multi-session host, bot harness, record/replay determinism |
 
@@ -781,7 +852,7 @@ stats), `ResourceNode`, `Projectile`, `LootContainer`, `MarketOrder`,
 
 - **Tests:** custom assert runner in `NeuronTools/testrunner/`; units for math
   (DirectXMath), serialization, reliability (loss/reorder/dup), **crypto handshake
-  (incl. MITM/nonce/replay cases)**, CMO/DDS parsers, and InterpBuffer.
+  (incl. MITM/nonce/replay cases)**, CMO/DDS/**WAV** parsers, and InterpBuffer.
   **ERHeadless** = multi-client integration & load harness plus an **input-log
   record/replay determinism harness** (same input → identical sim, the primary
   netcode debugging tool).
@@ -818,9 +889,13 @@ Scene + 2D Canvas HUD** as separate passes; snap-on-ack correction. **Done:** 1 
 ≥3 bots share the world; no `int64_t` reaches the GPU; 3D/2D split verified; loopback
 path tested **and** a non-exempt run validated before Store.
 
-**M2 — Darwinia look** *(M–L)* — DDS + **CMO** loaders, monospace Canvas HUD, bloom
-+ additive particles, instanced ships. **Done:** an instanced fleet (your CMO
-meshes) with thrusters + glow over a legible HUD at target frame time.
+**M2 — Darwinia look + audio** *(M–L)* — DDS + **CMO** loaders, monospace Canvas HUD,
+bloom + additive particles, instanced ships; **`NeuronAudio`**: XAudio2 voice graph +
+4 buses, WAV/PCM-16 RIFF reader, **X3DAudio 3D** (listener = camera), ambient beds +
+event SFX + UI + music. **Done:** an instanced fleet (your CMO meshes) with thrusters
++ glow over a legible HUD at target frame time, **with 3D-positioned thruster/weapon
+SFX, ambient bed and music** mixed across buses (and ERHeadless still builds/runs with
+no audio).
 
 **M3 — Core 4X loop + fleet command** *(L)* — nodes, harvesting, storage, build
 queue, sensor/fog; **RTS fleet control** (select/move/attack/guard/control-groups)
@@ -882,6 +957,7 @@ server restart.
 | R16 | **Fleet entity-count blows the bandwidth/sim budget** | **High** | Launch fleet cap 6–12; **interest-bounded** per-client visible set + entity aggregation/LOD + projectile batching; load-test the *contested-sector* case at M4 (App. B). |
 | R17 | **Conquest too brutal for newcomers → no growth** | High | High-sec protected onboarding (§13.5/13.9); ship insurance + base disable-not-destroy; catch-up/flattened power curve (§13.3); onboarding objective chain. |
 | R18 | **Thin social glue (light fleets only) hurts retention & conquest defense** | Med–High | Individual ownership works at ~100 players; **persistent corporations tracked as the first social expansion** (§13.8/§19) — promote forward if retention or coordinated defense suffers. |
+| R19 | **Audio on UWP / WAV-only / X3DAudio correctness** | Low | XAudio2 2.9 + X3DAudio are SDK components (UWP-supported); custom RIFF reader + `wavcheck` validate PCM-16; emitter math + parser unit-tested (NeuronAudioTest, testrunner); suspend/resume voice handling; audio is presentation-only (no sim/determinism impact). |
 
 ---
 
@@ -1040,12 +1116,17 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 - **RPO** — Recovery Point Objective: bounded data the system may lose on hard crash.
 - **Canvas** — the 2D immediate-mode UI subsystem (separate from the 3D scene).
 - **CMO** — VS "Compiled Mesh Object," output of the Mesh Content Pipeline.
+- **NeuronAudio** — client-only audio library (XAudio2 + X3DAudio + WAV reader); not linked by ERHeadless.
+- **XAudio2** — Microsoft low-level audio API (voice graph); v2.9 on Windows 10/UWP.
+- **X3DAudio** — Microsoft 3D-audio helper; computes DSP settings (pan/volume/Doppler) for XAudio2 voices.
+- **Submix / bus** — an XAudio2 voice that groups sources for shared volume/routing (Music/Ambient/SFX/UI).
+- **WAV / RIFF** — uncompressed audio container; EarthRise uses **PCM-16 only**, via a custom reader.
+- **Source / mastering voice** — XAudio2 objects: a playing sound / the final output mix.
 
 ---
 
-*End of DRAFT v0.9 — gameplay design pass: §13 expanded to a full PvP/PvE spec
-(Homeworld × EVE fleet command, role+fitting combat, hybrid progression, player
-crafting economy, tiered security + territorial conquest, dynamic invasions +
-anomalies, onboarding); App. B re-derived for fleets; risks R15–R18 added; M3
-expanded, M7 added. M0, M1a, M1b complete; M2 (Darwinia look) is next on the
-engineering track.*
+*End of DRAFT v0.10 — audio subsystem added: new `NeuronAudio` client lib (XAudio2
+2.9 + X3DAudio, WAV/PCM-16 custom reader, Master→Music/Ambient/SFX/UI buses, 3D from
+day one), folded into §2/§3/§4/§5/§11.3/§12.5/§16.1; M2 now "Darwinia look + audio";
+risk R19 added (14 projects total). v0.9 gameplay spec (§13) unchanged. M0, M1a, M1b
+complete; M2 is next on the engineering track.*
