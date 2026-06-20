@@ -482,6 +482,47 @@ CREATE INDEX IX_Killmail_Killer ON KillmailLog (KillerAccountId, OccurredAt);
 
 
 -- ============================================================
+-- §24  Communications — in-game mail (persistent, player-to-player)
+-- Durable but not zero-loss-critical (not routed through EconomyOutbox).
+-- SenderAccountId NULL ⇒ system mail. Soft-deletes keep audit + a sent view.
+-- (Attachments — credits/items — are a post-launch addition; see §24/§19.)
+-- ============================================================
+CREATE TABLE Mail (
+    MailId             BIGINT       NOT NULL IDENTITY(1,1) PRIMARY KEY,
+    SenderAccountId    BIGINT       NULL REFERENCES Accounts(AccountId),   -- NULL = system
+    RecipientAccountId BIGINT       NOT NULL REFERENCES Accounts(AccountId),
+    Subject            NVARCHAR(128) NOT NULL,
+    Body               NVARCHAR(MAX) NOT NULL,
+    SentAt             DATETIME2    NOT NULL DEFAULT SYSUTCDATETIME(),
+    ReadAt             DATETIME2    NULL,
+    RecipientDeleted   BIT          NOT NULL DEFAULT 0,    -- soft-delete from inbox
+    SenderDeleted      BIT          NOT NULL DEFAULT 0     -- soft-delete from sent view
+);
+-- Inbox view (newest first); filtered unread index for unread counts.
+CREATE INDEX IX_Mail_Inbox  ON Mail (RecipientAccountId, SentAt) WHERE RecipientDeleted = 0;
+CREATE INDEX IX_Mail_Unread ON Mail (RecipientAccountId) WHERE ReadAt IS NULL AND RecipientDeleted = 0;
+CREATE INDEX IX_Mail_Sent   ON Mail (SenderAccountId, SentAt) WHERE SenderDeleted = 0;
+
+-- ============================================================
+-- §24  Notifications — server-generated event alerts (surfaced on login + live)
+-- Type: 0=territory_attacked 1=territory_lost 2=market_filled 3=insurance_paid
+--       4=killmail 5=build_complete 6=mail_received 7=invasion 8=system
+-- Payload carries refs (StructureId/OrderId/KillId/…) for deep-linking in the UI.
+-- ============================================================
+CREATE TABLE Notifications (
+    NotificationId  BIGINT       NOT NULL IDENTITY(1,1) PRIMARY KEY,
+    AccountId       BIGINT       NOT NULL REFERENCES Accounts(AccountId),
+    Type            TINYINT      NOT NULL,
+    Payload         NVARCHAR(MAX) NULL,           -- JSON: { refType, refId, … }
+    CreatedAt       DATETIME2    NOT NULL DEFAULT SYSUTCDATETIME(),
+    ReadAt          DATETIME2    NULL,
+    CONSTRAINT CK_Notifications_Type CHECK (Type BETWEEN 0 AND 8)
+);
+CREATE INDEX IX_Notifications_Account ON Notifications (AccountId, CreatedAt);
+CREATE INDEX IX_Notifications_Unread  ON Notifications (AccountId) WHERE ReadAt IS NULL;
+
+
+-- ============================================================
 -- §15  Economy outbox — transactional write-through
 -- Rows inserted in the SAME transaction as the authoritative economy change.
 -- A persistence thread drains this in order and marks each row processed.
