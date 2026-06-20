@@ -8,10 +8,10 @@
 // Thread-model: all calls from the same game-loop thread; no locking.
 
 #include "session/Session.h"
-#include "net/Connection.h"
-#include "net/ICrypto.h"
-#include "net/ISocket.h"
-#include "net/Protocol.h"
+#include "Connection.h"
+#include "ICrypto.h"
+#include "ISocket.h"
+#include "Protocol.h"
 
 #include <array>
 #include <chrono>

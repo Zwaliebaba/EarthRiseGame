@@ -27,13 +27,13 @@
 #include <string>
 #include <vector>
 
-#include "platform/Debug.h"
-#include "net/CngCrypto.h"
-#include "net/WinsockSocket.h"
-#include "net/Connection.h"
-#include "sim/Command.h"
-#include "sim/Snapshot.h"
-#include "world/WorldPos.h"
+#include "Debug.h"
+#include "CngCrypto.h"
+#include "WinsockSocket.h"
+#include "Connection.h"
+#include "Command.h"
+#include "Snapshot.h"
+#include "WorldPos.h"
 
 namespace
 {

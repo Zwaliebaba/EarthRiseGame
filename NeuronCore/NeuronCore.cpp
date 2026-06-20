@@ -18,38 +18,38 @@
 #include <vector>
 
 // Platform
-#include "platform/Debug.h"
-#include "platform/TimerCore.h"
-#include "platform/Allocators.h"
+#include "Debug.h"
+#include "TimerCore.h"
+#include "Allocators.h"
 
 // ECS
-#include "ecs/Ecs.h"
+#include "Ecs.h"
 
 // World
-#include "world/WorldPos.h"
+#include "WorldPos.h"
 
 // Serialization
-#include "serde/BitStream.h"
-#include "serde/Serde.h"
+#include "BitStream.h"
+#include "Serde.h"
 
 // Networking (platform-independent protocol/reliability/crypto-channel)
-#include "net/Protocol.h"
-#include "net/SequenceMath.h"
-#include "net/ReplayWindow.h"
-#include "net/Reliability.h"
-#include "net/Fragmentation.h"
-#include "net/PacketCodec.h"
-#include "net/ICrypto.h"
-#include "net/ISocket.h"
-#include "net/SecureChannel.h"
-#include "net/HandshakeMessages.h"
-#include "net/Handshake.h"
+#include "Protocol.h"
+#include "SequenceMath.h"
+#include "ReplayWindow.h"
+#include "Reliability.h"
+#include "Fragmentation.h"
+#include "PacketCodec.h"
+#include "ICrypto.h"
+#include "ISocket.h"
+#include "SecureChannel.h"
+#include "HandshakeMessages.h"
+#include "Handshake.h"
 
 // Simulation (shared sim rules + fixed-step time)
-#include "sim/Components.h"
-#include "sim/FixedStepAccumulator.h"
-#include "sim/Movement.h"
-#include "sim/Snapshot.h"
+#include "Components.h"
+#include "FixedStepAccumulator.h"
+#include "Movement.h"
+#include "Snapshot.h"
 
 namespace Neuron
 {

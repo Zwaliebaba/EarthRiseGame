@@ -24,13 +24,13 @@
 #include <vector>
 
 // NeuronCore
-#include "platform/Debug.h"
-#include "sim/FixedStepAccumulator.h"
-#include "sim/ServerWorld.h"
-#include "net/CngCrypto.h"
-#include "net/WinsockSocket.h"
-#include "net/ServerHost.h"
-#include "net/Protocol.h"
+#include "Debug.h"
+#include "FixedStepAccumulator.h"
+#include "ServerWorld.h"
+#include "CngCrypto.h"
+#include "WinsockSocket.h"
+#include "ServerHost.h"
+#include "Protocol.h"
 
 namespace
 {

@@ -10,38 +10,23 @@
     <Filter Include="Project Files">
       <UniqueIdentifier>{84054ee8-59b5-432a-867e-43d3b3e6d624}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ECS">
+      <UniqueIdentifier>{6a26fa2b-e94d-4492-a6ef-f63ffc0b0f89}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="World">
+      <UniqueIdentifier>{003d0ae6-2b38-4fcd-9355-95b5e7696223}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Serde">
+      <UniqueIdentifier>{677b8173-da98-4fb4-aa7f-a462c01fc4e8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Network">
+      <UniqueIdentifier>{66e37ee6-5334-4392-8ad9-943ddd333f9e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Simulation">
+      <UniqueIdentifier>{4b21889f-e52f-4263-bdcd-7272c1cfb153}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="platform\Debug.h">
-      <Filter>Platform</Filter>
-    </ClInclude>
-    <ClInclude Include="platform\TimerCore.h">
-      <Filter>Platform</Filter>
-    </ClInclude>
-    <ClInclude Include="ecs\Ecs.h" />
-    <ClInclude Include="net\Protocol.h" />
-    <ClInclude Include="net\SequenceMath.h" />
-    <ClInclude Include="net\ReplayWindow.h" />
-    <ClInclude Include="net\Reliability.h" />
-    <ClInclude Include="net\Fragmentation.h" />
-    <ClInclude Include="net\PacketCodec.h" />
-    <ClInclude Include="net\ICrypto.h" />
-    <ClInclude Include="net\ISocket.h" />
-    <ClInclude Include="net\SecureChannel.h" />
-    <ClInclude Include="net\HandshakeMessages.h" />
-    <ClInclude Include="net\Handshake.h" />
-    <ClInclude Include="net\FakeCrypto.h" />
-    <ClInclude Include="net\CngCrypto.h" />
-    <ClInclude Include="net\WinsockSocket.h" />
-    <ClInclude Include="net\LoopbackNetwork.h" />
-    <ClInclude Include="platform\Allocators.h" />
-    <ClInclude Include="serde\BitStream.h" />
-    <ClInclude Include="serde\Serde.h" />
-    <ClInclude Include="sim\Components.h" />
-    <ClInclude Include="sim\FixedStepAccumulator.h" />
-    <ClInclude Include="sim\Movement.h" />
-    <ClInclude Include="sim\Snapshot.h" />
-    <ClInclude Include="world\WorldPos.h" />
     <ClInclude Include="NeuronCore.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="GameMath.h">
@@ -50,13 +35,109 @@
     <ClInclude Include="MathCommon.h">
       <Filter>GameMath</Filter>
     </ClInclude>
+    <ClInclude Include="Allocators.h">
+      <Filter>Platform</Filter>
+    </ClInclude>
+    <ClInclude Include="Debug.h">
+      <Filter>Platform</Filter>
+    </ClInclude>
+    <ClInclude Include="TimerCore.h">
+      <Filter>Platform</Filter>
+    </ClInclude>
+    <ClInclude Include="Ecs.h">
+      <Filter>ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="WorldPos.h">
+      <Filter>World</Filter>
+    </ClInclude>
+    <ClInclude Include="BitStream.h">
+      <Filter>Serde</Filter>
+    </ClInclude>
+    <ClInclude Include="Serde.h">
+      <Filter>Serde</Filter>
+    </ClInclude>
+    <ClInclude Include="Command.h">
+      <Filter>Simulation</Filter>
+    </ClInclude>
+    <ClInclude Include="Components.h">
+      <Filter>Simulation</Filter>
+    </ClInclude>
+    <ClInclude Include="FixedStepAccumulator.h">
+      <Filter>Simulation</Filter>
+    </ClInclude>
+    <ClInclude Include="Movement.h">
+      <Filter>Simulation</Filter>
+    </ClInclude>
+    <ClInclude Include="ServerWorld.h">
+      <Filter>Simulation</Filter>
+    </ClInclude>
+    <ClInclude Include="Snapshot.h">
+      <Filter>Simulation</Filter>
+    </ClInclude>
+    <ClInclude Include="CngCrypto.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="Connection.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="FakeCrypto.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="Fragmentation.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="Handshake.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="HandshakeMessages.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="ICrypto.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="ISocket.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="LoopbackNetwork.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="PacketCodec.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="Protocol.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="Reliability.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="ReplayWindow.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="SecureChannel.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="SequenceMath.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="ServerHost.h">
+      <Filter>Network</Filter>
+    </ClInclude>
+    <ClInclude Include="WinsockSocket.h">
+      <Filter>Network</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="NeuronCore.cpp" />
-    <ClCompile Include="net\CngCrypto.cpp" />
-    <ClCompile Include="net\WinsockSocket.cpp" />
-    <ClCompile Include="sim\SimComponents.cpp" />
     <ClCompile Include="pch.cpp" />
+    <ClCompile Include="SimComponents.cpp">
+      <Filter>Simulation</Filter>
+    </ClCompile>
+    <ClCompile Include="CngCrypto.cpp">
+      <Filter>Network</Filter>
+    </ClCompile>
+    <ClCompile Include="WinsockSocket.cpp">
+      <Filter>Network</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config">

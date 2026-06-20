@@ -24,10 +24,10 @@
 #include "interp/Interpolator.h"
 
 // NeuronCore platform impls (compiled into NeuronClient.lib / accessible via link)
-#include "net/CngCrypto.h"
-#include "net/WinsockSocket.h"
-#include "net/Protocol.h"
-#include "sim/Snapshot.h"
+#include "CngCrypto.h"
+#include "WinsockSocket.h"
+#include "Protocol.h"
+#include "Snapshot.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
