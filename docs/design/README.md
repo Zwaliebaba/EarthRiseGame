@@ -12,6 +12,7 @@ balance/design drafts**, tuned against ERHeadless bot fights — not final value
 | [`touch-controls.md`](touch-controls.md) | **Touch control scheme** (EVE-Echoes-style overview-driven model) — gesture table, on-screen bars, smart-action resolution | §23, §22.3 |
 | [`ui-hud-layout.md`](ui-hud-layout.md) | **HUD layout & screen flow** — in-space HUD wireframe (anchor zones), screen-flow map, per-screen layout notes | §22, §23 |
 | [`neuronrender-architecture.md`](neuronrender-architecture.md) | **NeuronRender DX12 architecture** — device/frame model, descriptor & binding model, resources/PSO, HDR forward pass graph, particles, Canvas, class layout | §11, §12.4 |
+| [`darwinia-menu-ui.md`](darwinia-menu-ui.md) | **Darwinia windowed menu/options UI** — reusable Canvas window toolkit (Window/Button/DropDown/Label), InterfaceGrey/InterfaceRed skin model, EditorFont atlas metrics, per-window layout, input + string-table wiring, M2 work breakdown | §11, §22.6, §22.4 |
 
 These docs are mutually consistent: damage types (K/T/E), ship roles, hull tiers,
 tiered-security scarcity, and the 6–12 fleet cap match across docs and the masterplan.

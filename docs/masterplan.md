@@ -1,6 +1,6 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.13 — for review
+> **Status:** DRAFT v0.14 — for review
 > **Date:** 2026-06-20
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
@@ -14,7 +14,22 @@
 
 ## Changelog
 
-**v0.13 (this revision) — repository-structure cleanup**
+**v0.14 (this revision) — Darwinia windowed menu/options UI**
+- **New design + implementation doc
+  [`docs/design/darwinia-menu-ui.md`](docs/design/darwinia-menu-ui.md):** a **reusable
+  immediate-mode window toolkit** on the CanvasRenderer (§11) that reproduces the
+  reference options UI (Main Menu; Screen/Graphics/Other Options; settings) **1:1** —
+  styled with the supplied **`InterfaceGrey.dds`/`InterfaceRed.dds`** vertical-gradient
+  skins + the **`EditorFont`** bitmap atlas. Four widget kinds (**Window / Button /
+  DropDown / Label**), draggable/closable windows, hover/press/open interactivity;
+  captions via the **§22.4 string table** (EarthRise-themed, no hard-coded text).
+- Documents **verified asset metrics** — interface DDS are uncompressed 32-bit BGRA
+  (`B8G8R8A8_UNORM`) vertical "sheen" gradients; `EditorFont` is a **16×16-px grid,
+  16 cols × 14 rows, first codepoint 32** (cp 32–255).
+- Adds **§22.6**; **folded into M2** (Canvas widgets + settings screen — plan areas F/G);
+  references §11 (Canvas). No decision changes; presentation only.
+
+**v0.13 — repository-structure cleanup**
 - **Source tree flattened:** project sources/headers are now **flat files** with logical
   grouping via **Visual Studio Filters** — no on-disk code subdirectories (was `net/`,
   `session/`, `replica/`, `interp/`, `control/`, `gfx/`, `scene/`, `canvas/`, `netio/`).
@@ -541,7 +556,10 @@ Separate subsystems 🔒 (own modules/PSOs/command lists; composited last).
   **instanced** ships) → bright-pass + Gaussian **bloom** (additive) → additive
   **particles** → tone-map (+ optional scanline/vignette/grain).
 - **CanvasRenderer (2D UI):** immediate-mode orthographic pass — batched quads /
-  monospace bitmap text / lines / rects; HUD & menus build on it, fully decoupled.
+  monospace bitmap text / lines / rects; HUD & menus build on it, fully decoupled. The
+  **windowed menu/options UI** (Darwinia chrome: `InterfaceGrey`/`InterfaceRed` skins +
+  `EditorFont` atlas) is specified in
+  [`docs/design/darwinia-menu-ui.md`](docs/design/darwinia-menu-ui.md) (§22.6).
 
 Shaders are precompiled into embedded SM6/DXIL byte-array headers (no runtime HLSL on
 UWP); see §12.4.
@@ -1328,6 +1346,22 @@ display strings**. The monospace bitmap-font pipeline (§12.2) stays **Unicode-c
   satisfied by §22.3) and on-screen **visual alerts** mirroring critical audio cues;
   tracked in §19.
 
+### 22.6 Windowed menu / options UI 🔒 (Darwinia chrome) — `docs/design/darwinia-menu-ui.md`
+The front-end and in-game **option windows** (Main Menu; Screen/Graphics/Sound/Control/
+Other Options; the settings screen of §22.1/§25) use a **reusable immediate-mode window
+toolkit** built on the CanvasRenderer (§11), styled with the supplied
+**`InterfaceGrey.dds`** (title bars/borders) and **`InterfaceRed.dds`** (buttons/bodies)
+vertical-gradient "sheen" skins plus the **`EditorFont`** bitmap atlas (§12.2). Four
+widget kinds — **Window** (draggable title bar + close box), **Button**, **DropDown**
+(with expansion popup), **Label** — reproduce the full options canvas. Windows are
+**draggable/closable**, buttons **hover/press**, dropdowns **open/select**; all captions
+flow through the **§22.4 string table** (EarthRise-themed, **no hard-coded text**). The
+widget toolkit + Canvas texture/font foundation live in **NeuronRender** (testable via
+`NeuronRenderTest`, §16.1); the screen definitions + pointer input live in the **EarthRise**
+client. **Folded into M2** (Canvas widgets + settings screen). Full asset metrics, the
+skin/UV-sampling model, per-window layout, input wiring, and the test/visual-acceptance
+plan are in **[`docs/design/darwinia-menu-ui.md`](docs/design/darwinia-menu-ui.md)**.
+
 ---
 
 ## 23. Input & Controls 🔒 (overview-driven; mouse+keyboard + touch)
@@ -1511,9 +1545,13 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 
 ---
 
-*End of DRAFT v0.12 — overview-driven control model (§23, EVE-Echoes-style; shared by
-desktop & touch; box-select demoted; touch ambiguity designed out; R20 Med→Low; spec in
-`docs/design/touch-controls.md`). Earlier: v0.11 completeness pass (DX12 §11.1, camera/
-VFX §11.2, navigation §13.12, UI/HUD/radar §22, input §23, comms §24, platform services
-§25, game-data §12.6, live-ops §26), v0.10 audio (NeuronAudio), v0.9 gameplay (§13).
-M0, M1a, M1b complete; M2 is next on the engineering track.*
+*End of DRAFT v0.14 — Darwinia windowed menu/options UI (§22.6; reusable Canvas window
+toolkit using InterfaceGrey/InterfaceRed skins + EditorFont; folded into M2; spec in
+`docs/design/darwinia-menu-ui.md`). Earlier: v0.13 repository-structure cleanup (flat
+source tree + VS Filters, NeuronCore.vcxitems, EarthRise.slnx, Config/; §4/§5/§16), v0.12
+overview-driven control model (§23,
+EVE-Echoes-style; shared by desktop & touch; box-select demoted; touch ambiguity designed
+out; R20 Med→Low; spec in `docs/design/touch-controls.md`), v0.11 completeness pass (DX12
+§11.1, camera/VFX §11.2, navigation §13.12, UI/HUD/radar §22, input §23, comms §24,
+platform services §25, game-data §12.6, live-ops §26), v0.10 audio (NeuronAudio), v0.9
+gameplay (§13). M0, M1a, M1b complete; M2 is next on the engineering track.*
