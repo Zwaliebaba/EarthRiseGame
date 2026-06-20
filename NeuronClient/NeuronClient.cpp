@@ -6,16 +6,17 @@
 //   interp/  — InterpBuffer: snap-on-ack interpolation (§10.1)
 //   control/ — IClientController / NullController
 
+#include "pch.h"
 #include <cstdint>
 #include <memory>
 
 // Core session + replica modules
-#include "session/Session.h"
-#include "session/SessionImpl.h"
-#include "replica/Replica.h"
-#include "replica/ReplicaManager.h"
-#include "interp/Interpolator.h"
-#include "control/IClientController.h"
+#include "Session.h"
+#include "SessionImpl.h"
+#include "Replica.h"
+#include "ReplicaManager.h"
+#include "Interpolator.h"
+#include "IClientController.h"
 
 namespace Neuron::Client
 {

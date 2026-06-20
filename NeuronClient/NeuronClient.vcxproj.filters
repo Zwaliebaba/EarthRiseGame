@@ -6,14 +6,35 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
-    <ClInclude Include="session\Session.h" />
-    <ClInclude Include="replica\Replica.h" />
-    <ClInclude Include="interp\Interpolator.h" />
-    <ClInclude Include="control\IClientController.h" />
+    <ClInclude Include="Session.h">
+      <Filter>Session</Filter>
+    </ClInclude>
+    <ClInclude Include="SessionImpl.h">
+      <Filter>Session</Filter>
+    </ClInclude>
+    <ClInclude Include="Replica.h">
+      <Filter>Replica</Filter>
+    </ClInclude>
+    <ClInclude Include="ReplicaManager.h">
+      <Filter>Replica</Filter>
+    </ClInclude>
+    <ClInclude Include="Interpolator.h" />
+    <ClInclude Include="IClientController.h">
+      <Filter>Control</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Project Files">
       <UniqueIdentifier>{cfd9a028-acea-4ce6-9563-ab2124344219}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Replica">
+      <UniqueIdentifier>{66f971d6-fc07-4b0f-a8aa-aed5947fe0c8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Control">
+      <UniqueIdentifier>{9045b0b3-84e1-4c37-94d2-51a13bbbdea5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Session">
+      <UniqueIdentifier>{61826609-3395-4894-9853-bc09141a50d2}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>

@@ -1,44 +1,16 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <ClCompile Include="CanvasRenderer.cpp" />
+    <ClCompile Include="DeviceResources.cpp" />
     <ClCompile Include="NeuronRender.cpp" />
-    <ClCompile Include="gfx\DeviceResources.cpp" />
-    <ClCompile Include="scene\SceneRenderer.cpp" />
-    <ClCompile Include="canvas\CanvasRenderer.cpp" />
     <ClCompile Include="pch.cpp" />
+    <ClCompile Include="SceneRenderer.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="gfx\DeviceResources.h" />
-    <ClInclude Include="scene\SceneRenderer.h" />
-    <ClInclude Include="canvas\CanvasRenderer.h" />
+    <ClInclude Include="CanvasRenderer.h" />
+    <ClInclude Include="DeviceResources.h" />
     <ClInclude Include="pch.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Filter Include="Shaders">
-      <UniqueIdentifier>{bd80d081-c658-4042-bdcb-dba1753cbec8}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Project Files">
-      <UniqueIdentifier>{70d1a7e0-5a1a-4f90-a1d3-19d7777a6ae4}</UniqueIdentifier>
-    </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="..\packages.config">
-      <Filter>Project Files</Filter>
-    </None>
-    <None Include="packages.config" />
-  </ItemGroup>
-  <ItemGroup>
-    <FxCompile Include="shaders\CanvasPS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="shaders\CanvasVS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="shaders\ScenePS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
-    <FxCompile Include="shaders\SceneVS.hlsl">
-      <Filter>Shaders</Filter>
-    </FxCompile>
+    <ClInclude Include="SceneRenderer.h" />
   </ItemGroup>
 </Project>

@@ -2,11 +2,6 @@
   <Configurations>
     <Platform Name="x64" />
   </Configurations>
-
-  <!-- Core libraries -->
-  <Project Path="NeuronCore/NeuronCore.vcxproj" Id="7f3a9c42-5d18-4b0e-9e21-3c9a1f2d4b67" />
-  <Project Path="NeuronClient/NeuronClient.vcxproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
-  <Project Path="NeuronRender/NeuronRender.vcxproj" Id="E5F6A7B8-C9D0-1234-EF01-23456789ABCD" />
   <Folder Name="/Testing/">
     <Project Path="Testing/ERHeadlessTest/ERHeadlessTest.vcxproj" />
     <Project Path="Testing/ERServerTest/ERServerTest.vcxproj" />
@@ -14,13 +9,12 @@
     <Project Path="Testing/NeuronCoreTest/NeuronCoreTest.vcxproj" />
     <Project Path="Testing/NeuronRenderTest/NeuronRenderTest.vcxproj" />
   </Folder>
-
-  <!-- UWP client application -->
   <Project Path="EarthRise/EarthRise.vcxproj" Id="4aeb4d7e-319a-41a2-996b-ef51b7744761">
     <Deploy />
   </Project>
-
-  <!-- Server and headless host -->
-  <Project Path="ERServer/ERServer.vcxproj" Id="b2c3d4e5-f6a7-8901-bcde-f23456789012" />
   <Project Path="ERHeadless/ERHeadless.vcxproj" Id="c3d4e5f6-a7b8-9012-cdef-345678901234" />
+  <Project Path="ERServer/ERServer.vcxproj" Id="b2c3d4e5-f6a7-8901-bcde-f23456789012" />
+  <Project Path="NeuronClient/NeuronClient.vcxproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
+  <Project Path="NeuronCore/NeuronCore.vcxitems" Id="81299923-54c4-459f-ba1f-fb97b3ca52f6" />
+  <Project Path="NeuronRender/NeuronRender.vcxproj" Id="8900f2e6-c6db-4890-a05e-72d47f7ed60d" />
 </Solution>

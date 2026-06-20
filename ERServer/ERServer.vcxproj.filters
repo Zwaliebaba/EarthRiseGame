@@ -1,0 +1,29 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="ERServer.cpp" />
+    <ClCompile Include="pch.cpp" />
+    <ClCompile Include="IocpUdpListener.cpp">
+      <Filter>NetIO</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="IocpUdpListener.h">
+      <Filter>NetIO</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Project Files">
+      <UniqueIdentifier>{fa109b38-0f03-49bd-98ca-1314497250fe}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="NetIO">
+      <UniqueIdentifier>{9783ed58-8528-4df9-b1bb-61b6b797a630}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config">
+      <Filter>Project Files</Filter>
+    </None>
+  </ItemGroup>
+</Project>

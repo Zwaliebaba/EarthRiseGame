@@ -1,0 +1,58 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <MSBuildAllProjects Condition="'$(MSBuildVersion)' == '' Or '$(MSBuildVersion)' &lt; '16.0'">$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <ItemsProjectGuid>{81299923-54c4-459f-ba1f-fb97b3ca52f6}</ItemsProjectGuid>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(MSBuildThisFileDirectory)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ProjectCapability Include="SourceItemsFromImports" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(MSBuildThisFileDirectory)CngCrypto.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)NeuronCore.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)SimComponents.cpp" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)WinsockSocket.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(MSBuildThisFileDirectory)Allocators.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)BitStream.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)CngCrypto.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Command.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Components.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Connection.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Debug.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Ecs.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)FakeCrypto.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)FixedStepAccumulator.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Fragmentation.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)GameMath.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Handshake.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)HandshakeMessages.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ICrypto.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ISocket.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)LoopbackNetwork.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)MathCommon.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Movement.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)NeuronCore.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)PacketCodec.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)pch.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Protocol.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Reliability.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ReplayWindow.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)SecureChannel.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)SequenceMath.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Serde.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ServerHost.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ServerWorld.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Snapshot.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)TimerCore.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)WinsockSocket.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)WorldPos.h" />
+  </ItemGroup>
+</Project>

@@ -12,10 +12,7 @@
 // Pinning: bots load the server's static public key from 'er_server_pub.bin'
 // (written by ERServer on startup) — overridable via ER_SERVER_PUB.
 
-#ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
+#include "pch.h"
 #include <array>
 #include <cstdint>
 #include <cstdio>
