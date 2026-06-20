@@ -130,6 +130,36 @@ public:
         return dg;
     }
 
+    // Best-effort graceful disconnect (encrypted Disconnect). Requires keys; the
+    // owner sends this on shutdown so the server frees the slot immediately
+    // rather than waiting for the inactivity timeout.
+    std::optional<std::vector<uint8_t>> BuildDisconnect()
+    {
+        if (!m_channel) return std::nullopt;
+        const uint8_t reason = static_cast<uint8_t>(DisconnectReason::Normal);
+        std::vector<uint8_t> payload;
+        WriteMessage(payload, Channel::ReliableOrdered, MsgType::Disconnect,
+                     std::span<const uint8_t>(&reason, 1));
+        std::vector<uint8_t> dg;
+        if (!SealEncrypted(payload, dg)) return std::nullopt;
+        return dg;
+    }
+
+    // Periodic liveness ping so the server can tell an idle-but-alive client from
+    // a gone one (the server reaps connections with no recent traffic).
+    std::optional<std::vector<uint8_t>> BuildKeepalive()
+    {
+        if (!IsConnected() || !m_channel) return std::nullopt;
+        std::vector<uint8_t> payload;
+        // Unreliable: a dropped ping just misses one refresh (sent every 1 s, 8 s
+        // timeout), and avoids reliability-window bookkeeping for sustained pings.
+        WriteMessage(payload, Channel::Unreliable, MsgType::Keepalive,
+                     std::span<const uint8_t>{});
+        std::vector<uint8_t> dg;
+        if (!SealEncrypted(payload, dg)) return std::nullopt;
+        return dg;
+    }
+
     [[nodiscard]] bool HandshakePending() const noexcept
     {
         return m_state == ConnState::Handshaking || m_state == ConnState::Authenticating;
@@ -307,6 +337,13 @@ private:
                           std::vector<AppMessage>& appOut,
                           std::vector<std::vector<uint8_t>>& sendOut)
     {
+        if (m.type == MsgType::Disconnect) {
+            m_state = ConnState::Disconnected; // host reaps the slot + despawns the base
+            return;
+        }
+        if (m.type == MsgType::Keepalive) {
+            return; // liveness only; the host stamps activity on every datagram
+        }
         if (m.type == MsgType::LoginRequest) {
             LoginRequestBody req;
             (void)LoginRequestBody::Decode(m.body, req); // dev mode: accept any name (§14 stub)

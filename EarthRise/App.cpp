@@ -13,10 +13,21 @@
 
 #include "pch.h"
 
+#include <chrono>
+#include <cstdio>
+#include <fstream>
+#include <string>
+#include <vector>
+
+#include <winrt/Windows.ApplicationModel.h> // Package (install location)
+#include <winrt/Windows.Graphics.Display.h> // DisplayInformation (DPI scale)
+#include <winrt/Windows.Storage.h>          // StorageFolder::Path
+
 // NeuronRender
 #include "DeviceResources.h"
 #include "SceneRenderer.h"
 #include "CanvasRenderer.h"
+#include "CmoLoader.h"
 
 // NeuronClient
 #include "SessionImpl.h"
@@ -34,6 +45,32 @@
 // ─────────────────────────────────────────────────────────────────────────────
 static constexpr uint16_t kServerPort = 7777;
 static constexpr float kInterpAlpha = 0.0f; // M1b: snap-on-ack (alpha unused)
+
+// Read a file packaged with the app (relative to the install location) into a
+// byte buffer. Read-only access to the package folder is permitted on UWP.
+// Returns empty on any failure (callers fail-safe).
+static std::vector<std::byte> LoadPackagedAsset(const wchar_t* relativePath)
+{
+  try
+  {
+    const auto folder = Windows::ApplicationModel::Package::Current().InstalledLocation().Path();
+    const std::wstring full = std::wstring(folder.c_str()) + L"\\" + relativePath;
+    std::ifstream f(full.c_str(), std::ios::binary | std::ios::ate);
+    if (!f)
+      return {};
+    const std::streamsize n = f.tellg();
+    if (n <= 0)
+      return {};
+    std::vector<std::byte> buf(static_cast<size_t>(n));
+    f.seekg(0);
+    f.read(reinterpret_cast<char*>(buf.data()), n);
+    return buf;
+  }
+  catch (...)
+  {
+    return {};
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // App
@@ -57,6 +94,13 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   std::array<uint8_t, 4096> m_snapBuf{};
   bool m_running{true};
 
+  // ---- window / dpi / timing ----
+  Windows::UI::Core::CoreWindow m_window{nullptr};
+  float m_dpiScale{1.0f};
+  std::chrono::steady_clock::time_point m_connectStart{};
+  bool m_connectedLogged{false};
+  float m_meshRadius{0.0f}; // loaded CMO bounding radius (0 = cube fallback)
+
   // ── IFrameworkViewSource ─────────────────────────────────────────────────
   Windows::ApplicationModel::Core::IFrameworkView CreateView() { return *this; }
 
@@ -74,19 +118,73 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
   void SetWindow(const Windows::UI::Core::CoreWindow& window)
   {
-    auto bounds = window.Bounds();
-    const UINT w = static_cast<UINT>(bounds.Width);
-    const UINT h = static_cast<UINT>(bounds.Height);
+    m_window = window;
 
+    // CoreWindow::Bounds() is in logical DIPs; the swap chain needs PHYSICAL
+    // pixels. On a scaled display (e.g. 125%) using DIPs makes the back buffer
+    // smaller than the window → the rendered region sits in the top-left with
+    // black margins. Convert via the display DPI scale.
+    auto disp = Windows::Graphics::Display::DisplayInformation::GetForCurrentView();
+    m_dpiScale = disp.LogicalDpi() / 96.0f;
+
+    const auto bounds = window.Bounds();
+    const UINT w = PhysPx(bounds.Width);
+    const UINT h = PhysPx(bounds.Height);
+
+    const auto initStart = std::chrono::steady_clock::now();
     check_bool(m_dr.Initialize(winrt::get_unknown(window), w, h));
     check_bool(m_scene.Initialize(&m_dr));
     check_bool(m_canvas.Initialize(&m_dr));
+    {
+      const long long initMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - initStart)
+                                   .count();
+      char buf[112];
+      std::snprintf(buf, sizeof(buf), "[EarthRise] DX init %lld ms (backbuffer %ux%u, dpi %.2f)\n",
+                    initMs, w, h, m_dpiScale);
+      OutputDebugStringA(buf);
+    }
+
+    // Load the real CMO mesh (fail-safe: SceneRenderer keeps the cube if the
+    // asset is missing or unparseable).
+    if (auto cmo = LoadPackagedAsset(L"Assets\\Shapes\\Jumpgates\\Jumpgate.cmo"); !cmo.empty())
+    {
+      auto mesh = Neuron::Render::CmoLoader::Load(m_dr.Device(), cmo);
+      char buf[128];
+      std::snprintf(buf, sizeof(buf),
+                    "[EarthRise] CMO load: %zu bytes, valid=%d verts=%u idx=%u radius=%.1f\n",
+                    cmo.size(), static_cast<int>(mesh.valid()), mesh.vertexCount, mesh.indexCount,
+                    mesh.boundingRadius);
+      OutputDebugStringA(buf);
+      if (mesh.valid())
+        m_meshRadius = mesh.boundingRadius;
+      m_scene.SetMesh(std::move(mesh));
+    }
+    else
+    {
+      OutputDebugStringA("[EarthRise] CMO load: asset not found (using placeholder cube)\n");
+    }
 
     // Start connecting to ERServer.
+    m_connectStart = std::chrono::steady_clock::now();
     m_session->Connect("127.0.0.1", kServerPort);
 
+    // Keep the back buffer matched to the window across resize / maximize.
+    window.SizeChanged([this](Windows::UI::Core::CoreWindow const&,
+                              Windows::UI::Core::WindowSizeChangedEventArgs const&) { ApplyResize(); });
     window.KeyDown({this, &App::OnKeyDown});
     window.Closed({this, &App::OnClosed});
+  }
+
+  // Logical DIP -> physical pixels for the swap chain.
+  UINT PhysPx(float dip) const noexcept { return static_cast<UINT>(dip * m_dpiScale + 0.5f); }
+
+  void ApplyResize()
+  {
+    if (!m_window)
+      return;
+    const auto b = m_window.Bounds();
+    m_dr.Resize(PhysPx(b.Width), PhysPx(b.Height));
   }
 
   void Load(const hstring&) {}
@@ -95,6 +193,21 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   {
     auto window = Windows::UI::Core::CoreWindow::GetForCurrentThread();
     window.Activate();
+
+    // Pump the handshake to completion up front so connect isn't paced one
+    // round-trip per vsynced frame. Each Tick() sends the next step; the brief
+    // sleep lets the server reply over loopback. Bounded (~400 ms) so a missing
+    // server just falls through to the normal retrying render loop.
+    for (int i = 0; i < 200 && m_running &&
+                    m_session->GetState() != Neuron::Client::SessionState::Connected;
+         ++i)
+    {
+      window.Dispatcher().ProcessEvents(Windows::UI::Core::CoreProcessEventsOption::ProcessAllIfPresent);
+      m_session->Tick();
+      if (m_session->GetState() == Neuron::Client::SessionState::Connected)
+        break;
+      Sleep(2);
+    }
 
     while (m_running)
     {
@@ -107,6 +220,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   void Uninitialize()
   {
     m_canvas.Uninitialize();
+    if (m_session)
+      m_session->Disconnect(); // best-effort graceful notice while the socket is alive
     m_session.reset();
     m_socket.reset();
     Neuron::Net::WinsockSocket::GlobalCleanup();
@@ -117,6 +232,18 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   {
     // 1. Network I/O.
     m_session->Tick();
+
+    // One-shot: how long from Connect() to fully connected (handshake cost).
+    if (!m_connectedLogged && m_session->GetState() == Neuron::Client::SessionState::Connected)
+    {
+      m_connectedLogged = true;
+      const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - m_connectStart)
+                               .count();
+      char buf[80];
+      std::snprintf(buf, sizeof(buf), "[EarthRise] connected in %lld ms\n", ms);
+      OutputDebugStringA(buf);
+    }
 
     // 2. Consume any new snapshots.
     size_t snapSize = 0;
@@ -132,19 +259,41 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     // Build per-frame view-proj: simple fixed look-at for M1b.
     using namespace DirectX;
-    const XMVECTOR eye = XMVectorSet(0.f, 50.f, -120.f, 0.f);
-    const XMVECTOR at = XMVectorSet(0.f, 0.f, 0.f, 0.f);
+    // Center the camera on the player's own base — it drifts, so a fixed look-at
+    // at the world origin lets it slide off screen. Fall back to first entity.
+    float cx = 0.f, cy = 0.f, cz = 0.f;
+    {
+      const Neuron::Client::ReplicaSet& cam = m_interp.curr;
+      const uint32_t pid = m_session->PlayerNetId();
+      for (uint32_t i = 0; i < cam.count; ++i)
+      {
+        const auto& ce = cam.entities[i];
+        if (ce.valid && (ce.networkId == pid || pid == 0))
+        {
+          cx = ce.x;
+          cy = ce.y;
+          cz = ce.z;
+          break;
+        }
+      }
+    }
+    const XMVECTOR eye = XMVectorSet(cx, cy + 50.f, cz - 120.f, 0.f);
+    const XMVECTOR at = XMVectorSet(cx, cy, cz, 0.f);
     const XMVECTOR up = XMVectorSet(0.f, 1.f, 0.f, 0.f);
     constexpr float fov = XM_PIDIV4;
     const float asp = (h > 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.f;
 
     XMMATRIX view = XMMatrixLookAtRH(eye, at, up);
     XMMATRIX proj = XMMatrixPerspectiveFovRH(fov, asp, 0.1f, 10000.f);
-    // Transpose so columns match HLSL column-major layout expected by root constants.
-    XMMATRIX viewProjT = XMMatrixTranspose(view * proj);
+    // SceneVS reads viewProj from a (HLSL-default) COLUMN-MAJOR cbuffer and
+    // applies it as mul(viewProj, worldPos) (column-vector). Storing view*proj
+    // row-major lets the column-major load reinterpret it as the transpose that
+    // multiply needs — so we must NOT pre-transpose here. (Transposing in C++ as
+    // well cancels out and corrupts the transform — the old "thin box" bug.)
+    XMMATRIX viewProj = view * proj;
 
     float vpf[16];
-    XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(vpf), viewProjT);
+    XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(vpf), viewProj);
 
     // Gather scene entities from the interp buffer.
     const Neuron::Client::ReplicaSet& rs = m_interp.curr;
@@ -162,9 +311,15 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       se.y = re.y;
       se.z = re.z;
       se.yaw = 0.f;
-      se.scale = (re.entityType == 0) ? 4.f : 1.f; // base = larger
+      // entityType carries EntityKind (Components.h): Base = 1, Ship = 2.
+      const bool isBase = (re.entityType == 1);
+      // With a CMO mesh loaded, normalize by its bounding radius so the on-screen
+      // size is sensible regardless of the model's native units (Jumpgate r~333);
+      // otherwise use the unit-cube half-extents.
+      const float targetMetres = isBase ? 40.f : 15.f;
+      se.scale = (m_meshRadius > 0.f) ? (targetMetres / m_meshRadius) : (isBase ? 10.f : 3.f);
       // Darwinia palette: base = neon blue, ship = neon orange.
-      if (re.entityType == 0)
+      if (isBase)
       {
         se.r = 0.2f;
         se.g = 0.6f;
@@ -177,6 +332,23 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         se.b = 0.1f;
       }
       se.kind = re.entityType;
+    }
+
+    // Once-per-second diagnostic (VS Output / DebugView; the on-screen HUD font
+    // is still placeholder blocks). Shows where the player's base actually is.
+    {
+      static auto lastDbg = std::chrono::steady_clock::now();
+      const auto nowDbg = std::chrono::steady_clock::now();
+      if (nowDbg - lastDbg >= std::chrono::seconds(1))
+      {
+        char buf[192];
+        std::snprintf(buf, sizeof(buf),
+                      "[EarthRise] state=%d entities=%u playerNet=%u cameraCenter=(%.1f,%.1f,%.1f)\n",
+                      static_cast<int>(m_session->GetState()), entCount, m_session->PlayerNetId(),
+                      cx, cy, cz);
+        OutputDebugStringA(buf);
+        lastDbg = nowDbg;
+      }
     }
 
     m_dr.BeginFrame();
@@ -208,7 +380,14 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_running = false;
   }
 
-  void OnClosed(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::CoreWindowEventArgs&) { m_running = false; }
+  void OnClosed(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::CoreWindowEventArgs&)
+  {
+    // Tell the server we're leaving before the loop unwinds (UWP may not call
+    // Uninitialize on a window close). The 8 s server idle timeout is the backstop.
+    if (m_session)
+      m_session->Disconnect();
+    m_running = false;
+  }
 };
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) { Windows::ApplicationModel::Core::CoreApplication::Run(winrt::make<App>()); }

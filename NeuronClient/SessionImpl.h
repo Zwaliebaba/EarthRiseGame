@@ -56,6 +56,12 @@ public:
 
     void Disconnect() override
     {
+        // Best-effort graceful notice so the server frees the slot immediately
+        // instead of waiting for the inactivity timeout.
+        if (m_conn) {
+            if (auto dg = m_conn->BuildDisconnect())
+                m_socket->SendTo(m_serverEp, *dg);
+        }
         m_conn.reset();
         m_state = SessionState::Disconnected;
         while (!m_snapQueue.empty()) m_snapQueue.pop();
@@ -84,6 +90,14 @@ public:
         // Update local state / retransmit as needed.
         if (m_conn->IsConnected()) {
             m_state = SessionState::Connected;
+            // Periodic keepalive so the server can distinguish idle-but-alive
+            // from gone (it reaps connections with no recent traffic).
+            const auto now = std::chrono::steady_clock::now();
+            if (now - m_lastKeepalive >= std::chrono::seconds(1)) {
+                if (auto dg = m_conn->BuildKeepalive())
+                    m_socket->SendTo(m_serverEp, *dg);
+                m_lastKeepalive = now;
+            }
         } else if (m_state != SessionState::Disconnected) {
             std::vector<std::vector<uint8_t>> rs;
             m_conn->ResendPending(rs);
@@ -129,6 +143,7 @@ private:
     SessionState                                   m_state{ SessionState::Disconnected };
     std::queue<std::vector<uint8_t>>               m_snapQueue;
     std::array<uint8_t, 2048>                      m_recvBuf{};
+    std::chrono::steady_clock::time_point          m_lastKeepalive{};
 };
 
 } // namespace Neuron::Client

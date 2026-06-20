@@ -372,7 +372,7 @@ below are those logical groupings, not directories.
     ├── db/                 SQL schema + ordered, forward-only migrations
     └── deploy/             ERServer Dockerfile (Server Core) · docker-compose.dev.yml
 ```
-**Planned (not yet in the tree):** `NeuronAudio/` (XAudio2/X3DAudio client lib + `NeuronAudioTest` — M2, §11.3) and `NeuronTools/` (datacook/datacheck + asset cookers — §12.6). Both follow the same flat-files + VS Filters convention when added.
+**In progress (M2):** `NeuronAudio/` (XAudio2/X3DAudio client lib + `NeuronAudioTest`, §11.3) is scaffolded — voice graph / mixer / spatializer / WAV reader landed; buffer-queue streaming, cue catalog and the Windows device smoke test still pending. The platform-independent asset parsers live in their **owning** libraries (`WavParse.h` in `NeuronAudio/`; `DdsParse.h`/`CmoParse.h`/`FontAtlasLayout.h` in `NeuronRender/`), kept dependency-free. `NeuronTools/` currently holds only a Linux `testrunner` that includes those parser headers — **a leaf with no dependents**, intended to be removed once asset checking runs natively on Windows; the `datacook`/`datacheck` + asset-cooker executables (§12.6) are still to come. All follow the flat-files + VS Filters convention.
 > Generated `CompiledShaders/` headers live under each project that compiles shaders
 > (per `$(ProjectDir)`), so they're picked up by `#include` at build time.
 

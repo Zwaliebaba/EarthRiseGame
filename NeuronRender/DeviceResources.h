@@ -46,6 +46,12 @@ public:
     [[nodiscard]] UINT Width()  const noexcept { return m_width; }
     [[nodiscard]] UINT Height() const noexcept { return m_height; }
 
+    // Index of the back buffer / per-frame resource slot for the in-progress
+    // frame (valid between BeginFrame and EndFrame). Renderers key per-frame
+    // upload buffers off this so the CPU never overwrites data the GPU may still
+    // be reading from an in-flight frame.
+    [[nodiscard]] UINT FrameIndex() const noexcept { return m_frameIndex; }
+
 private:
     void CreateRenderTargetViews();
     void CreateDepthStencil();

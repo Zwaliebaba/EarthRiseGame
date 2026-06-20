@@ -15,6 +15,26 @@
 > mixed across buses (and ERHeadless still builds/runs with no audio); **GPU-compute
 > particles**, **radar/overview HUD** basics, settings screen.
 
+## Status summary (this branch)
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| **A** Asset pipeline & tooling | 🟢 mostly done | DDS/CMO/font/WAV parser cores + `NeuronTools/testrunner` (35 cases, Linux CI); MSTest parser mirrors. Loaders done (see B/E). Remaining: the `*check`/cook tool executables, `datacook`/`datacheck` cue catalog. |
+| **B** Instanced CMO ships | 🟡 in progress | `DdsLoader`/`CmoLoader`→GPU done; `SceneRenderer` renders the real `Jumpgate.cmo` instanced (size-normalized, cube fallback), validated vs the real file. **Next: material/texture binding;** then per-kind mesh mapping. |
+| **C** HDR + bloom + tone-map | ⚪ not started | scene still renders straight to the LDR backbuffer. |
+| **D** GPU-compute particles | ⚪ not started | — |
+| **E** NeuronAudio | 🟡 in progress | library scaffolded — voice graph / 4 buses / `WavReader` / X3DAudio `Spatializer` / `VoicePool` / `AudioEngine` + `NeuronAudioTest` (14 projects). Device-free math Linux-verified. Remaining: buffer-queue streaming, cue catalog, `wavcheck`, Windows device smoke test. |
+| **F** Canvas HUD + radar | ⚪ not started | `CanvasRenderer` still draws placeholder blocks for text; **no font atlas yet** (so on-screen HUD/strings are unreadable). `FontAtlasLayout` UV math done. |
+| **G** Settings screen | ⚪ not started | — |
+| **H** Integration / perf gate | 🟡 ongoing | 14 projects in `.slnx`; render frame-time gate not yet measured. |
+
+> **Bring-up fixes (M1a/M1b, done while standing up the live client+server this branch):** real
+> `ERServer` console logging + crypto self-test; fixed `CngCrypto` HKDF derivation (the handshake
+> blocker) + dev pinned-key skip; graceful disconnect + idle-timeout reaping; UWP DPI swap-chain
+> sizing; faster connect (handshake pump); `EntityKind::Base` render mapping; the Scene viewProj
+> double-transpose; and per-frame instance buffers (flicker). These are M1-level fixes surfaced by
+> running the client for real, not new M2 features.
+
 ## Scope at a glance
 
 - **In scope:** asset pipeline (DDS/CMO/font + cook/check tools), HDR forward + bloom +
@@ -34,7 +54,11 @@
     rule, bus assignment) is M2's one new piece of *game data*. Author it as a `datacook`
     dataset (§12.6) — see area **F** and **G**.
 
-## Current state (what M1b left us)
+## Starting point (what M1b left us)
+
+> Historical baseline at the start of M2. For where things stand **now**, see the
+> **Status summary** above and the per-area Progress notes — `NeuronTools` and `NeuronAudio`
+> now exist, the parser loaders are in, and `SceneRenderer` renders a real CMO mesh.
 
 - `NeuronRender/` has `DeviceResources` (DX12 device/swap-chain/fences, §11.1),
   `SceneRenderer` (draws **placeholder unit cubes** — bases 100 m blue, ships 20 m orange —
@@ -70,28 +94,41 @@
   `NeuronTools/`, `assets/`).
 - **Current state:** no loaders, no tools dir. One sample `.dds` exists in the client.
 - **Work:**
-  - [ ] **DDS reader** — `DDS_HEADER` (+`DXT10`) → `DXGI_FORMAT`, BC1–BC7 + mips, upload via
-        COPY queue (§11.1). Target `NeuronRender` (texture loader, gfx filter) + a parser unit
-        usable headless.
-  - [ ] **CMO reader** — materials + ≤8 texture slots (diffuse = DDS), vertex streams
-        (pos/normal/tangent/color/uv), 16-bit indices, submeshes; static meshes first
-        (skinning later, R11). Target `NeuronRender/assets/`.
+  - [x] **DDS reader** — `DdsParse` (`DDS_HEADER`+`DXT10` → `DxgiFormat`, BC1–BC7 + 32-bit
+        BGRA/RGBA, mip subresource enumeration) + `DdsLoader` (`NeuronRender`) uploads to a
+        DEFAULT-heap texture, SRV-ready. *(Upload currently waits on a temporary DIRECT queue;
+        the dedicated COPY queue per §11.1 is a later refinement.)*
+  - [x] **CMO reader** — `CmoParse` (materials + ≤8 texture slots [diffuse], vertex/index
+        spans, submeshes; static meshes, skinning walked for bounds — R11) + `CmoLoader`
+        (`NeuronRender`) builds DEFAULT-heap VB/IB (52-byte CMO vertex stride).
   - [ ] **Monospace font pipeline** — fixed-grid atlas; codepoint→cell; config
-        `cols,rows,firstCodepoint,cellPx` (§12.2, §22.4 Unicode-capable). Feeds area F.
+        `cols,rows,firstCodepoint,cellPx` (§12.2, §22.4 Unicode-capable). `FontAtlasLayout`
+        (UV math) done; the runtime `FontAtlas` (texture + draw) lands in area F.
   - [ ] **`NeuronTools/`** project group: `ddscheck`, `meshcook` (repack for instancing),
         `fontpack`, plus `datacook`/`datacheck` (§12.6) for the audio-cue catalog (area F/G)
         and `wavcheck` (area E). Wire as pre-build/CI steps (§16).
   - [ ] **`assets/`** top-level dir per §5 (`.dds`, font bitmaps, `.cmo`, `audio/*.wav`).
 - **Tests (`<project>Test`, §16.1):**
-  - [ ] `NeuronRenderTest`: DDS parser — valid header, each BC format, mip count, truncated/
-        garbage → clean failure.
-  - [ ] `NeuronRenderTest`: CMO parser — submesh/material/index counts on a known mesh;
-        malformed → rejected, not crash.
-  - [ ] Platform-independent parser cases also added to `NeuronTools/testrunner/` (§16.2) so
-        Linux CI catches regressions without a Windows build.
+  - [x] `NeuronRenderTest`: DDS parser — BC formats, mip count, subresource chain, garbage →
+        clean failure (MSTest `DdsParseTests`, mirrors `testrunner`).
+  - [x] `NeuronRenderTest`: CMO parser — counts/extraction on a known mesh; malformed →
+        rejected, not crash (MSTest `CmoParseTests`, mirrors `testrunner`).
+  - [x] Platform-independent parser cases also in `NeuronTools/testrunner/` (§16.2) so Linux
+        CI catches regressions without a Windows build. **(WAV/DDS/CMO/font, 35 cases incl.
+        subresource enumeration + CMO data extraction, `-Werror` clean.)**
   - [ ] `datacheck` referential-integrity run in CI for the cue catalog (cue→clip exists,
         3D⇒mono honored — §12.6).
 - **Depends on:** nothing (foundation). **Blocks:** B, E (wavcheck), F.
+
+> **Progress (this branch):** the platform-independent parser **cores** landed in their
+> **owning** libraries — `WavParse.h` in `NeuronAudio/`, `DdsParse.h`/`CmoParse.h`/
+> `FontAtlasLayout.h` in `NeuronRender/` — with a Linux `testrunner` under `NeuronTools/`
+> that includes them from there. **Nothing depends on `NeuronTools`** (it's a leaf, intended
+> to be removed once checks run natively on Windows). The runtime loaders that wrap these cores
+> now exist — NeuronRender `DdsLoader`/`CmoLoader` (area B) and NeuronAudio `WavReader` (area E)
+> — and the MSTest parser mirrors are in `NeuronRenderTest`/`NeuronAudioTest`. Remaining area-A
+> work needs the Windows build / user assets: the runtime `FontAtlas` (area F), the `*check`/cook
+> tool executables, and the `assets/` tree.
 
 ### B. SceneRenderer upgrade — real instanced CMO ships
 
@@ -99,19 +136,44 @@
   per-instance stream from M1b.
 - **Masterplan refs:** §11 (Scene), §11.1 (binding model: per-instance structured-buffer
   SRV, descriptor tables for material textures), §12 (CMO/DDS).
-- **Current state:** `SceneRenderer` draws a unit cube via instance stream; viewProj via root
-  constants; `kMaxEntities = 512`.
+- **Current state:** `SceneRenderer` renders a loaded CMO `MeshGpu` (with a unit-cube
+  fallback) via the per-instance stream; viewProj via root constants; `kMaxEntities = 512`.
 - **Work:**
-  - [ ] Load base + ship CMO meshes (area A) into DEFAULT-heap vertex/index buffers.
-  - [ ] Material/texture binding: descriptor tables for diffuse DDS, static samplers (§11.1).
-  - [ ] Keep instanced draw path; per-instance world matrix + emissive (already in stream).
+  - [x] Load CMO meshes into DEFAULT-heap vertex/index buffers — `CmoLoader::Load` →
+        `MeshGpu` (VB/IB views, 52-byte stride, submeshes, per-material diffuse names, model
+        bounding radius); `DdsLoader::Load` → `TextureGpu` for the diffuse maps.
+  - [x] Swap the placeholder cube for a loaded `MeshGpu` in `SceneRenderer` (`SetMesh`; keeps
+        the per-instance world+emissive stream — the Scene input layout reads position@0/
+        normal@12 from the 52-byte CMO stride). The client loads `Assets/Shapes/Jumpgates/
+        Jumpgate.cmo` from the package at startup (fail-safe → cube if missing). On-screen size
+        normalized by the CMO bounding radius (Jumpgate native radius ≈ 333). Cull mode → NONE
+        (authored winding varies). *Rendered blind — pending Windows visual confirmation.*
+  - [ ] **Material/texture binding:** SRV descriptor heap + static sampler + a textured pixel
+        shader; bind `dif_512.dds` (then `nrm`/`spec`) via `DdsLoader` (§11.1). **(next)**
+  - [ ] **Per-kind mesh mapping** — a small mesh catalog (Base/Ship/structure → `.cmo`);
+        currently every entity uses the one loaded mesh. Needs a base/ship mesh.
+  - [~] **Skeletal animation** — `CmoParse` fully extracts the skeleton (bones + parents +
+        bind/inverse-bind/local matrices), animation clips (keyframes), and skinning vertices;
+        `CmoAnimation.h` samples a clip → per-bone pose and builds the skinning palette
+        (parent accumulation × inverse-bind), all unit-tested. Surfaced on `MeshGpu`. **Remaining:
+        the GPU skinned-render path** (skinning vertex stream + bone-palette CBV + skinned VS).
+        (Current assets are static — built ahead so an animated `.cmo` works when one arrives.)
   - [ ] Low-poly bright-emissive silhouettes per the Darwinia look (§11).
 - **Tests (`NeuronRenderTest`):**
-  - [ ] Mesh→GPU buffer sizing/stride matches CMO; instance stream layout unchanged.
-  - [ ] SceneRenderer init/teardown with a loaded mesh (no leaks; DeviceResources teardown
-        path from existing M1b tests still green).
+  - [x] Mesh→GPU sizing/stride from CMO — extraction (counts, span sizes, diffuse name,
+        bounding radius) covered in `testrunner` + MSTest, and **validated against the real
+        `Jumpgate.cmo`** (7538 verts, 12936 indices, radius 333, diffuse `dif_512.dds`).
+  - [ ] SceneRenderer init/teardown with a loaded mesh (needs a D3D12 device — Windows agent).
 - **Depends on:** A (DDS+CMO). **Blocks:** C (bloom needs real emissive geometry to look
   right, but can be developed against cubes).
+
+> **Progress (this branch):** `DdsLoader`→`TextureGpu` and `CmoLoader`→`MeshGpu` landed in
+> `NeuronRender` (wrapping the `DdsParse`/`CmoParse` cores; parsers gained mip-subresource
+> enumeration, vertex/index/material extraction, and bounding-radius — all Linux-tested and
+> validated against the real `Jumpgate.cmo`). `SceneRenderer` now renders the loaded mesh
+> instanced (size-normalized, cull-none, cube fallback); the client loads the packaged `.cmo`
+> at startup. **Geometry only** — diffuse/normal/spec **texturing is the next step** (SRV heap +
+> sampler + textured PS), then per-kind mesh mapping.
 
 ### C. HDR forward + bloom + tone-map
 
@@ -161,33 +223,46 @@
   (allow-list, NeuronAudio sibling lib), §16.1 (add `NeuronAudioTest` → 14 projects).
   **Design doc:** [`docs/design/neuronaudio-api.md`](../docs/design/neuronaudio-api.md) —
   follow its class layout.
-- **Current state:** does not exist.
+- **Current state:** library scaffolded this branch (see Progress below); device path
+  written but unverified (needs a Windows build).
 - **Work:**
-  - [ ] Create `NeuronAudio/` (`engine/` XAudio2, `spatial/` X3DAudio, `wav/` RIFF reader,
-        `mixer/` buses) + `NeuronAudioTest`. Links NeuronCore (math/types), **not**
-        NeuronRender. Add both to `EarthRise.sln`/`.slnx`.
-  - [ ] **WAV/RIFF reader** — parse `RIFF`/`fmt `/`data` → `WAVEFORMATEX` + PCM-16 samples;
-        mono (3D emitters) / stereo (music/ambient/UI). No MP3/OGG/ADPCM.
-  - [ ] **Voice graph** — mastering voice → 4 submix buses → pooled source voices; per-bus +
-        master volume. Event SFX loaded fully; ambient beds + music **streamed** via
-        buffer-queue `IXAudio2VoiceCallback`.
-  - [ ] **X3DAudio** — listener = scene camera (pos/orient/velocity, camera-relative /
-        floating-origin — **no `int64` reaches audio**, R2); emitters compute output matrix +
-        Doppler + distance LPF (`SetOutputMatrix`/`SetFrequencyRatio`/filter).
-  - [ ] **Event sounds = client-side feedback** off replicated sim events (NeuronClient
-        replica/interp) — no audio on the wire, no determinism requirement.
-  - [ ] UWP **suspend/resume**: stop/restart engine, release/reacquire voices.
+  - [x] Create `NeuronAudio/` (`Engine`/`Spatial`/`Wav`/`Mixer` VS Filters) + `NeuronAudioTest`.
+        Links NeuronCore (math/types), **not** NeuronRender. Both added to `EarthRise.slnx`
+        → **14 projects**.
+  - [x] **WAV/RIFF reader** — `WavClip`/`WavReader.h` wraps the tested `er::format::parseWav`
+        core (`NeuronAudio/WavParse.h`) → `WAVEFORMATEX` + PCM-16 (mono 3D / stereo). No
+        MP3/OGG/ADPCM.
+  - [~] **Voice graph** — mastering voice → 4 submix buses → pooled source voices (`VoicePool`,
+        generation-checked) + per-bus/master volume (`Mixer`) **done**; event SFX loaded fully
+        **done**. *Ambient/music currently loop **in-memory**; buffer-queue
+        `IXAudio2VoiceCallback` **streaming** is the next increment.*
+  - [x] **X3DAudio** — `Spatializer`: listener = camera (camera-relative, **no `int64`**, R2);
+        emitters → output matrix + Doppler + distance LPF (`SetOutputMatrix`/`SetFrequencyRatio`/
+        `SetFilterParameters`).
+  - [ ] **Event sounds = client-side feedback** off replicated sim events — needs the
+        data-driven `CueCatalog`/`AudioEventRouter` + NeuronClient wiring (next increment).
+  - [x] UWP **suspend/resume**: `AudioEngine::suspend/resume` → `StopEngine`/`StartEngine`.
   - [ ] `wavcheck` tool (area A/NeuronTools) validates assets at build time.
 - **Tests (`NeuronAudioTest`, §16.1):**
-  - [ ] WAV/RIFF parser — valid PCM-16 mono/stereo, invalid/compressed rejected, truncated
-        chunk handled, edge cases.
-  - [ ] Bus/volume logic (per-bus + master gain composition).
-  - [ ] X3DAudio emitter math (pan/Doppler/distance) on known listener/emitter setups.
-  - [ ] XAudio2 device init/teardown (Windows-only; lives in `NeuronAudioTest`).
-  - [ ] Platform-independent WAV-parser cases also in `NeuronTools/testrunner/` (§16.2).
-- **Depends on:** A (wavcheck), camera (M1b, exists). **Blocks:** Done gate audio clauses.
-- **⚠️ Guard:** confirm **ERHeadless still builds and runs with no audio** after this lands
-  (CI must build ERHeadless without linking NeuronAudio) — an explicit M2 *Done* clause.
+  - [x] WAV/RIFF parser — valid PCM-16 mono/stereo, invalid/compressed rejected, truncated
+        (covered in `testrunner` + `NeuronAudioTest::WavReaderTests`).
+  - [x] Bus/volume logic (per-bus + master gain composition) — `MixerMathTests`.
+  - [x] X3DAudio emitter math (Doppler/distance/attenuation) — `SpatialMathTests` (also
+        Linux-verified against a DirectXMath stub; caught a Doppler sign bug).
+  - [ ] XAudio2 device init/teardown (Windows-agent smoke test) — needs an audio device.
+  - [x] Platform-independent WAV-parser cases also in `NeuronTools/testrunner/` (§16.2).
+- **Depends on:** A (WavParse), camera (M1b, exists). **Blocks:** Done gate audio clauses.
+- **⚠️ Guard:** confirm **ERHeadless still builds and runs with no audio** after this lands —
+  NeuronAudio is a standalone project NOT referenced by ERHeadless; the guard holds by
+  construction, to be re-confirmed on the Windows build.
+
+> **Progress (this branch):** `NeuronAudio` library landed — `AudioTypes`/`Mixer`/`Spatializer`/
+> `SpatialMath`/`VoicePool`/`VoiceHandle`/`WavReader`/`AudioEngine` + `NeuronAudio.vcxproj`
+> (+ filters) and `Testing/NeuronAudioTest` (+ `.vcxproj`), both wired into `EarthRise.slnx`.
+> Device-free math (mixer/handle/spatial) is unit-tested and Linux-verified; the XAudio2/
+> X3DAudio device path is written blind and **must be built/run on Windows** to verify.
+> **Next increment:** buffer-queue streaming (`WavStream`/`OpenMusic`), the data-driven
+> `CueCatalog`/`AudioEventRouter`, the `wavcheck` tool, and the Windows device smoke test.
 
 ### F. Canvas HUD — monospace text + radar/overview basics
 

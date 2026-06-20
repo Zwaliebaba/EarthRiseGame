@@ -80,6 +80,15 @@
     <Image Include="Assets\Textures\Starburst.dds">
       <Filter>Assets\Textures</Filter>
     </Image>
+    <Image Include="Assets\Shapes\Jumpgates\dif_512.dds">
+      <Filter>Assets\Shapes\Jumpgates</Filter>
+    </Image>
+    <Image Include="Assets\Shapes\Jumpgates\nrm_512.dds">
+      <Filter>Assets\Shapes\Jumpgates</Filter>
+    </Image>
+    <Image Include="Assets\Shapes\Jumpgates\spec_512.dds">
+      <Filter>Assets\Shapes\Jumpgates</Filter>
+    </Image>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Assets">
@@ -94,6 +103,12 @@
     <Filter Include="Assets\Textures">
       <UniqueIdentifier>{f4cb0d78-8c1f-4c7f-86e9-24054c89d473}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Assets\Shapes">
+      <UniqueIdentifier>{4a0ee8e4-61aa-42f1-a9c6-08eb2b368631}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Assets\Shapes\Jumpgates">
+      <UniqueIdentifier>{10841fb8-204b-4d7c-9bbb-1d31617ffc85}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config">
@@ -101,6 +116,12 @@
     </None>
     <None Include="PropertySheet.props">
       <Filter>Project Files</Filter>
+    </None>
+    <None Include="EarthRise_TemporaryKey.pfx">
+      <Filter>Project Files</Filter>
+    </None>
+    <None Include="Assets\Shapes\Jumpgates\Jumpgate.cmo">
+      <Filter>Assets\Shapes\Jumpgates</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
