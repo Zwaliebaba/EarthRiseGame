@@ -14,12 +14,12 @@
 ## 1. Layout & dependencies
 
 ```
-NeuronRender/                [static lib, client/UWP only]
+NeuronRender/                [static lib, client/UWP only — files flat; names below are VS Filters, not dirs]
 ├── gfx/      DeviceResources, SwapChain, FrameContext, CommandQueue, Fence,
 │             DescriptorHeaps, PsoCache, RootSignatures, UploadRing, ResourceUploader,
 │             GpuMemory, Barriers, GpuTimer, DebugLayer/DRED
 ├── scene/    SceneRenderer (3D), Camera, FloatingOrigin, InstanceBuffer, MeshGpu,
-│             TextureGpu, passes/ (Forward, BrightPass, Bloom, Particles, ToneMap)
+│             TextureGpu, passes (Forward, BrightPass, Bloom, Particles, ToneMap)
 ├── canvas/   CanvasRenderer (2D), QuadBatch, TextBatch (monospace), LineBatch
 └── assets/   DdsLoader, CmoLoader, FontAtlas   (parsers; cooked data from NeuronTools)
 

@@ -2,7 +2,7 @@
 #
 # Build context: repo root
 # Usage:
-#   docker build -f deploy/Dockerfile -t earthrise-server .
+#   docker build -f Config/deploy/Dockerfile -t earthrise-server .
 #   docker run --rm -p 7777:7777/udp \
 #       -e ER_DB_CONNSTR="Server=host.docker.internal,1433;Database=EarthRise;User Id=...;Password=...;Encrypt=yes" \
 #       -e ER_SERVER_PEPPER="<base64-pepper>" \

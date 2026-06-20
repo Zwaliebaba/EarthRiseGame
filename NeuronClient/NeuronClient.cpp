@@ -1,10 +1,10 @@
 // NeuronClient.cpp — single TU for the NeuronClient static library (M1b).
 //
-// Modules:
-//   session/ — SessionImpl: encrypted reliable-UDP client session (§8.5, §10.1)
-//   replica/ — ReplicaManager: snapshot decode + floating-origin projection (§8.4)
-//   interp/  — InterpBuffer: snap-on-ack interpolation (§10.1)
-//   control/ — IClientController / NullController
+// Files are flat in the project, grouped by Visual Studio Filters:
+//   Session — Session/SessionImpl: encrypted reliable-UDP client session (§8.5, §10.1)
+//   Replica — Replica/ReplicaManager: snapshot decode + floating-origin projection (§8.4)
+//   Interpolator — snap-on-ack interpolation buffer (§10.1)
+//   Control — IClientController / NullController
 
 #include "pch.h"
 #include <cstdint>

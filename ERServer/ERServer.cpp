@@ -3,7 +3,7 @@
 // Architecture (§9):
 //   net I/O -> decode/reliability/decrypt -> sim -> snapshots -> net
 //   Single-threaded 30 Hz fixed-step sim owns the authoritative ECS state.
-//   (IOCP multi-threading via ERServer/netio/IocpUdpListener is the M4 scaling
+//   (IOCP multi-threading via ERServer/IocpUdpListener is the M4 scaling
 //    lever; M1a uses a correct single-threaded non-blocking Winsock loop — the
 //    same logic verified end-to-end over the loopback integration tests.)
 //   Persistence (ODBC outbox + write-behind) lands in M5.

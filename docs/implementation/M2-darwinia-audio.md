@@ -69,7 +69,7 @@
 - **Current state:** no loaders, no tools dir. One sample `.dds` exists in the client.
 - **Work:**
   - [ ] **DDS reader** — `DDS_HEADER` (+`DXT10`) → `DXGI_FORMAT`, BC1–BC7 + mips, upload via
-        COPY queue (§11.1). Target `NeuronRender/gfx/` (texture loader) + a parser unit
+        COPY queue (§11.1). Target `NeuronRender` (texture loader, gfx filter) + a parser unit
         usable headless.
   - [ ] **CMO reader** — materials + ≤8 texture slots (diffuse = DDS), vertex streams
         (pos/normal/tangent/color/uv), 16-bit indices, submeshes; static meshes first

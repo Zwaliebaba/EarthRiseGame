@@ -1,9 +1,11 @@
 // NeuronCore.cpp
 //
-// Single translation unit for the NeuronCore static library (M0 Foundations).
-// All subsystem headers are compiled here so the library validates them and
-// produces a linkable .lib. Each subsystem is header-only at M0; implementations
-// land in later milestones as .cpp files are added.
+// Primary translation unit for the NeuronCore shared items project
+// (NeuronCore.vcxitems). The subsystem headers are included here so they are
+// compiled and validated when NeuronCore's sources build into each consumer
+// (EarthRise, NeuronClient, ERServer). Subsystems start header-only; platform-
+// backed implementations land in their own .cpp files (CngCrypto, WinsockSocket,
+// SimComponents) as milestones progress.
 
 #include "pch.h"
 #include <algorithm>
@@ -53,6 +55,7 @@
 
 namespace Neuron
 {
-// Intentionally empty — all subsystem code is header-only at M0.
-// Subsystem .cpp implementations are added milestone by milestone.
+// Intentionally empty — the header-only subsystems are validated by the includes
+// above. Platform-backed subsystems compile from their own .cpp files (CngCrypto,
+// WinsockSocket, SimComponents); more land milestone by milestone.
 }
