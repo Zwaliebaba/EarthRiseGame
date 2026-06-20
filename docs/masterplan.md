@@ -464,13 +464,18 @@ row-major, row-vector, right-handed (`*RH`). A `WorldPos` fixed-point layer brid
 
 ### 8.2 Channels
 `Unreliable` (snapshots) · `ReliableOrdered` (commands/chat/events) ·
-`ReliableUnordered` (notifications) · `Bulk` (fragmented world sync). Per-channel
-16-bit sequences are for reliability/ordering only — **not** the AEAD nonce (§8.3).
+`ReliableUnordered` (notifications). Per-channel 16-bit sequences are for
+reliability/ordering only — **not** the AEAD nonce (§8.3).
+
+There is **no `Bulk`/world-sync channel and no on-wire fragmentation** (§8.4): the
+world is never shipped as one large artifact, so no realtime datagram ever exceeds
+the safe MTU and nothing on the gameplay path requires fragment sequencing/reassembly.
 
 ### 8.3 Reliability & encryption
 **Reliability:** 16-bit per-channel sequences; **ack + 32-bit ack-bitfield**; RTT/RTO
-retransmit; dup detection; **fragmentation/reassembly** (~1200 B safe payload);
-**64-bit connection token** (anti-spoof); keepalive/timeout; congestion backoff.
+retransmit; dup detection; **64-bit connection token** (anti-spoof); keepalive/timeout;
+congestion backoff. Every message fits one **~1200 B safe-MTU** datagram by
+construction (§8.4) — there is **no fragmentation/reassembly** on the realtime path.
 
 **Encryption (required):**
 - Handshake performs a **CNG ECDH** key agreement; the server's ephemeral key is
@@ -492,6 +497,33 @@ entities (~100 ms back). **Own-unit prediction/reconciliation is deferred past M
 (§10.1) — until then own units are server-confirmed and **snap-corrected on ack**.
 Input is **intents/commands**; the server validates everything (speed/rate checks).
 
+**No bulk world sync (cold-start = empty baseline).** A freshly connected client is
+not a special "download the world first" case — it is simply a client whose acked
+baseline is **∅**. The same interest+delta snapshot loop fills it in, so there is no
+separate transfer phase, no `Bulk` channel, and no fragmentation. The world is never
+sent as one large artifact because it is decomposed into three kinds of data, none of
+which is ever "big" on the realtime socket:
+- **Content (assets) → out-of-band, hash-addressed.** Meshes/CMOs, sector geometry,
+  hull & module definitions ship with the build or a CDN, fetched over HTTP and
+  cached locally — never over the game socket.
+- **Derivable state → seed, not payload.** Procedurally generated content (anomalies/
+  expeditions §13.7) is reconstructed locally from a shared seed by the **same
+  deterministic generator** the server runs; the server transmits only the
+  **divergences** from that procedural baseline (player edits, kills, claims).
+- **Mutable state → interest-scoped deltas from ∅.** Everything left is streamed by
+  the ordinary snapshot loop. The server already tracks each player's **interest set**
+  and **acked baseline**, so it knows exactly which relevant entities the client still
+  lacks and **dribbles them in, MTU-budgeted and relevance-prioritised** (closest/most
+  important first), until the client converges on its area of interest — all it can see
+  or act on anyway.
+
+The cold-start cost moves from an explicit transfer to a **priority/quota snapshot
+scheduler** ("the N most relevant keys this client still lacks, within the byte
+budget"). A new player therefore **converges progressively** over the first ~1–2 s
+rather than blocking on a full download — invisible under the ~100 ms interpolation
+delay. The only hard requirement is **seed-reproducible deterministic generation** on
+both ends — already committed by the deterministic ECS simulation.
+
 ### 8.5 Connection sequence
 1. **Stateless cookie:** client → server hello; server replies with a token derived
    from client addr + secret (no per-connection state, no crypto yet) — a
@@ -503,7 +535,8 @@ Input is **intents/commands**; the server validates everything (speed/rate check
    later prediction share a common clock.
 5. **Login** (§14, custom username/password) over the encrypted channel → verify vs
    SQL → expiring **session token**.
-6. Initial world sync (`Bulk`) → enter the tick/snapshot loop.
+6. Enter the tick/snapshot loop directly (baseline **∅**) — no separate world-sync
+   phase; interest-scoped delta snapshots converge the client progressively (§8.4).
 
 ---
 
@@ -1466,10 +1499,10 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 ├── Header (AAD): protocol_id u32 · connection_token u64 · packet_number u64
 │                 · per-channel: sequence u16 · ack u16 · ack_bits u32
 └── Payload (encrypted): 1..N messages { channel u8, msg_type u8, length u16, body … }
-   (fragments: message_id, fragment_index, fragment_count)
 ```
 > The 64-bit `packet_number` doubles as the AEAD nonce input and feeds the replay
-> window; the 16-bit per-channel `sequence` is reliability/ordering only.
+> window; the 16-bit per-channel `sequence` is reliability/ordering only. Every
+> message fits one safe-MTU datagram (§8.4) — there are no fragment fields.
 
 ## Appendix B — Tick & timing budget
 | Quantity | Target |
@@ -1515,7 +1548,11 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 - **Anomaly / expedition** — scannable procedural PvE site (combat/exploration/salvage), scaling difficulty & loot.
 - **Invasion** — server-driven NPC-faction incursion event that degrades a region until repelled.
 - **Session token** — credential issued at login, validates reliable traffic.
-- **Interest set / Baseline** — entities told to a player / last acked snapshot.
+- **Interest set / Baseline** — entities told to a player / last acked snapshot; a
+  new client starts from the **empty (∅) baseline** (§8.4).
+- **No-bulk sync** — cold-start uses the ordinary interest+delta snapshot loop from an
+  empty baseline; content is fetched out-of-band and procedural state is reconstructed
+  from a seed, so the world is never transferred as one large artifact (§8.4).
 - **Floating origin** — per-frame render origin near the camera.
 - **Sector** — fixed cubic cell for spatial queries & interest (keyed by `SectorId`).
 - **Outbox** — durable, ordered queue of economy events drained to SQL (write-through).
