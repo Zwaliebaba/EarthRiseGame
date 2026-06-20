@@ -9,7 +9,8 @@
 CXX ?= g++
 CXXFLAGS ?= -std=c++23 -Wall -Wextra -Wpedantic -O2 -g
 
-SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParseTests.cpp
+SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParseTests.cpp \
+        CmoAnimationTests.cpp
 BIN := testrunner
 
 .PHONY: all build run clean

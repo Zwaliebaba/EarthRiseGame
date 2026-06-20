@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include "CmoParse.h" // skeleton + animation data (er::format::CmoBone / CmoAnimationClip)
+
 namespace Neuron::Render
 {
   struct SubmeshGpu
@@ -39,6 +41,14 @@ namespace Neuron::Render
     std::vector<SubmeshGpu> submeshes;
     std::vector<std::string> materialDiffuse; // diffuse .dds filename per material
 
+    // Skeletal animation (empty for static meshes). The skinning vertex stream
+    // and a skinned vertex shader are still TODO; this carries the CPU-side
+    // skeleton + clips so a render path can sample poses (CmoAnimation.h) and
+    // build a bone palette once that lands.
+    std::vector<er::format::CmoBone> bones;
+    std::vector<er::format::CmoAnimationClip> animations;
+
     bool valid() const noexcept { return vertexBuffer != nullptr && indexBuffer != nullptr; }
+    bool skinned() const noexcept { return !bones.empty(); }
   };
 } // namespace Neuron::Render

@@ -152,6 +152,12 @@
         shader; bind `dif_512.dds` (then `nrm`/`spec`) via `DdsLoader` (§11.1). **(next)**
   - [ ] **Per-kind mesh mapping** — a small mesh catalog (Base/Ship/structure → `.cmo`);
         currently every entity uses the one loaded mesh. Needs a base/ship mesh.
+  - [~] **Skeletal animation** — `CmoParse` fully extracts the skeleton (bones + parents +
+        bind/inverse-bind/local matrices), animation clips (keyframes), and skinning vertices;
+        `CmoAnimation.h` samples a clip → per-bone pose and builds the skinning palette
+        (parent accumulation × inverse-bind), all unit-tested. Surfaced on `MeshGpu`. **Remaining:
+        the GPU skinned-render path** (skinning vertex stream + bone-palette CBV + skinned VS).
+        (Current assets are static — built ahead so an animated `.cmo` works when one arrives.)
   - [ ] Low-poly bright-emissive silhouettes per the Darwinia look (§11).
 - **Tests (`NeuronRenderTest`):**
   - [x] Mesh→GPU sizing/stride from CMO — extraction (counts, span sizes, diffuse name,

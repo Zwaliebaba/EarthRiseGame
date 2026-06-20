@@ -125,6 +125,11 @@ namespace Neuron::Render
     for (const CmoMaterialInfo& mat : mesh.materials)
       out.materialDiffuse.push_back(mat.diffuseTexture);
 
+    // Carry skeleton + animation clips through (empty for static meshes) so the
+    // skinned-render path can sample poses + build a bone palette later.
+    out.bones = mesh.bones;
+    out.animations = mesh.animations;
+
     return out;
   }
 } // namespace Neuron::Render
