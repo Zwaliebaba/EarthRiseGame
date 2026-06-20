@@ -21,6 +21,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CanvasRenderer.cpp" />
+    <ClCompile Include="CmoLoader.cpp" />
+    <ClCompile Include="DdsLoader.cpp" />
     <ClCompile Include="DeviceResources.cpp" />
     <ClCompile Include="NeuronRender.cpp" />
     <ClCompile Include="pch.cpp">
@@ -30,12 +32,16 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CanvasRenderer.h" />
+    <ClInclude Include="CmoLoader.h" />
     <ClInclude Include="CmoParse.h" />
+    <ClInclude Include="DdsLoader.h" />
     <ClInclude Include="DdsParse.h" />
     <ClInclude Include="DeviceResources.h" />
     <ClInclude Include="FontAtlasLayout.h" />
+    <ClInclude Include="MeshGpu.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="SceneRenderer.h" />
+    <ClInclude Include="TextureGpu.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -148,6 +154,8 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>$(SolutionDir)NeuronCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

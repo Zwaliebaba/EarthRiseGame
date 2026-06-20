@@ -123,3 +123,57 @@ ER_TEST(DdsParse, RejectsZeroDimensions)
   DdsImage img{};
   ER_CHECK(parseDds(file, img) == DdsStatus::BadDimensions);
 }
+
+ER_TEST(DdsParse, SubresourceBc1SingleMip)
+{
+  // BC1 8×8: 2×2 blocks × 8 bytes = rowPitch 16, 2 block-rows, 32-byte slice.
+  auto file = makeDds(8, 8, 1, fourCC('D', 'X', 'T', '1'), 0, 0, 0, 0, 0, 0, /*payload*/ 32);
+  DdsImage img{};
+  ER_CHECK(parseDds(file, img) == DdsStatus::Ok);
+  std::vector<DdsSubresource> subs;
+  ER_CHECK(enumerateDdsSubresources(img, file.size(), subs));
+  ER_CHECK_EQ(subs.size(), static_cast<size_t>(1));
+  ER_CHECK_EQ(subs[0].rowPitch, 16u);
+  ER_CHECK_EQ(subs[0].numRows, 2u);
+  ER_CHECK_EQ(subs[0].slicePitch, static_cast<size_t>(32));
+  ER_CHECK_EQ(subs[0].offset, DDS_MAGIC_SIZE + DDS_HEADER_SIZE);
+}
+
+ER_TEST(DdsParse, SubresourceMipChainOffsets)
+{
+  // BC1 8×8 with 4 mips (8,4,2,1) → 32 + 8 + 8 + 8 = 56 payload bytes.
+  auto file = makeDds(8, 8, 4, fourCC('D', 'X', 'T', '1'), 0, 0, 0, 0, 0, 0, /*payload*/ 56);
+  DdsImage img{};
+  ER_CHECK(parseDds(file, img) == DdsStatus::Ok);
+  std::vector<DdsSubresource> subs;
+  ER_CHECK(enumerateDdsSubresources(img, file.size(), subs));
+  ER_CHECK_EQ(subs.size(), static_cast<size_t>(4));
+  const size_t base = DDS_MAGIC_SIZE + DDS_HEADER_SIZE;
+  ER_CHECK_EQ(subs[0].offset, base);
+  ER_CHECK_EQ(subs[1].offset, base + 32); // mip 0 is 32 bytes
+  ER_CHECK_EQ(subs[3].width, 1u);
+  ER_CHECK_EQ(subs[3].height, 1u);
+}
+
+ER_TEST(DdsParse, SubresourceUncompressedBgra)
+{
+  // 4×4 BGRA32: rowPitch 16, 4 rows, 64-byte slice.
+  auto file = makeDds(4, 4, 1, 0, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000, 0, 64);
+  DdsImage img{};
+  ER_CHECK(parseDds(file, img) == DdsStatus::Ok);
+  std::vector<DdsSubresource> subs;
+  ER_CHECK(enumerateDdsSubresources(img, file.size(), subs));
+  ER_CHECK_EQ(subs.size(), static_cast<size_t>(1));
+  ER_CHECK_EQ(subs[0].rowPitch, 16u);
+  ER_CHECK_EQ(subs[0].numRows, 4u);
+}
+
+ER_TEST(DdsParse, SubresourceRejectsTruncatedPayload)
+{
+  // Declares a mip but provides no payload → enumeration fails cleanly.
+  auto file = makeDds(8, 8, 1, fourCC('D', 'X', 'T', '1'), 0, 0, 0, 0, 0, 0, /*payload*/ 0);
+  DdsImage img{};
+  ER_CHECK(parseDds(file, img) == DdsStatus::Ok);
+  std::vector<DdsSubresource> subs;
+  ER_CHECK(!enumerateDdsSubresources(img, file.size(), subs));
+}

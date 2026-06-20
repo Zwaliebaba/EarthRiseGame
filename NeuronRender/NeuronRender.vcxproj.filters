@@ -6,6 +6,8 @@
     <ClCompile Include="NeuronRender.cpp" />
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="SceneRenderer.cpp" />
+    <ClCompile Include="DdsLoader.cpp" />
+    <ClCompile Include="CmoLoader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CanvasRenderer.h" />
@@ -15,6 +17,10 @@
     <ClInclude Include="DdsParse.h" />
     <ClInclude Include="CmoParse.h" />
     <ClInclude Include="FontAtlasLayout.h" />
+    <ClInclude Include="DdsLoader.h" />
+    <ClInclude Include="CmoLoader.h" />
+    <ClInclude Include="TextureGpu.h" />
+    <ClInclude Include="MeshGpu.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Project Files">

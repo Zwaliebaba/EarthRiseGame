@@ -83,6 +83,26 @@ ER_TEST(CmoParse, StaticMeshCounts)
   ER_CHECK_EQ(mesh.submeshes[1].startIndex, 3u);
 }
 
+ER_TEST(CmoParse, ExtractsBufferData)
+{
+  auto file = makeStaticCmo();
+  CmoModel model{};
+  ER_CHECK(parseCmo(file, model) == CmoStatus::Ok);
+  const auto& mesh = model.meshes[0];
+
+  // Materials captured; the synthetic material has no diffuse texture.
+  ER_CHECK_EQ(mesh.materials.size(), static_cast<size_t>(1));
+  ER_CHECK(mesh.materials[0].diffuseTexture.empty());
+
+  // Vertex/index payloads aliased with the right sizes (52 B/vert, 2 B/index).
+  ER_CHECK_EQ(mesh.vertexData.size(), static_cast<size_t>(1));
+  ER_CHECK_EQ(mesh.vertexCounts[0], 4u);
+  ER_CHECK_EQ(mesh.vertexData[0].size(), static_cast<size_t>(4 * 52));
+  ER_CHECK_EQ(mesh.indexData.size(), static_cast<size_t>(1));
+  ER_CHECK_EQ(mesh.indexCounts[0], 6u);
+  ER_CHECK_EQ(mesh.indexData[0].size(), static_cast<size_t>(6 * 2));
+}
+
 ER_TEST(CmoParse, EmptyModel)
 {
   ByteWriter w;

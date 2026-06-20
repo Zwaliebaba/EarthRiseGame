@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 namespace er::format
 {
@@ -210,5 +211,85 @@ namespace er::format
 
     out.dataOffset = dataOffset;
     return DdsStatus::Ok;
+  }
+
+  // One mip level's tightly-packed layout within the DDS payload. Feeds the
+  // D3D12 upload: the loader copies `rowPitch` bytes × `numRows` rows per mip
+  // into the (256-aligned) upload footprint from GetCopyableFootprints.
+  struct DdsSubresource
+  {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t rowPitch = 0;  // bytes per row (BC: per 4-row block strip)
+    uint32_t numRows = 0;   // rows (BC: height in 4-px blocks)
+    size_t offset = 0;      // byte offset within the file
+    size_t slicePitch = 0;  // rowPitch * numRows
+  };
+
+  // Bytes per 4×4 block (BC) — BC1/BC4 are 8, the rest 16.
+  inline uint32_t bcBlockBytes(DxgiFormat fmt) noexcept
+  {
+    switch (fmt)
+    {
+    case DxgiFormat::BC1_UNORM:
+    case DxgiFormat::BC4_UNORM:
+      return 8;
+    case DxgiFormat::BC2_UNORM:
+    case DxgiFormat::BC3_UNORM:
+    case DxgiFormat::BC5_UNORM:
+    case DxgiFormat::BC6H_UF16:
+    case DxgiFormat::BC7_UNORM:
+      return 16;
+    default:
+      return 0;
+    }
+  }
+
+  // Enumerate the mip chain of a parsed (single-array-slice 2D) DDS image into
+  // tightly-packed subresource layouts. Returns false if the declared mips run
+  // past `fileSize` (truncated payload). Assumes 32 bits/pixel for uncompressed.
+  inline bool enumerateDdsSubresources(const DdsImage& img, size_t fileSize,
+                                       std::vector<DdsSubresource>& out)
+  {
+    out.clear();
+    size_t offset = img.dataOffset;
+    uint32_t w = img.width;
+    uint32_t h = img.height;
+    const uint32_t blockBytes = img.blockCompressed ? bcBlockBytes(img.format) : 0;
+    if (img.blockCompressed && blockBytes == 0)
+      return false;
+
+    for (uint32_t mip = 0; mip < img.mipCount; ++mip)
+    {
+      const uint32_t mw = w == 0 ? 1 : w;
+      const uint32_t mh = h == 0 ? 1 : h;
+
+      DdsSubresource sr{};
+      sr.width = mw;
+      sr.height = mh;
+      if (img.blockCompressed)
+      {
+        const uint32_t blocksW = (mw + 3) / 4;
+        const uint32_t blocksH = (mh + 3) / 4;
+        sr.rowPitch = blocksW * blockBytes;
+        sr.numRows = blocksH;
+      }
+      else
+      {
+        sr.rowPitch = mw * 4; // 32-bit BGRA/RGBA
+        sr.numRows = mh;
+      }
+      sr.slicePitch = static_cast<size_t>(sr.rowPitch) * sr.numRows;
+      sr.offset = offset;
+
+      if (offset + sr.slicePitch > fileSize)
+        return false;
+
+      out.push_back(sr);
+      offset += sr.slicePitch;
+      w = mw > 1 ? mw / 2 : 1;
+      h = mh > 1 ? mh / 2 : 1;
+    }
+    return true;
   }
 } // namespace er::format

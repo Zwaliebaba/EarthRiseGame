@@ -70,28 +70,28 @@
   `NeuronTools/`, `assets/`).
 - **Current state:** no loaders, no tools dir. One sample `.dds` exists in the client.
 - **Work:**
-  - [ ] **DDS reader** — `DDS_HEADER` (+`DXT10`) → `DXGI_FORMAT`, BC1–BC7 + mips, upload via
-        COPY queue (§11.1). Target `NeuronRender` (texture loader, gfx filter) + a parser unit
-        usable headless.
-  - [ ] **CMO reader** — materials + ≤8 texture slots (diffuse = DDS), vertex streams
-        (pos/normal/tangent/color/uv), 16-bit indices, submeshes; static meshes first
-        (skinning later, R11). Target `NeuronRender/assets/`.
+  - [x] **DDS reader** — `DdsParse` (`DDS_HEADER`+`DXT10` → `DxgiFormat`, BC1–BC7 + 32-bit
+        BGRA/RGBA, mip subresource enumeration) + `DdsLoader` (`NeuronRender`) uploads to a
+        DEFAULT-heap texture, SRV-ready. *(Upload currently waits on a temporary DIRECT queue;
+        the dedicated COPY queue per §11.1 is a later refinement.)*
+  - [x] **CMO reader** — `CmoParse` (materials + ≤8 texture slots [diffuse], vertex/index
+        spans, submeshes; static meshes, skinning walked for bounds — R11) + `CmoLoader`
+        (`NeuronRender`) builds DEFAULT-heap VB/IB (52-byte CMO vertex stride).
   - [ ] **Monospace font pipeline** — fixed-grid atlas; codepoint→cell; config
-        `cols,rows,firstCodepoint,cellPx` (§12.2, §22.4 Unicode-capable). Feeds area F.
+        `cols,rows,firstCodepoint,cellPx` (§12.2, §22.4 Unicode-capable). `FontAtlasLayout`
+        (UV math) done; the runtime `FontAtlas` (texture + draw) lands in area F.
   - [ ] **`NeuronTools/`** project group: `ddscheck`, `meshcook` (repack for instancing),
         `fontpack`, plus `datacook`/`datacheck` (§12.6) for the audio-cue catalog (area F/G)
         and `wavcheck` (area E). Wire as pre-build/CI steps (§16).
   - [ ] **`assets/`** top-level dir per §5 (`.dds`, font bitmaps, `.cmo`, `audio/*.wav`).
 - **Tests (`<project>Test`, §16.1):**
-  - [ ] `NeuronRenderTest`: DDS parser — valid header, each BC format, mip count, truncated/
-        garbage → clean failure. *(logic covered in `testrunner` `DdsParseTests`; needs the
-        Windows MSTest mirror once `DdsLoader` exists.)*
-  - [ ] `NeuronRenderTest`: CMO parser — submesh/material/index counts on a known mesh;
-        malformed → rejected, not crash. *(logic covered in `testrunner` `CmoParseTests`;
-        needs the Windows MSTest mirror once `CmoLoader` exists.)*
-  - [x] Platform-independent parser cases also added to `NeuronTools/testrunner/` (§16.2) so
-        Linux CI catches regressions without a Windows build. **(done — WAV/DDS/CMO/font,
-        30 cases, `-Werror` clean.)**
+  - [x] `NeuronRenderTest`: DDS parser — BC formats, mip count, subresource chain, garbage →
+        clean failure (MSTest `DdsParseTests`, mirrors `testrunner`).
+  - [x] `NeuronRenderTest`: CMO parser — counts/extraction on a known mesh; malformed →
+        rejected, not crash (MSTest `CmoParseTests`, mirrors `testrunner`).
+  - [x] Platform-independent parser cases also in `NeuronTools/testrunner/` (§16.2) so Linux
+        CI catches regressions without a Windows build. **(WAV/DDS/CMO/font, 35 cases incl.
+        subresource enumeration + CMO data extraction, `-Werror` clean.)**
   - [ ] `datacheck` referential-integrity run in CI for the cue catalog (cue→clip exists,
         3D⇒mono honored — §12.6).
 - **Depends on:** nothing (foundation). **Blocks:** B, E (wavcheck), F.
@@ -100,10 +100,11 @@
 > **owning** libraries — `WavParse.h` in `NeuronAudio/`, `DdsParse.h`/`CmoParse.h`/
 > `FontAtlasLayout.h` in `NeuronRender/` — with a Linux `testrunner` under `NeuronTools/`
 > that includes them from there. **Nothing depends on `NeuronTools`** (it's a leaf, intended
-> to be removed once checks run natively on Windows). Remaining area-A work needs the Windows
-> build: the runtime loaders that wrap these cores (NeuronRender `DdsLoader`/`CmoLoader`/
-> `FontAtlas`, NeuronAudio `WavReader` — done), the `*check`/cook tool executables, the
-> `assets/` tree, and the MSTest mirrors.
+> to be removed once checks run natively on Windows). The runtime loaders that wrap these cores
+> now exist — NeuronRender `DdsLoader`/`CmoLoader` (area B) and NeuronAudio `WavReader` (area E)
+> — and the MSTest parser mirrors are in `NeuronRenderTest`/`NeuronAudioTest`. Remaining area-A
+> work needs the Windows build / user assets: the runtime `FontAtlas` (area F), the `*check`/cook
+> tool executables, and the `assets/` tree.
 
 ### B. SceneRenderer upgrade — real instanced CMO ships
 
@@ -114,16 +115,27 @@
 - **Current state:** `SceneRenderer` draws a unit cube via instance stream; viewProj via root
   constants; `kMaxEntities = 512`.
 - **Work:**
-  - [ ] Load base + ship CMO meshes (area A) into DEFAULT-heap vertex/index buffers.
+  - [x] Load CMO meshes into DEFAULT-heap vertex/index buffers — `CmoLoader::Load` →
+        `MeshGpu` (VB/IB views, 52-byte stride, submeshes + per-material diffuse names);
+        `DdsLoader::Load` → `TextureGpu` for the diffuse maps.
   - [ ] Material/texture binding: descriptor tables for diffuse DDS, static samplers (§11.1).
-  - [ ] Keep instanced draw path; per-instance world matrix + emissive (already in stream).
+  - [ ] Swap the placeholder cube for a loaded `MeshGpu` in `SceneRenderer` (keep the
+        per-instance world+emissive stream; the Scene input layout already reads
+        position@0/normal@12 from the CMO stride).
   - [ ] Low-poly bright-emissive silhouettes per the Darwinia look (§11).
 - **Tests (`NeuronRenderTest`):**
-  - [ ] Mesh→GPU buffer sizing/stride matches CMO; instance stream layout unchanged.
-  - [ ] SceneRenderer init/teardown with a loaded mesh (no leaks; DeviceResources teardown
-        path from existing M1b tests still green).
+  - [~] Mesh→GPU buffer sizing/stride matches CMO — CMO extraction (counts, span sizes,
+        diffuse name) verified in `testrunner` + MSTest; the GPU buffer sizing/stride is set
+        from those and needs a device test to confirm end-to-end.
+  - [ ] SceneRenderer init/teardown with a loaded mesh (needs a D3D12 device — Windows agent).
 - **Depends on:** A (DDS+CMO). **Blocks:** C (bloom needs real emissive geometry to look
   right, but can be developed against cubes).
+
+> **Progress (this branch):** the `DdsLoader`→`TextureGpu` and `CmoLoader`→`MeshGpu` building
+> blocks landed in `NeuronRender` (wrapping the `DdsParse`/`CmoParse` cores; the parsers gained
+> mip-subresource enumeration and vertex/index/material extraction, both Linux-tested). Still
+> to do (blind Windows + needs the user's `.cmo`/`.dds` assets): the material/texture descriptor
+> path and swapping `SceneRenderer`'s cube for a loaded `MeshGpu`.
 
 ### C. HDR forward + bloom + tone-map
 

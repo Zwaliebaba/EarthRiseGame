@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace er::format
@@ -39,6 +40,12 @@ namespace er::format
     uint32_t primCount = 0;
   };
 
+  struct CmoMaterialInfo
+  {
+    std::string name;
+    std::string diffuseTexture; // CMO texture slot 0 = diffuse (a .dds filename)
+  };
+
   struct CmoMeshInfo
   {
     uint32_t nameLength = 0;       // UTF-16 code units
@@ -51,6 +58,14 @@ namespace er::format
     uint32_t totalVertices = 0;    // summed across all vertex buffers
     bool hasSkeletalAnimation = false;
     std::vector<CmoSubmeshInfo> submeshes;
+    std::vector<CmoMaterialInfo> materials;
+
+    // Raw buffer payloads (alias into the parsed file — keep it alive). Each
+    // vertex is CMO_VERTEX_SIZE bytes; each index is a uint16_t.
+    std::vector<uint32_t> vertexCounts;                   // verts per vertex buffer
+    std::vector<uint32_t> indexCounts;                    // indices per index buffer
+    std::vector<std::span<const std::byte>> vertexData;   // bytes per vertex buffer
+    std::vector<std::span<const std::byte>> indexData;    // bytes per index buffer
   };
 
   struct CmoModel
@@ -109,6 +124,33 @@ namespace er::format
         m_pos += bytes;
       }
 
+      // Read `bytes` as a subspan aliasing the source; empty span on overrun.
+      std::span<const std::byte> readSpan(size_t bytes) noexcept
+      {
+        if (!ensure(bytes))
+          return {};
+        auto s = m_data.subspan(m_pos, bytes);
+        m_pos += bytes;
+        return s;
+      }
+
+      // Read a UTF-16 name (UINT length + that many 16-bit units) as narrow
+      // ASCII (CMO texture/material names are ASCII filenames). Empty on overrun.
+      std::string readName()
+      {
+        const uint32_t len = readU32();
+        std::string s;
+        s.reserve(len);
+        for (uint32_t i = 0; i < len; ++i)
+        {
+          if (!ensure(CMO_WCHAR_SIZE))
+            break;
+          s.push_back(static_cast<char>(std::to_integer<unsigned char>(m_data[m_pos])));
+          m_pos += CMO_WCHAR_SIZE;
+        }
+        return s;
+      }
+
     private:
       bool ensure(size_t bytes) noexcept
       {
@@ -157,11 +199,18 @@ namespace er::format
         return CmoStatus::TooLarge;
       for (uint32_t i = 0; i < mesh.materialCount && cur.ok(); ++i)
       {
-        skipName();                       // material name
+        CmoMaterialInfo mat{};
+        mat.name = cur.readName();        // material name
         cur.skip(CMO_MATERIAL_SIZE);      // Material struct
-        skipName();                       // pixel-shader name
+        cur.readName();                   // pixel-shader name (ignored)
         for (uint32_t t = 0; t < CMO_MAX_TEXTURES; ++t)
-          skipName();                     // texture names
+        {
+          std::string tex = cur.readName(); // texture names
+          if (t == 0)
+            mat.diffuseTexture = std::move(tex); // slot 0 = diffuse
+        }
+        if (cur.ok())
+          mesh.materials.push_back(std::move(mat));
       }
 
       mesh.hasSkeletalAnimation = cur.readU8() != 0;
@@ -193,7 +242,12 @@ namespace er::format
         if (n > CMO_SANE_COUNT_LIMIT)
           return CmoStatus::TooLarge;
         mesh.totalIndices += n;
-        cur.skip(static_cast<size_t>(n) * sizeof(uint16_t));
+        auto span = cur.readSpan(static_cast<size_t>(n) * sizeof(uint16_t));
+        if (cur.ok())
+        {
+          mesh.indexCounts.push_back(n);
+          mesh.indexData.push_back(span);
+        }
       }
 
       // Vertex buffers.
@@ -206,7 +260,12 @@ namespace er::format
         if (n > CMO_SANE_COUNT_LIMIT)
           return CmoStatus::TooLarge;
         mesh.totalVertices += n;
-        cur.skip(static_cast<size_t>(n) * CMO_VERTEX_SIZE);
+        auto span = cur.readSpan(static_cast<size_t>(n) * CMO_VERTEX_SIZE);
+        if (cur.ok())
+        {
+          mesh.vertexCounts.push_back(n);
+          mesh.vertexData.push_back(span);
+        }
       }
 
       // Skinning vertex buffers (walked for bounds validation only).
