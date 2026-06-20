@@ -29,6 +29,57 @@
     <Image Include="Assets\LockScreenLogo.scale-200.png">
       <Filter>Assets</Filter>
     </Image>
+    <Image Include="Assets\Fonts\EditorFont-ENG.dds">
+      <Filter>Assets\Fonts</Filter>
+    </Image>
+    <Image Include="Assets\Fonts\EditorFont-FRA.dds">
+      <Filter>Assets\Fonts</Filter>
+    </Image>
+    <Image Include="Assets\Fonts\EditorFont-ITA.dds">
+      <Filter>Assets\Fonts</Filter>
+    </Image>
+    <Image Include="Assets\Fonts\EditorFont-RUS.dds">
+      <Filter>Assets\Fonts</Filter>
+    </Image>
+    <Image Include="Assets\Fonts\SpeccyFont-ENG.dds">
+      <Filter>Assets\Fonts</Filter>
+    </Image>
+    <Image Include="Assets\Fonts\SpeccyFont-FRA.dds">
+      <Filter>Assets\Fonts</Filter>
+    </Image>
+    <Image Include="Assets\Fonts\SpeccyFont-ITA.dds">
+      <Filter>Assets\Fonts</Filter>
+    </Image>
+    <Image Include="Assets\Fonts\SpeccyFont-RUS.dds">
+      <Filter>Assets\Fonts</Filter>
+    </Image>
+    <Image Include="Assets\Textures\CloudyGlow.dds">
+      <Filter>Assets\Textures</Filter>
+    </Image>
+    <Image Include="Assets\Textures\Fuel.dds">
+      <Filter>Assets\Textures</Filter>
+    </Image>
+    <Image Include="Assets\Textures\Glow.dds">
+      <Filter>Assets\Textures</Filter>
+    </Image>
+    <Image Include="Assets\Textures\InterfaceGrey.dds">
+      <Filter>Assets\Textures</Filter>
+    </Image>
+    <Image Include="Assets\Textures\InterfaceRed.dds">
+      <Filter>Assets\Textures</Filter>
+    </Image>
+    <Image Include="Assets\Textures\Particle.dds">
+      <Filter>Assets\Textures</Filter>
+    </Image>
+    <Image Include="Assets\Textures\ShapeWireframe.dds">
+      <Filter>Assets\Textures</Filter>
+    </Image>
+    <Image Include="Assets\Textures\starbox_1024.dds">
+      <Filter>Assets\Textures</Filter>
+    </Image>
+    <Image Include="Assets\Textures\Starburst.dds">
+      <Filter>Assets\Textures</Filter>
+    </Image>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Assets">
@@ -36,6 +87,12 @@
     </Filter>
     <Filter Include="Project Files">
       <UniqueIdentifier>{02bae768-21ca-4929-9633-f0529cb1660c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Assets\Fonts">
+      <UniqueIdentifier>{217ef6b3-55ce-4cbf-b526-b9ec185e45ac}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Assets\Textures">
+      <UniqueIdentifier>{f4cb0d78-8c1f-4c7f-86e9-24054c89d473}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>

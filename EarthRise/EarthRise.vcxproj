@@ -99,12 +99,29 @@
     </AppxManifest>
   </ItemGroup>
   <ItemGroup>
+    <Image Include="Assets\Fonts\EditorFont-ENG.dds" />
+    <Image Include="Assets\Fonts\EditorFont-FRA.dds" />
+    <Image Include="Assets\Fonts\EditorFont-ITA.dds" />
+    <Image Include="Assets\Fonts\EditorFont-RUS.dds" />
+    <Image Include="Assets\Fonts\SpeccyFont-ENG.dds" />
+    <Image Include="Assets\Fonts\SpeccyFont-FRA.dds" />
+    <Image Include="Assets\Fonts\SpeccyFont-ITA.dds" />
+    <Image Include="Assets\Fonts\SpeccyFont-RUS.dds" />
     <Image Include="Assets\LockScreenLogo.scale-200.png" />
     <Image Include="Assets\SplashScreen.scale-200.png" />
     <Image Include="Assets\Square150x150Logo.scale-200.png" />
     <Image Include="Assets\Square44x44Logo.scale-200.png" />
     <Image Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
     <Image Include="Assets\StoreLogo.png" />
+    <Image Include="Assets\Textures\CloudyGlow.dds" />
+    <Image Include="Assets\Textures\Fuel.dds" />
+    <Image Include="Assets\Textures\Glow.dds" />
+    <Image Include="Assets\Textures\InterfaceGrey.dds" />
+    <Image Include="Assets\Textures\InterfaceRed.dds" />
+    <Image Include="Assets\Textures\Particle.dds" />
+    <Image Include="Assets\Textures\ShapeWireframe.dds" />
+    <Image Include="Assets\Textures\starbox_1024.dds" />
+    <Image Include="Assets\Textures\Starburst.dds" />
     <Image Include="Assets\Wide310x150Logo.scale-200.png" />
   </ItemGroup>
   <ItemGroup>
