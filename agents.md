@@ -1,54 +1,60 @@
 # agents.md
 
 ## Repository overview
-EarthRiseGame is a multi-project Visual Studio C++ solution centered on a shared simulation/networking core.
+EarthRiseGame is a multi-project Visual Studio C++ solution (`EarthRise.slnx`) centered on a shared simulation/networking core.
 
 Current top-level projects in the solution:
-- `NeuronCore/` - shared core library for platform, ECS, world math, serialization, networking, and simulation.
-- `NeuronClient/` - client-side session, replica, interpolation, and controller code.
-- `NeuronRender/` - rendering library with D3D12 device, scene, and canvas/HUD systems.
-- `ERServer/` - dedicated server host.
-- `ERHeadless/` - headless bot client host for live/dev validation.
-- `EarthRise/` - UWP client shell that wires client + render together.
-- `Testing/` - MSTest projects for each major area.
+- `NeuronCore/` - shared core for platform, ECS, world math, serialization, networking, and simulation. Packaged as a **shared items project** (`NeuronCore.vcxitems`); its sources compile directly into each consumer rather than building a standalone `.lib`.
+- `NeuronClient/` - client-side session, replica, interpolation, and controller code (static library).
+- `NeuronRender/` - rendering library with D3D12 device, scene, and canvas/HUD systems (static library).
+- `ERServer/` - dedicated server host (executable).
+- `ERHeadless/` - headless bot client host for live/dev validation (executable).
+- `EarthRise/` - UWP client shell that wires client + render together (executable; this is the `EarthRise.Client` referred to in `docs/`).
+- `Testing/` - MSTest projects, one per major area (`NeuronCoreTest`, `NeuronClientTest`, `NeuronRenderTest`, `ERServerTest`, `ERHeadlessTest`).
+
+Supporting files outside the solution:
+- `Config/db/` - SQL schema and ordered, forward-only migrations.
+- `Config/deploy/` - ERServer `Dockerfile` and dev `docker-compose.dev.yml`.
+- `CODE_STANDARDS.md` - language/style conventions. `docs/` - design and implementation docs; `docs/masterplan.md` is the design source-of-truth.
+
+## Source layout convention
+All projects keep their source and header files **flat** in the project directory. There are **no on-disk subdirectories** for grouping code; logical grouping is done with **Visual Studio project Filters** (`*.vcxproj.filters`). For example, `NeuronClient` keeps `Session.h`, `SessionImpl.h`, `Replica.h`, `ReplicaManager.h`, `Interpolator.h`, and `IClientController.h` flat, organised under `Session` / `Replica` / `Control` filters. Preserve this layout — do not reintroduce source subdirectories.
 
 ## Architecture notes
 
 ### NeuronCore
-`NeuronCore/NeuronCore.cpp` is currently a single translation unit that includes the subsystem headers so the static library validates the header-only M0 foundation. The file groups the code into:
+`NeuronCore.vcxitems` is a shared items project consumed by `EarthRise`, `NeuronClient`, and `ERServer`; its sources are compiled into each consumer rather than into a separate library. `NeuronCore/NeuronCore.cpp` is the translation unit that includes the subsystem headers so the header-only subsystems are validated; platform-backed subsystems carry their own `.cpp` files (`CngCrypto.cpp`, `WinsockSocket.cpp`, `SimComponents.cpp`). The headers group into:
 - Platform: `Debug.h`, `TimerCore.h`, `Allocators.h`
 - ECS: `Ecs.h`
-- World: `WorldPos.h`
+- World/math: `WorldPos.h`, `GameMath.h`, `MathCommon.h`
 - Serialization: `BitStream.h`, `Serde.h`
-- Networking: protocol, sequencing, replay, reliability, fragmentation, packet codec, crypto/socket abstractions, secure channel, handshake
-- Simulation: components, fixed-step accumulation, movement, snapshot
-
-Some platform-backed pieces already have `.cpp` implementations, especially crypto, sockets, and simulation support.
+- Networking: protocol, sequencing, replay, reliability, fragmentation, packet codec, crypto/socket abstractions, secure channel, handshake, connection
+- Simulation/server: components, fixed-step accumulation, movement, snapshot, command, server world/host
 
 ### Client
-`NeuronClient/NeuronClient.cpp` describes the client library layout:
-- `session/` - connection/session logic
-- `replica/` - snapshot decode and projection into render-friendly state
-- `interp/` - interpolation buffer
-- `control/` - client controller interfaces
+`NeuronClient/` (static library) holds the client library. Files are flat, grouped by VS Filters:
+- Session (`Session.h`, `SessionImpl.h`) - encrypted reliable-UDP client session
+- Replica (`Replica.h`, `ReplicaManager.h`) - snapshot decode and floating-origin projection into render-friendly state
+- `Interpolator.h` - interpolation buffer
+- Control (`IClientController.h`) - client controller interface
 
 ### Render
-`NeuronRender/NeuronRender.cpp` documents three rendering areas:
-- `gfx/` - D3D12 device, swap chain, command infrastructure
-- `scene/` - 3D scene rendering
-- `canvas/` - 2D HUD rendering
+`NeuronRender/` (static library) keeps its renderer files flat. `NeuronRender.cpp` is a stub TU; each class compiles from its own `.cpp`:
+- `DeviceResources` - D3D12 device, swap chain, command infrastructure
+- `SceneRenderer` - 3D scene rendering
+- `CanvasRenderer` - 2D HUD rendering
 
-Shader sources live under `NeuronRender/shaders/`.
+Shader sources live under `NeuronRender/shaders/`; compiled shader headers are generated at build time and are not in source control.
 
 ### Hosts
-- `ERServer/ERServer.cpp` is the authoritative dedicated server host. It owns the fixed-step simulation loop, processes UDP datagrams, and broadcasts snapshots.
+- `ERServer/ERServer.cpp` is the authoritative dedicated server host. It owns the fixed-step simulation loop, processes UDP datagrams (`IocpUdpListener`), and broadcasts snapshots.
 - `ERHeadless/ERHeadless.cpp` runs multiple bot clients against a live server and is useful for end-to-end validation.
 - `EarthRise/App.cpp` is the UWP shell that drives networking, snapshot consumption, interpolation, and rendering inside an `IFrameworkView` loop.
 
 ## Working conventions
 - Prefer minimal, localized changes.
 - Follow the existing folder boundaries instead of introducing cross-project shortcuts.
-- Do not create new subdirectories in the code tree just to group source or header files; use Visual Studio project Filters for logical grouping instead.
+- Keep source files flat within each project; use Visual Studio project Filters for logical grouping instead of new subdirectories.
 - Keep shared protocol/simulation rules in `NeuronCore` when both client and server depend on them.
 - Keep rendering-specific code in `NeuronRender` and client presentation/replica code in `NeuronClient`.
 - Match the surrounding style in each file. Existing code uses concise comments to describe milestones and subsystem intent.
@@ -59,14 +65,15 @@ Shader sources live under `NeuronRender/shaders/`.
 - For networking changes, inspect both the shared protocol code in `NeuronCore` and the host/session code in `ERServer`, `ERHeadless`, or `NeuronClient`.
 - For simulation changes, check snapshot encoding/decoding and any client replica/interpolation code impacted by the new state.
 - For rendering changes, confirm whether the data originates in `NeuronClient` replica state or in `NeuronRender` rendering code.
-- Be careful with project references and include paths; this solution is split into multiple static libraries and app/host entry points.
+- Be careful with project references and include paths. `NeuronCore` is a shared items project compiled into its consumers; `NeuronClient` and `NeuronRender` are static libraries; `EarthRise`, `ERServer`, and `ERHeadless` are app/host executables.
+- When adding a file, add it to the owning project (`.vcxproj` / `.vcxitems`) and place it under the appropriate Filter in the matching `.filters` file.
 
 ## Validation guidance
-- Build the full solution after changes.
+- Build the full solution (`EarthRise.slnx`) after changes.
 - Use the relevant MSTest project under `Testing/` when adding or changing covered behavior.
 - If touching live connection flow, server loop, or snapshot behavior, also consider validating with `ERServer` + `ERHeadless` because those hosts reflect the intended end-to-end path.
 
 ## Known current-state signals
-- `NeuronCore/NeuronCore.cpp` explicitly states that many subsystems are still header-only at the current milestone.
-- `NeuronClient/NeuronClient.cpp` still contains a stub `CreateSession()` kept for compatibility.
+- Several `NeuronCore` subsystems are still header-only at the current milestone; `.cpp` implementations land milestone by milestone.
+- `NeuronClient/NeuronClient.cpp` still contains a stub `CreateSession()` kept for ERHeadless compatibility.
 - The test projects exist, but some current test files are placeholders, so lack of deep automated coverage should be assumed unless verified in the specific area being changed.

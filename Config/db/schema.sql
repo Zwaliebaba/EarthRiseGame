@@ -7,7 +7,7 @@
 -- Azure-SQL-compatible: NO cross-DB queries, NO FILESTREAM, NO SQL Agent jobs.
 -- All money/economy columns use BIGINT integer credits (no float rounding).
 -- Quantities/mass are BIGINT. Positions are int64 metres (§6).
--- Versioned, forward-only migrations live in db/migrations/.
+-- Versioned, forward-only migrations live in Config/db/migrations/.
 --
 -- DURABILITY CONTRACT (§15)
 --   Economy events  → write-through / transactional outbox  (zero-loss on crash)

@@ -4,7 +4,7 @@
 // A thin interface so NeuronClient can run over Winsock on both the UWP client
 // and ERHeadless, and so tests can substitute an in-memory loopback that injects
 // loss/reorder/duplication. ERServer uses a separate IOCP-based listener
-// (ERServer/netio/) rather than this per-client interface.
+// (ERServer/IocpUdpListener) rather than this per-client interface.
 
 #include <cstdint>
 #include <span>

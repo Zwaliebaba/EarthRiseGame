@@ -3,7 +3,7 @@
 //
 // Windows-only. This is the real per-client datagram socket used by NeuronClient
 // (UWP client and ERHeadless). ERServer does NOT use this — it has its own
-// IOCP-based listener (ERServer/netio/IocpUdpListener) for many-connection scale.
+// IOCP-based listener (ERServer/IocpUdpListener) for many-connection scale.
 //
 // Design notes:
 //  * winsock2.h is NOT pulled into this header. The SOCKET handle is stored as a

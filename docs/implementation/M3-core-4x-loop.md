@@ -253,7 +253,7 @@
   record/replay), §16.3 (perf gates).
 - **Current state:** ERHeadless drives ≥3 base-moving bots (M1a).
 - **Work:**
-  - [ ] Extend the bot controller (`NeuronClient/control/`, scripted) to issue the new
+  - [ ] Extend the bot controller (`NeuronClient`, Control filter, scripted) to issue the new
         intents: harvest, return, enqueue build, warp/jump across beacons, attack a site.
   - [ ] Integration scenario: bots run **harvest→build→warp/jump→clear-site** end-to-end
         against a real ERServer (server-authoritative).

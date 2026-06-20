@@ -1,7 +1,7 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.12 — for review
-> **Date:** 2026-06-19
+> **Status:** DRAFT v0.13 — for review
+> **Date:** 2026-06-20
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
 > Microsoft SQL Server, a UWP/DirectX 12 client with **XAudio2/X3DAudio audio
@@ -14,7 +14,21 @@
 
 ## Changelog
 
-**v0.12 (this revision) — overview-driven control model**
+**v0.13 (this revision) — repository-structure cleanup**
+- **Source tree flattened:** project sources/headers are now **flat files** with logical
+  grouping via **Visual Studio Filters** — no on-disk code subdirectories (was `net/`,
+  `session/`, `replica/`, `interp/`, `control/`, `gfx/`, `scene/`, `canvas/`, `netio/`).
+  §5 layout rewritten to match.
+- **NeuronCore is now a shared items project** (`NeuronCore.vcxitems`) compiled directly
+  into its consumers (EarthRise, NeuronClient, ERServer) instead of a standalone static
+  library. Updates §4, §5.
+- **Solution migrated to the XML format** `EarthRise.slnx` (was `EarthRise.sln`).
+- **Ops files relocated under `Config/`:** `Config/db/` (schema + migrations) and
+  `Config/deploy/` (Dockerfile, compose). Updates §5, §14/§15 paths.
+- No design decisions changed; this revision only reconciles the plan with the on-disk
+  structure. Updates §4, §5, §16.
+
+**v0.12 — overview-driven control model**
 - **§23 reworked around an overview-driven command model** (EVE-Echoes prior art) as
   the **shared primary scheme for desktop *and* touch**: select/command via the §22.3
   **overview list + smart-select buttons + a smart context action**, routed through the
@@ -199,7 +213,7 @@ players at launch and designed to grow well past that.
 | Topic | Decision |
 | --- | --- |
 | Server OS / deploy | Windows only; **ERServer** in a **Windows Server Core container**. Winsock + IOCP. |
-| Build system | **MSBuild** (`EarthRise.sln`); UWP → MSIX. |
+| Build system | **MSBuild** (`EarthRise.slnx`); UWP → MSIX. |
 | Network transport | Custom **reliable UDP**, **encrypted** (CNG handshake, **server-key pinned**). |
 | **Database** | **SQL Server over the network — not containerized.** Self-hosted (Developer/Standard) now → **Azure SQL** later. ODBC Driver 18. |
 | **Authentication** | **Real login at launch — custom username/password**; CNG PBKDF2 hashing (+ server pepper, rate-limit/lockout); encrypted handshake. |
@@ -293,7 +307,7 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
   │  └───────────┬───────────────┘  │packets │  │ acks, auth/session         │  │
   │  ┌───────────▼───────────────┐  │snap/   │  └─────────────┬──────────────┘  │
   │  │ NeuronClient (lib)         │  │deltas  │  ┌─────────────▼──────────────┐  │
-  │  │  session/replica/interp/   │◀─┼───────▶│  │ Simulation (30 Hz fixed,   │  │
+  │  │  session · replica · interp│◀─┼───────▶│  │ Simulation (30 Hz fixed,   │  │
   │  │  controller(human)         │  │        │  │ auth. ECS, PvE AI, PvP)    │  │
   │  └────────────────────────────┘  │        │  └─────────────┬──────────────┘  │
   └────────────────────────────────┘        │  ┌─────────────▼──────────────┐  │
@@ -305,14 +319,14 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
   └──────────────┬─────────────────┘         └───────────────────────────┼──────┘
                  ▼                                       TCP 1433 (ODBC,  │
    ┌──────────────────────────────────────┐              Encrypt=yes)    ▼
-   │ NeuronCore (linked by ALL):          │  ┌───────────────────────────────────┐
+   │ NeuronCore (shared by ALL):          │  ┌───────────────────────────────────┐
    │ math(DirectXMath)·ECS·world(int64)·  │  │ Microsoft SQL Server (EXTERNAL,   │
    │ sectors·net protocol·serde·sim rules │  │ NETWORK SERVICE — not a container)│
    └──────────────────────────────────────┘  │ self-hosted now → Azure SQL later │
                                               └───────────────────────────────────┘
 ```
 
-**Targets:** **NeuronCore** (lib, all) · **NeuronClient** (lib → UWP app +
+**Targets:** **NeuronCore** (shared items, all) · **NeuronClient** (lib → UWP app +
 ERHeadless) · **NeuronRender** (lib, UWP/DX12 → UWP app) · **NeuronAudio** (lib,
 XAudio2/X3DAudio → UWP app **only**; ERHeadless links none) · **ERServer** (exe) ·
 **EarthRise.Client** (UWP/MSIX) · **ERHeadless** (exe) · **NeuronTools** (exes).
@@ -321,21 +335,29 @@ XAudio2/X3DAudio → UWP app **only**; ERHeadless links none) · **ERServer** (e
 
 ## 5. Repository Layout
 
+Source/header files are kept **flat** in each project; logical grouping uses **Visual
+Studio Filters**, not on-disk subdirectories. `NeuronCore` is a **shared items project**
+(`NeuronCore.vcxitems`) compiled into its consumers. The names listed after each project
+below are those logical groupings, not directories.
+
 ```
 /EarthRiseGame
-├── masterplan.md   ·   EarthRise.sln   ·   docs/   ·   db/ (SQL schema+migrations)
-├── NeuronCore/    math/ ecs/ world/ net/ serde/ sim/ platform/
-├── NeuronClient/  session/ replica/ interp/ control/ bots/   (predict/ added later)
-├── NeuronRender/  gfx/ scene/(3D) canvas/(2D) assets/(DDS,font,CMO)        [UWP]
-├── NeuronAudio/   engine/(XAudio2) spatial/(X3DAudio) wav/(RIFF reader) mixer/(buses) [client]
-├── ERServer/      netio/ simloop/ ai/(PvE) interest/ auth/ persist/(ODBC)
-├── EarthRise.Client/  app/ ui/(HUD on CanvasRenderer)                      [UWP/MSIX]
-├── ERHeadless/    host/ (N sessions; load + integration + replay tests)    [no audio]
-├── NeuronTools/   meshcook/ ddscheck/ fontpack/ wavcheck/ testrunner/
-├── assets/        .dds · monospace font bitmaps · your .cmo meshes · audio/*.wav (PCM-16)
-├── shaders/       .hlsl sources → dxc (SM6/DXIL) → CompiledShaders/*.h (embedded)
-└── deploy/        ERServer Dockerfile (Server Core) · k8s manifests · dev scripts
+├── EarthRise.slnx          solution (XML format)   ·   agents.md   ·   CODE_STANDARDS.md
+├── docs/                   masterplan.md (this plan) · design/ · implementation/
+├── NeuronCore/             shared items (.vcxitems): math · ECS · world/sector · serde · net · sim
+├── NeuronClient/           static lib: Session · Replica · Interpolator · Control
+├── NeuronRender/           static lib [UWP/DX12]: DeviceResources · SceneRenderer · CanvasRenderer
+│   └── shaders/            .hlsl → dxc (SM6/DXIL) → CompiledShaders/*.h (embedded, untracked)
+├── ERServer/               exe: IOCP UDP listener · fixed-step sim loop · (AI/interest/auth/persist)
+├── ERHeadless/             exe: N bot/scripted sessions (load + integration + replay)   [no audio]
+├── EarthRise/              exe [UWP/MSIX]: IFrameworkView shell wiring client + render  (a.k.a. EarthRise.Client)
+├── Testing/                MSTest per project: NeuronCoreTest · NeuronClientTest ·
+│                           NeuronRenderTest · ERServerTest · ERHeadlessTest
+└── Config/
+    ├── db/                 SQL schema + ordered, forward-only migrations
+    └── deploy/             ERServer Dockerfile (Server Core) · docker-compose.dev.yml
 ```
+**Planned (not yet in the tree):** `NeuronAudio/` (XAudio2/X3DAudio client lib + `NeuronAudioTest` — M2, §11.3) and `NeuronTools/` (datacook/datacheck + asset cookers — §12.6). Both follow the same flat-files + VS Filters convention when added.
 > Generated `CompiledShaders/` headers live under each project that compiles shaders
 > (per `$(ProjectDir)`), so they're picked up by `#include` at build time.
 
@@ -962,7 +984,7 @@ all but the longest are sim-stepped so they can be **interdicted** — core PvP)
   snapshot** (same serde primitives, §7.2) — restart replays the log onto the last
   snapshot for a clean, verifiable state, rather than reconstructing the sim from
   normalized rows.
-- **Schema (`/db/`, Azure-SQL-compatible — see `db/schema.sql`):** accounts/sessions
+- **Schema (`Config/db/`, Azure-SQL-compatible — see `Config/db/schema.sql`):** accounts/sessions
   (§14); **wallet + append-only currency ledger**; **player standings**; the
   **`ItemDefs` catalog** (canonical item-id space); **tiered-security regions**
   (§13.5); **bases** (layered HP + disable-not-destroy state, §13.1); **ships**
@@ -981,14 +1003,14 @@ all but the longest are sim-stepped so they can be **interdicted** — core PvP)
   live parties) is **never normalized** — it lives only in the warm-restart
   `SimSnapshots` blob (§9, §13.7). Avoid features absent in Azure SQL DB (cross-DB
   queries, SQL Agent jobs → Elastic Jobs, FILESTREAM). Versioned migrations
-  (`db/migrations/`, forward-only).
+  (`Config/db/migrations/`, forward-only).
 - **App→DB auth:** **🔒 SQL login now → managed identity / Entra ID on Azure SQL.**
 - **ERServer stateless** → restarts recover from snapshot + log.
 
 ---
 
 ## 16. Build, Tooling, Testing
-- **MSBuild** 🔒 (`EarthRise.sln`): UWP `.vcxproj` → MSIX; others standard. The
+- **MSBuild** 🔒 (`EarthRise.slnx`): UWP `.vcxproj` → MSIX; others standard. The
   **`dxc` (DXCCompile) task** emits embedded SM6/DXIL shader headers (§12.4); asset
   cooking (CMO/DDS) runs as pre-build steps via the VS content pipeline.
 
@@ -1008,7 +1030,7 @@ all but the longest are sim-stepped so they can be **interdicted** — core PvP)
 - Each `<project>Test` is a **Microsoft Native Unit Test project** (`.vcxproj` with
   `<UseOfMfc>false</UseOfMfc>` and the native test framework; includes
   `<ProjectReference>` to the project under test).
-- Every `<project>Test` is added to **`EarthRise.sln`** alongside its project.
+- Every `<project>Test` is added to **`EarthRise.slnx`** alongside its project.
 - A feature is not complete until its `<project>Test` tests pass. New feature code and
   its test cases land in the **same commit**.
 - Tests that require Windows platform APIs (CNG, IOCP, D3D12) live in the matching
@@ -1038,7 +1060,7 @@ all but the longest are sim-stepped so they can be **interdicted** — core PvP)
 
 ## 17. Milestone Roadmap
 
-**M0 — Foundations** *(S–M)* — `EarthRise.sln`; NeuronCore skeleton (DirectXMath,
+**M0 — Foundations** *(S–M)* — `EarthRise.slnx`; NeuronCore skeleton (DirectXMath,
 ECS w/ generation handles, world [`int64`/sector], serde, **fixed-step time**,
 allocators, logging); NeuronClient + ERHeadless skeletons; test runner; `dxc`
 shader-header build wired. **Done:** all targets build; NeuronCore tests pass;
