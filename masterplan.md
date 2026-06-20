@@ -1,6 +1,6 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.10 — for review
+> **Status:** DRAFT v0.11 — for review
 > **Date:** 2026-06-19
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
@@ -14,7 +14,36 @@
 
 ## Changelog
 
-**v0.10 (this revision) — audio subsystem**
+**v0.11 (this revision) — completeness pass (client engine, UI/radar, navigation, live-ops)**
+- **DirectX 12 engine architecture written down (new §11.1):** adapter/feature-level
+  selection (**target FL 12_0, Resource Binding Tier 2, SM6.0** — broad reach),
+  **triple-buffered** flip-model swap chain + fences, command queues/allocators/lists,
+  **descriptor-heap strategy**, root-signature/binding model, resource heaps + upload
+  ring, **PSO management**, the **HDR forward + bloom** pass graph, barriers, GPU
+  memory budget, UWP suspend/`Trim`, device-removed/DRED, PIX/timestamp profiling.
+- **Camera & VFX (new §11.2):** space-RTS camera (orbit/pan/zoom/follow, floating-origin
+  rebase, feeds the audio listener) + **GPU-compute additive particle system**.
+- **Navigation & travel decided (new §13.12):** **warp + jump-beacon network** —
+  sublight combat movement, **interdictable warp** to scanned points, long-haul
+  **jump drive + fuel** between beacons (player/territory-owned beacons = chokepoints).
+  Fills the biggest gap (an interstellar world with no travel model).
+- **Client UI, HUD, radar & accessibility (new §22):** screen inventory, HUD spec,
+  **3D bracket overlay + sortable overview list + 2D radar disc** (IFF, range rings),
+  scalable/DPI-aware UI, **localization-ready** string table (English at launch),
+  accessibility (**scalable UI + audio cues** at launch).
+- **Input & controls (new §23):** **mouse+keyboard (primary) + touch (tablets)** RTS
+  scheme; commands → server-validated intents; rebindable keymap.
+- **Communications (new §24):** chat channels + **in-game mail + offline
+  notifications** (needs Mail/Notifications tables — §15).
+- **Client platform services (new §25):** settings/config (UWP local storage),
+  client logging & **crash/minidump** reporting, MSIX/Store update + version gate.
+- **Game-data files & tooling (new §12.6):** text source → cooked binary via
+  `datacook`/`datacheck`, **dev hot-reload**; one dataset drives server, client & bots.
+- **World clock & live-ops (new §26):** **24/7, rolling restarts, no scheduled
+  downtime** (warm-restart SLA); authoritative world clock; event director; live tunables.
+- **Risks R20–R22**; §2 decisions, milestones (M1b/M2/M3/M5/M7), §19, glossary updated.
+
+**v0.10 — audio subsystem**
 - **Audio added (new §11.3, `NeuronAudio`):** **XAudio2 (2.9)** for playback +
   **X3DAudio** for 3D positional sound, **WAV (PCM 16-bit) only** via a custom
   RIFF/WAVE reader (mirrors the CMO/DDS custom-parser approach). Both are Windows-SDK
@@ -185,6 +214,14 @@ players at launch and designed to grow well past that.
 | Sim tick / snapshot | **30 Hz sim (~33.3 ms) / 20 Hz snapshot**; true fixed-step accumulator. |
 | Persistence durability | **Economy = write-through / outbox; position = write-behind (RPO bounded).** |
 | Dev / Prod | **Dev: Docker Desktop. Prod: Kubernetes** (Windows nodes + UDP LB). |
+| **Navigation / travel** | **Warp + jump-beacon network**: sublight combat move; **interdictable warp** to scanned points; long-haul **jump drive + fuel** between beacons (§13.12). |
+| **Renderer target** | **D3D12 FL 12_0, Resource Binding Tier 2, SM6.0**; **triple-buffered** flip-model; **HDR forward + bloom**, no MSAA; GPU-compute particles (§11.1–11.2). |
+| **Client input** | **Mouse+keyboard (primary) + touch (tablets)**; RTS scheme (box-select, control groups); commands → **server-validated intents** (§23). |
+| **Tactical UI / radar** | **3D bracket overlay + sortable overview list + 2D radar disc** (IFF, range rings) (§22). |
+| **Communications** | **Chat channels + in-game mail + offline notifications** (§24). |
+| **Server uptime** | **24/7, rolling restarts via warm-restart; no scheduled downtime** (§26). |
+| **Localization** | **English at launch, localization-ready** (string table; Unicode-capable font) (§22). |
+| **Accessibility** | **Scalable UI/HUD + audio cues** at launch (§22). |
 | First milestone | Networked tech slice, split **M1a (headless) → M1b (client)** (§17). |
 
 ### 🔒 Hard constraints (brief)
@@ -475,6 +512,75 @@ Separate subsystems 🔒 (own modules/PSOs/command lists; composited last).
 Shaders are precompiled into embedded SM6/DXIL byte-array headers (no runtime HLSL on
 UWP); see §12.4.
 
+### 11.1 DirectX 12 engine architecture (NeuronRender) 🔒
+The renderer targets **broad reach**: **D3D12 feature level 12_0, Resource Binding
+Tier 2, Shader Model 6.0, Root Signature 1.1** — runs on most DX12 GPUs incl.
+integrated, ample for the cheap low-poly Darwinia look. No mesh shaders / ray tracing.
+
+- **Device & adapter:** DXGI factory enumerates adapters; pick the highest-performance
+  hardware adapter that meets FL 12_0 (`CheckFeatureSupport` for binding tier, SM6,
+  RS 1.1); **WARP** fallback for dev/CI. **Debug layer + GPU-based validation** in dev
+  builds; **DRED** (Device Removed Extended Data) for device-removal diagnostics.
+- **Frames in flight = 3 (triple-buffered).** Swap chain via
+  `CreateSwapChainForCoreWindow`, **`DXGI_SWAP_EFFECT_FLIP_DISCARD`**, LDR backbuffer
+  (`R8G8B8A8_UNORM` or `R10G10B10A2`). Per-frame: **command allocator + a fence
+  value**; the CPU waits on the frame fence before reusing a frame's allocators/upload
+  ring. Optional **waitable swap chain** for low-latency frame pacing.
+- **Command model:** one **DIRECT** queue (graphics; compute runs here at FL 12_0) +
+  one **COPY** queue for async resource uploads. Command lists recorded per frame
+  (single-threaded record at M1b; parallel record a later lever).
+- **Descriptor heaps:**
+  - One large **shader-visible CBV/SRV/UAV heap**, **ring-sub-allocated per frame** for
+    per-draw descriptors; a non-shader-visible **staging heap** holds persistent
+    descriptors copied in via `CopyDescriptors`.
+  - A small **sampler heap** (static sampler set; most samplers as static samplers in
+    the root signature).
+  - Non-shader-visible **RTV** and **DSV** heaps.
+  - **Binding model (Tier 2, not full bindless):** root signatures authored in HLSL
+    (§12.4) — **root constants** (per-draw ids) + **root CBVs** (per-frame/per-view) +
+    **descriptor tables** for material textures; **per-instance data via a structured
+    buffer (SRV)** drives instanced ship draws.
+- **Resources & memory:**
+  - **DEFAULT** heap for static GPU data (meshes, DDS textures), uploaded from **UPLOAD**
+    staging on the COPY queue with fence sync.
+  - Dynamic per-frame constants from a **persistently-mapped UPLOAD ring buffer**.
+  - **Manual resource-state tracking & barriers** (RT↔SRV, etc.), batched to minimize
+    transitions.
+  - **GPU memory budget** via `IDXGIAdapter3::QueryVideoMemoryInfo`; residency-aware
+    texture streaming as fleets/sectors stream in.
+- **PSO management:** PSOs built at load from the **embedded DXIL** (§12.4), **cached by
+  hash**; optional `ID3D12PipelineLibrary` disk cache. Shared **Scene** and **Canvas**
+  root signatures.
+- **Pass graph (HDR forward — fits the Darwinia look):**
+  1. **Scene forward** → HDR target **`R16G16B16A16_FLOAT`** (instanced emissive ships;
+     depth `D32_FLOAT`). No MSAA (low-poly + bloom; optional cheap post-AA in tonemap).
+  2. **Bright-pass** extract → downsample → **Gaussian bloom** (ping-pong blur).
+  3. **Additive particles** (§11.2) into HDR.
+  4. **Tone-map + post** (scanline / vignette / grain) → LDR backbuffer.
+  5. **Canvas (2D UI)** orthographic pass → backbuffer (post-tonemap, no bloom).
+  6. **Present.**
+- **Resize / suspend / loss:** fence-flush then recreate swap-chain buffers on resize;
+  handle DPI/orientation via `DisplayInformation`; on UWP **suspend**, call
+  `IDXGIDevice3::Trim()` to release memory, rebuild on resume; on
+  `DXGI_ERROR_DEVICE_REMOVED`, recreate the device (DRED logs the cause).
+- **Profiling:** **PIX markers** + a **timestamp query heap** feed the render
+  frame-time perf gate (§16.3, App. B). Render runs on its own thread, decoupled from
+  the sim/snapshot cadence.
+
+### 11.2 Camera & VFX / particles 🔒
+- **Camera (space-RTS):** right-handed perspective; **orbit / pan / zoom / follow**,
+  edge-scroll + drag, **center-on-selection**, smooth zoom from ship-detail to fleet
+  tactical range. The camera **is** the **floating-origin** render origin (§6.4) —
+  panning far triggers a rebase — and supplies the **X3DAudio listener** (§11.3). Touch
+  adds pinch-zoom / two-finger rotate (§23).
+- **VFX — GPU-compute particles:** particle pools in structured buffers (UAV);
+  **spawn/update in compute shaders** (FL 12_0), drawn as **additive instanced
+  billboards** into the HDR target. Categories: thrusters, weapon tracers/muzzle,
+  impacts, **explosions**, **warp/jump** effects, mining beams. CPU emits spawn
+  requests only; the GPU simulates. A **per-frame particle budget** with distance LOD
+  keeps big fights within frame time (ties to App. B / R16). Additive throughout for
+  the neon Darwinia glow.
+
 ### 11.3 Audio — XAudio2 / X3DAudio (NeuronAudio) 🔒
 A dedicated **client-only** `NeuronAudio` library (sibling to NeuronRender). It links
 **NeuronCore** (math/types) but **not** NeuronRender; the UWP client owns both and
@@ -553,6 +659,22 @@ psoDesc.PS = { g_pScenePS, sizeof(g_pScenePS) };
 - **`wavcheck` (NeuronTools):** build-time validation — confirms RIFF/WAVE + PCM-16,
   flags non-PCM/compressed files, warns if a 3D-tagged cue is stereo (X3DAudio needs
   mono). Long streamed assets (music/ambient) are loaded incrementally, not embedded.
+
+### 12.6 Game-data files & tooling 🔒
+The **catalog/balance boundary** (§15) keeps balance out of SQL and code. Game data —
+**item/hull/module stats, crafting recipes, the research tree, audio cue catalog, the
+jump-beacon graph, region/security layout, anomaly & invasion definitions** — is
+authored as **text source** and cooked to the **versioned binary serde** (§7.2):
+
+- **`datacook` (NeuronTools):** text source → packed binary, loaded by **NeuronCore**
+  so **one dataset drives the server sim, the client display, and bots** (no drift).
+- **`datacheck` (NeuronTools):** referential-integrity validation in CI — item ids
+  exist, recipe inputs/outputs resolve, **research prereqs are acyclic**, cue→clip
+  honours the *3D ⇒ mono* rule (§11.3), every beacon links to a valid region.
+- **Dev hot-reload:** reload game data into a running dev ERServer / client for fast
+  iteration; in prod, tunables reload as a **live-ops** lever (§26) without a redeploy.
+- Game data is **versioned with the build** and gated by the protocol version (§8.5),
+  so client and server always agree on rules.
 
 ---
 
@@ -751,8 +873,40 @@ emitter; **disable-not-destroy** retreat state), `Ship` (🔒 roles: scout / fig
 harvester / builder-logistics / hauler / EWAR; **fitting grid** of `Module`s),
 `Module` (weapon/tank/prop/EWAR/rep/sensor with power-CPU cost + damage-type/resist
 stats), `ResourceNode`, `Projectile`, `LootContainer`, `MarketOrder`,
-`TerritoryStructure` (claimable, owner, upkeep, yield), `AnomalySite`,
-`InvasionEvent`, `NpcUnit` (PvE AI), `Player`, `Party/Fleet` (light squad).
+`TerritoryStructure` (claimable, owner, upkeep, yield; incl. **jump beacons**),
+`JumpBeacon`, `AnomalySite`, `InvasionEvent`, `NpcUnit` (PvE AI), `Player`,
+`Party/Fleet` (light squad).
+
+### 13.12 Navigation & travel — warp + jump-beacon network 🔒
+The universe spans ±975 ly, so travel needs three scales (all **server-authoritative**;
+all but the longest are sim-stepped so they can be **interdicted** — core PvP):
+
+1. **Sublight maneuver** (combat / short range) — the RTS movement layer (§6); ships and
+   the base move at sublight within an engagement. Authoritative, validated per tick.
+2. **Warp** (in-system / short hop) — *align then warp* to a **scanned/bracketed
+   destination** (resource node, beacon, anomaly, structure, fleet member) at high
+   speed; **travel time ∝ distance**. Warp is fast sublight along a path, **not
+   instant**, so it can be **interdicted** by tackle/warp-disruptors (§13.2) —
+   enabling **interception, ganks and blockades**.
+3. **Jump** (long-haul) — a network of **jump beacons** (public NPC beacons in
+   high-sec; **player/territory-owned** beacons in low/null, a `TerritoryStructure`
+   type, §13.6). A **jump drive** (on the base and jump-capable ships) jumps between
+   **linked beacons**, consuming **fuel** (a harvested/crafted resource — economy sink,
+   §13.4), with a **spool-up** (a vulnerability window) and a post-jump **cooldown**.
+   Jump range is limited → crossing the galaxy means **chaining beacons**.
+
+- **Mobile-base travel:** the capital base warps slowly and jumps via beacons (larger
+  fuel cost / longer spool) — this is how the "mobile home" actually relocates.
+- **Why beacons matter:** they make **territory strategic** (own the network = control
+  movement; chokepoints to camp) and give the economy a steady **fuel** sink.
+- **Fuel risk:** running dry strands a fleet/base (a real exploration hazard).
+- **Netcode/interest (R21):** warp/jump cross sectors fast → rapid interest-set churn;
+  the server **prefetches the destination sector's interest** at warp/jump start, and
+  validates interdiction server-side. Ties to §6.3 / §8.4.
+- **Onboarding:** high-sec has **dense public beacons + short distances**; low/null are
+  sparser and riskier (risk→reward, §13.5).
+- **Data-driven:** the beacon graph and region/security layout are **game data**
+  (§12.6); player beacons live in the schema (`TerritoryStructures`, §15).
 
 ---
 
@@ -803,8 +957,10 @@ stats), `ResourceNode`, `Projectile`, `LootContainer`, `MarketOrder`,
   (hull/role + layered HP) and **fitting** (`ShipModules`/`FitTemplates`, §13.2);
   **itemized inventory** (`BaseInventory`/`ShipCargo`) + build queue; **research +
   unlocked blueprints** (§13.3); **markets** (`MarketOrders`/`MarketTrades`, §13.4);
-  **territory** (`TerritoryStructures` + capture log, §13.6); **insurance** (§13.9);
-  itemized **loot**; **killmail log**; **outbox**, **snapshots**.
+  **territory** (`TerritoryStructures` + capture log, incl. **jump beacons** §13.12,
+  §13.6); **insurance** (§13.9); itemized **loot**; **killmail log**; **in-game mail +
+  offline notifications** (§24 — `Mail`/`Notifications`, **migration 003**);
+  **outbox**, **snapshots**.
   **Catalog/balance boundary:** item/hull/module *stats*, crafting *recipes*,
   research *costs/prereqs*, and anomaly/invasion *definitions* are **game data**
   (versioned with the build, loaded by NeuronCore) — **not** SQL; SQL keeps only the
@@ -885,9 +1041,12 @@ a sector boundary under simulated loss/reorder/dup; MITM/replay tests pass; tick
 within budget (App. B).
 
 **M1b — Client tech slice** *(M)* — UWP client renders base + a few ships with **3D
-Scene + 2D Canvas HUD** as separate passes; snap-on-ack correction. **Done:** 1 UWP +
-≥3 bots share the world; no `int64_t` reaches the GPU; 3D/2D split verified; loopback
-path tested **and** a non-exempt run validated before Store.
+Scene + 2D Canvas HUD** as separate passes; **DX12 engine foundation** (FL 12_0,
+triple-buffered flip-model + fences, descriptor heaps, PSO cache, barriers — §11.1);
+**space-RTS camera** + basic **mouse+keyboard** input; snap-on-ack correction.
+**Done:** 1 UWP + ≥3 bots share the world; no `int64_t` reaches the GPU; 3D/2D split
+verified; camera pan/zoom + select/move work; loopback path tested **and** a
+non-exempt run validated before Store.
 
 **M2 — Darwinia look + audio** *(M–L)* — DDS + **CMO** loaders, monospace Canvas HUD,
 bloom + additive particles, instanced ships; **`NeuronAudio`**: XAudio2 voice graph +
@@ -895,12 +1054,14 @@ bloom + additive particles, instanced ships; **`NeuronAudio`**: XAudio2 voice gr
 event SFX + UI + music. **Done:** an instanced fleet (your CMO meshes) with thrusters
 + glow over a legible HUD at target frame time, **with 3D-positioned thruster/weapon
 SFX, ambient bed and music** mixed across buses (and ERHeadless still builds/runs with
-no audio).
+no audio); **GPU-compute particles**, **radar/overview HUD** basics, settings screen.
 
-**M3 — Core 4X loop + fleet command** *(L)* — nodes, harvesting, storage, build
-queue, sensor/fog; **RTS fleet control** (select/move/attack/guard/control-groups)
-over a 6–12-ship fleet + mobile base. **Done:** harvest → return → build a ship and
-**command a multi-ship fleet** to clear a basic NPC site, server-authoritative.
+**M3 — Core 4X loop, fleet command & navigation** *(L)* — nodes, harvesting, storage,
+build queue, sensor/fog; **RTS fleet control** (select/move/attack/guard/control-groups)
+over a 6–12-ship fleet + mobile base; **navigation: warp + jump-beacon network**
+(fuel, interdiction) + **starmap UI**; tactical **overview list**. **Done:** harvest →
+return → build a ship, **warp/jump across beacons**, and **command a multi-ship fleet**
+to clear a basic NPC site, server-authoritative.
 
 **M4 — Scale & interest** *(L)* — sector subscriptions, delta compression, snapshot
 job pool; **ERHeadless ~100 bots**. **Done:** 100-bot load test holds 30 Hz within
@@ -909,9 +1070,10 @@ the bandwidth budget (App. B); per-client bandwidth measured vs the M0 estimate.
 **M5 — Accounts, auth & persistence** *(M–L)* — real login (custom username/password,
 PBKDF2 + pepper + rate-limit); ODBC persist layer + schema/migrations + **outbox
 (write-through) + write-behind + snapshot/log warm-restart**; **SQL Server over the
-network (self-hosted)**; ERServer stateless. **Done:** register/login works; kill &
-restart the ERServer container → world + bases + economy restore with **zero economy
-loss**.
+network (self-hosted)**; ERServer stateless; **24/7 rolling-restart drill** (warm-restart
+as an uptime SLA) + **client reconnect with backoff/jitter** (§26, R22). **Done:**
+register/login works; kill & restart the ERServer container → world + bases + economy
+restore with **zero economy loss**, and connected clients reconnect cleanly.
 
 **M6 — Combat model & deployment** *(L)* — **role + fitting + damage-type combat**
 (shield/armor/hull + resists, module fitting grid, EWAR/logistics archetypes),
@@ -926,12 +1088,13 @@ composition beat raw numbers, playable on the prod topology.
 capture/hold timers, upkeep/yield, ownership persistence); **player crafting economy**
 (refine→components→build) + **regional markets** + currency sinks + **ship
 insurance**; **dynamic faction invasions** + **procedural anomalies/expeditions**;
-**protected starter onboarding** + objective chain; retention loop. **Interest at
-scale:** entity aggregation/LOD validated for contested sectors (App. B, R16).
-**Done:** a full sandbox session — onboard in high-sec, build & fit a fleet, run
-anomalies, trade, push into null, and **claim & hold territory** through a contested
-fight — playable end-to-end by players + bots, with zero economy loss across a
-server restart.
+**protected starter onboarding** + objective chain; retention loop; **full UI suite**
+(fitting / market / research / inventory / territory), **in-game mail + notifications**
+(§24), **touch control scheme** (§23). **Interest at scale:** entity aggregation/LOD
+validated for contested sectors (App. B, R16). **Done:** a full sandbox session —
+onboard in high-sec, build & fit a fleet, run anomalies, trade, push into null, and
+**claim & hold territory** through a contested fight — playable end-to-end by players +
+bots (mouse+keyboard and touch), with zero economy loss across a server restart.
 
 ---
 
@@ -958,12 +1121,22 @@ server restart.
 | R17 | **Conquest too brutal for newcomers → no growth** | High | High-sec protected onboarding (§13.5/13.9); ship insurance + base disable-not-destroy; catch-up/flattened power curve (§13.3); onboarding objective chain. |
 | R18 | **Thin social glue (light fleets only) hurts retention & conquest defense** | Med–High | Individual ownership works at ~100 players; **persistent corporations tracked as the first social expansion** (§13.8/§19) — promote forward if retention or coordinated defense suffers. |
 | R19 | **Audio on UWP / WAV-only / X3DAudio correctness** | Low | XAudio2 2.9 + X3DAudio are SDK components (UWP-supported); custom RIFF reader + `wavcheck` validate PCM-16; emitter math + parser unit-tested (NeuronAudioTest, testrunner); suspend/resume voice handling; audio is presentation-only (no sim/determinism impact). |
+| R20 | **UI/HUD scope, esp. RTS-on-touch** | Med | M+K is the primary, lowest-risk scheme; touch gets an explicit select-vs-pan mode + scalable hit targets (§23); custom immediate-mode toolkit on Canvas; HUD/radar built incrementally (M1b→M2→M3); validate touch separately before relying on it. |
+| R21 | **Warp/jump interception netcode & fast interest churn** | Med | Warp/jump are sim-stepped & server-authoritative (interdiction validated); **prefetch destination-sector interest** on warp/jump start; beacon graph is data-driven; test interception + sector-transition churn at M3/M7 (§13.12, §8.4). |
+| R22 | **24/7 uptime depends on warm-restart reliability** | Med–High | Warm-restart (snapshot+outbox) is now an **uptime SLA**, not just crash recovery: restart drills in M5; reconnect **backoff/jitter** against thundering-herd; rolling-restart playbook (§26); economy stays zero-loss via outbox (§15). |
 
 ---
 
 ## 19. Open Questions & Future Considerations
 
-**Resolved this revision (v0.9 — gameplay):** core fantasy = Homeworld × EVE fleet
+**Resolved this revision (v0.11 — completeness):** travel = warp + jump-beacon network;
+renderer = D3D12 FL 12_0 / Tier 2 / SM6.0, triple-buffered HDR forward + bloom;
+input = mouse+keyboard primary + touch on tablets; tactical UI = 3D overlay + overview
+list + 2D radar disc; comms = chat + in-game mail + offline notifications; uptime =
+24/7 rolling restarts (no scheduled downtime); localization = English at launch but
+localization-ready; accessibility = scalable UI + audio cues at launch.
+
+**Resolved earlier (v0.9 — gameplay):** core fantasy = Homeworld × EVE fleet
 command; combat = role + fitting + damage-type counters; progression = hybrid
 tech-tree + fitting; economy = player-driven crafting; world = tiered security
 high→low→null with claimable nullsec territory; PvE = invasions + procedural
@@ -988,6 +1161,12 @@ SM6/DXIL via `dxc`; M1 split M1a/M1b; crypto hardening.
 - **Onboarding objective chain** scope (recommended for M3/M7).
 - Whether any subsystem needs **own-unit/fleet prediction** (decided by feel at M6).
 - AES-GCM **rekey interval** vs packet rate; replay-window width.
+- **RTS-on-touch control scheme** (select-vs-pan disambiguation, command palette) —
+  prototype & validate before relying on the tablet target (R20).
+- **Warp/jump balance** — warp-speed vs distance, jump range/fuel/spool/cooldown, and
+  interdiction strength; tune for interception gameplay without making travel tedious.
+- **Mail/notification volume & anti-spam** (rate-limits, blocklists) at scale (§24).
+- **Particle/voice budgets** in big fights (render + audio) vs App. B (R16).
 
 **Deferred to post-launch (fit the v0.9 frame, not selected now):**
 - **Persistent corporations / alliances + diplomacy & shared wallet** (launch = light
@@ -997,6 +1176,9 @@ SM6/DXIL via `dxc`; M1 split M1a/M1b; crypto hardening.
   (§13.7).
 - **Active combat abilities** (overheat/EWAR bursts) where feel/prediction allow (§13.2).
 - **Seasons / leaderboards** and other meta-retention (§13.10).
+- **Gamepad support** and **multi-language** localization (launch is M+K+touch, English).
+- **Colorblind-safe IFF** and **visual alerts/subtitles** for audio cues — recommended
+  accessibility follow-ups beyond the launch scope (§22.5).
 - Federated **Entra ID** / social login (launch is custom username/password).
 - **Multi-shard** topology + directory/matchmaking — the main lever to grow well past
   100 players (§13.1 growth intent).
@@ -1051,6 +1233,131 @@ per-shard and per-client:
 
 Exported as structured logs + counters (lightweight, MS-only — perf counters / ETW /
 log lines), consumable by the headless harness for automated perf gates.
+
+---
+
+## 22. Client UI, HUD, Radar & Accessibility 🔒
+UI is built on the **CanvasRenderer** primitive layer (§11) with a thin **custom
+immediate-mode widget toolkit** (panels, buttons, lists, sliders, text fields,
+drag) — no third-party UI lib. **DPI-aware, anchor-based layout** with a user **HUD
+scale**; all strings flow through a **localization string table** (§22.4).
+
+### 22.1 Screen inventory (launch)
+- **Boot / login / register** (account, §14) → server/version status.
+- **Main HUD (in-space)** — the primary screen (§22.2).
+- **Fitting** — hull slot grid, modules, **PG/CPU budget**, save/load **fit
+  templates** (§13.2; `FitTemplates`).
+- **Inventory / cargo & build queue** — base storage + ship cargo; enqueue builds.
+- **Market / trade** — regional order book, place buy/sell, fees, my orders (§13.4).
+- **Starmap / navigation** — the **jump-beacon graph** (§13.12), set destination/route,
+  security-tier coloring, owned territory, fleet/base location.
+- **Research / tech-tree** — branches × tiers, datacore costs, queue (§13.3).
+- **Social** — standings, party/fleet roster, chat (§24).
+- **Mail & notifications** (§24).
+- **Settings** — graphics / audio / keybinds / accessibility / language (§25).
+
+### 22.2 HUD spec (in-space)
+- **Tactical view & radar (§22.3).**
+- **Fleet command bar** — control groups, selected ships, formation/stance, orders.
+- **Selected-unit & target panels** — **shield / armor / hull** bars + per-type
+  resists, modules, range; base capacitor/jump-fuel/jump-cooldown.
+- **Sensor / scan UI** — scan anomalies/beacons; fog/sensor range.
+- **Alerts / notifications** — low-hull → retreat, under attack, jump ready, invasion
+  incoming (paired with **audio cues**, §22.5).
+- **Resource / credits readout**, **chat** (§24), **context commands**.
+
+### 22.3 Radar / tactical overview 🔒 (3D overlay + overview list + 2D radar disc)
+Three synced views (selection is shared):
+- **3D bracket overlay** — IFF brackets on entities in the scene + **off-screen
+  direction arrows** for out-of-view contacts (fits the minimalist Darwinia look).
+- **Sortable overview list** — the primary target-management tool: contacts with
+  **type / distance / velocity / IFF**, sortable & filterable (EVE-style "overview").
+- **2D radar disc** — relative **bearing + range rings + IFF**, with vertical-offset
+  indicators for true-3D awareness.
+- **IFF** = friend / neutral / hostile from **player standings** (§13.8), shown by
+  **shape + color** (color is never the only channel — see accessibility §22.5).
+
+### 22.4 Localization 🔒 (English at launch, localization-ready)
+All UI text is referenced by **string id** through a string table; **no hard-coded
+display strings**. The monospace bitmap-font pipeline (§12.2) stays **Unicode-capable**
+(codepoint→cell). **English ships at launch**; adding a language is **data, not code**.
+*(Fixed-grid monospace makes CJK hard; treat CJK/RTL as a later, separate effort.)*
+
+### 22.5 Accessibility 🔒 (launch scope)
+- **Scalable UI / HUD 🔒** — user HUD/text scale (also serves the **touch/tablet**
+  target and high-DPI). 
+- **Audio cues for key events 🔒** — distinct, learnable cues (low hull, under attack,
+  jump ready) via the NeuronAudio cue catalog (§11.3) so players aren't forced to watch
+  everything.
+- **💡 Recommended next:** colorblind-safe IFF (shape/icon, not color alone — partly
+  satisfied by §22.3) and on-screen **visual alerts** mirroring critical audio cues;
+  tracked in §19.
+
+---
+
+## 23. Input & Controls 🔒 (mouse+keyboard primary, touch on tablets)
+Input flows: UWP **CoreWindow** pointer/key/gesture events → an **`IInputSource`**
+abstraction → either UI events or **fleet commands → intents** (server-validated,
+§8.4; never client-authoritative). **Keymap is rebindable** (client config, §25).
+
+- **Mouse + keyboard (primary):** left-click select; **drag = box-select**;
+  right-click = context command (move/attack/harvest/guard/warp); double-click = select
+  by type; **`Ctrl+#` set / `#` recall control groups**; camera = WASD/edge-scroll pan,
+  wheel zoom, MMB/alt-drag orbit, **center-on-selection**; hotkeys for modules/abilities
+  and for warp/jump.
+- **Touch (tablets):** tap select; **drag box-select vs camera-pan disambiguated by an
+  explicit mode toggle / long-press**; tap-and-hold = context menu; **two-finger pan,
+  pinch zoom, two-finger twist rotate**; on-screen **command palette + control-group
+  bar**; large, **scalable hit targets** (§22.5). *(RTS-on-touch is the main UX risk —
+  R20.)*
+- **Selection model:** single / additive (shift) / box / by-type; commands queue
+  (shift-chain) and respect formations/stance.
+
+---
+
+## 24. Communications & Notifications 🔒
+- **Chat (real-time):** channels — **global · local (by region/sector) · party/fleet ·
+  direct**. Carried on the **ReliableOrdered** channel (§8.2); server-relayed with
+  **rate-limit + mute/block**; transient (recent scrollback only).
+- **In-game mail (persistent) 🔒:** player-to-player messages stored in SQL
+  (`Mail` table, **migration 003**, §15); inbox UI, unread counts; **survives offline**.
+- **Offline notifications 🔒:** server-generated events surfaced **on login and live** —
+  **territory attacked/lost** (§13.6), **market order filled** (§13.4), **insurance
+  paid** (§13.9), **killmail** involving you, **build complete** — stored
+  (`Notifications` table) until read. Strong async-retention hook.
+
+---
+
+## 25. Client Platform Services 🔒
+- **Settings / config:** stored in **UWP local storage** (`ApplicationData`), **not
+  SQL** — graphics options, **audio bus volumes**, **keybinds**, HUD scale/layout,
+  accessibility, language. Sane defaults + reset.
+- **Graphics options:** resolution / fullscreen (UWP), VSync / frame cap, bloom &
+  particle quality, render scale, HUD scale — driving §11.1–11.2.
+- **Client logging & crash reporting:** structured **rolling local logs** + **ETW**;
+  on crash capture a **minidump** + recent logs (Windows Error Reporting / local),
+  **opt-in upload**; **DRED** for GPU device-removed. (Server telemetry is §21.)
+- **Updates / patching:** client ships and auto-updates via **MSIX / Microsoft Store**;
+  the **protocol-version gate** (§8.5) blocks mismatched clients with a clear
+  "update required" message; assets are in-package; game data is build-versioned (§12.6).
+
+---
+
+## 26. World Clock & Live-Ops 🔒
+- **24/7, no scheduled downtime 🔒:** rely on the **warm-restart** (snapshot + outbox,
+  §15) for **rolling restarts/deploys** — k8s restarts the shard pod and clients
+  **reconnect** (session token + one-session rule, §14; backoff/jitter to avoid a
+  reconnect storm — R22). A brief reconnect blip is acceptable; **warm-restart
+  correctness is now an uptime SLA**, drilled at M5.
+- **Authoritative world clock:** the server maps the monotonic sim tick → UTC and is the
+  single time source (clients align via clock-sync, §8.5). Drives **invasion scheduling,
+  anomaly spawn/despawn, market-order expiry, structure upkeep ticks, insurance
+  expiry**, and daily/weekly cadences.
+- **Event director:** a lightweight server system schedules invasions/anomalies on the
+  world clock + region exploitation (§13.7), within the sim/bandwidth budget.
+- **Live-ops levers:** server tunables (spawn/faucet/sink rates, fleet cap) are **game
+  data** with **hot-reload** (§12.6) → economy/PvE pacing adjustable **without a
+  redeploy**, guided by telemetry (§21).
 
 ---
 
@@ -1122,11 +1429,27 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 - **Submix / bus** — an XAudio2 voice that groups sources for shared volume/routing (Music/Ambient/SFX/UI).
 - **WAV / RIFF** — uncompressed audio container; EarthRise uses **PCM-16 only**, via a custom reader.
 - **Source / mastering voice** — XAudio2 objects: a playing sound / the final output mix.
+- **Warp** — fast, sim-stepped (interdictable) travel to a scanned point within range.
+- **Jump beacon** — a network node a jump drive jumps between; public (high-sec) or player/territory-owned (low/null).
+- **Jump drive** — base/ship system for long-haul beacon-to-beacon jumps (fuel + spool-up + cooldown).
+- **Interdiction** — disrupting an enemy's warp (tackle/warp-disruptor) to force an engagement.
+- **Overview** — the sortable contact list used to manage targets in 3D space.
+- **IFF** — Identify Friend/Foe: friend/neutral/hostile state (from standings), shown by shape + color.
+- **Frames in flight** — number of frames the CPU may queue ahead of the GPU (EarthRise: 3, fence-synced).
+- **Descriptor heap** — DX12 GPU-visible table of resource views (CBV/SRV/UAV/sampler); ring-sub-allocated per frame.
+- **PSO** — Pipeline State Object: a compiled DX12 pipeline (shaders + fixed-function state), hash-cached.
+- **Root signature** — DX12 binding layout (root constants/CBVs + descriptor tables); authored in HLSL (RS 1.1).
+- **HDR forward** — forward rendering into a float HDR target, then bloom + tone-map (the Darwinia look).
+- **Trim** — `IDXGIDevice3::Trim()`, releases GPU memory on UWP suspend.
+- **String table** — id→text indirection enabling localization without code changes.
+- **Event director** — server system that schedules invasions/anomalies on the world clock.
 
 ---
 
-*End of DRAFT v0.10 — audio subsystem added: new `NeuronAudio` client lib (XAudio2
-2.9 + X3DAudio, WAV/PCM-16 custom reader, Master→Music/Ambient/SFX/UI buses, 3D from
-day one), folded into §2/§3/§4/§5/§11.3/§12.5/§16.1; M2 now "Darwinia look + audio";
-risk R19 added (14 projects total). v0.9 gameplay spec (§13) unchanged. M0, M1a, M1b
-complete; M2 is next on the engineering track.*
+*End of DRAFT v0.11 — completeness pass: DX12 engine architecture (§11.1), camera &
+GPU-compute VFX (§11.2), navigation/warp + jump-beacon network (§13.12), client UI/HUD/
+radar & accessibility (§22), input & controls incl. touch (§23), communications/mail/
+notifications (§24), client platform services (§25), game-data files & tooling (§12.6),
+world clock & live-ops 24/7 (§26); risks R20–R22; §2/§15/§17/§19/glossary updated.
+Earlier: v0.10 audio (NeuronAudio), v0.9 gameplay (§13). M0, M1a, M1b complete; M2 is
+next on the engineering track.*
