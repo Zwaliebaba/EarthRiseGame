@@ -39,7 +39,7 @@ changed, bump the masterplan first, then the plan).
 | M1a — Networked transport (headless) | (complete — masterplan §17) | ✅ |
 | M1b — Client tech slice | (complete — masterplan §17) | ✅ |
 | **M2 — Darwinia look + audio** | [`M2-darwinia-audio.md`](M2-darwinia-audio.md) | 🔨 **active** |
-| M3 — Core 4X loop, fleet command & navigation | (draft from `_template.md` when next) | ⏳ |
+| M3 — Core 4X loop, fleet command & navigation | [`M3-core-4x-loop.md`](M3-core-4x-loop.md) | 📝 drafted |
 | M4 — Scale & interest | — | ⏳ |
 | M5 — Accounts, auth & persistence | — | ⏳ |
 | M6 — Combat model & deployment | — | ⏳ |
