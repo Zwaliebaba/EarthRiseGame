@@ -15,13 +15,19 @@
 
 #include <chrono>
 #include <cstdio>
+#include <fstream>
+#include <string>
+#include <vector>
 
+#include <winrt/Windows.ApplicationModel.h> // Package (install location)
 #include <winrt/Windows.Graphics.Display.h> // DisplayInformation (DPI scale)
+#include <winrt/Windows.Storage.h>          // StorageFolder::Path
 
 // NeuronRender
 #include "DeviceResources.h"
 #include "SceneRenderer.h"
 #include "CanvasRenderer.h"
+#include "CmoLoader.h"
 
 // NeuronClient
 #include "SessionImpl.h"
@@ -39,6 +45,32 @@
 // ─────────────────────────────────────────────────────────────────────────────
 static constexpr uint16_t kServerPort = 7777;
 static constexpr float kInterpAlpha = 0.0f; // M1b: snap-on-ack (alpha unused)
+
+// Read a file packaged with the app (relative to the install location) into a
+// byte buffer. Read-only access to the package folder is permitted on UWP.
+// Returns empty on any failure (callers fail-safe).
+static std::vector<std::byte> LoadPackagedAsset(const wchar_t* relativePath)
+{
+  try
+  {
+    const auto folder = Windows::ApplicationModel::Package::Current().InstalledLocation().Path();
+    const std::wstring full = std::wstring(folder.c_str()) + L"\\" + relativePath;
+    std::ifstream f(full.c_str(), std::ios::binary | std::ios::ate);
+    if (!f)
+      return {};
+    const std::streamsize n = f.tellg();
+    if (n <= 0)
+      return {};
+    std::vector<std::byte> buf(static_cast<size_t>(n));
+    f.seekg(0);
+    f.read(reinterpret_cast<char*>(buf.data()), n);
+    return buf;
+  }
+  catch (...)
+  {
+    return {};
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // App
@@ -67,6 +99,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   float m_dpiScale{1.0f};
   std::chrono::steady_clock::time_point m_connectStart{};
   bool m_connectedLogged{false};
+  float m_meshRadius{0.0f}; // loaded CMO bounding radius (0 = cube fallback)
 
   // ── IFrameworkViewSource ─────────────────────────────────────────────────
   Windows::ApplicationModel::Core::IFrameworkView CreateView() { return *this; }
@@ -110,6 +143,26 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       std::snprintf(buf, sizeof(buf), "[EarthRise] DX init %lld ms (backbuffer %ux%u, dpi %.2f)\n",
                     initMs, w, h, m_dpiScale);
       OutputDebugStringA(buf);
+    }
+
+    // Load the real CMO mesh (fail-safe: SceneRenderer keeps the cube if the
+    // asset is missing or unparseable).
+    if (auto cmo = LoadPackagedAsset(L"Assets\\Shapes\\Jumpgates\\Jumpgate.cmo"); !cmo.empty())
+    {
+      auto mesh = Neuron::Render::CmoLoader::Load(m_dr.Device(), cmo);
+      char buf[128];
+      std::snprintf(buf, sizeof(buf),
+                    "[EarthRise] CMO load: %zu bytes, valid=%d verts=%u idx=%u radius=%.1f\n",
+                    cmo.size(), static_cast<int>(mesh.valid()), mesh.vertexCount, mesh.indexCount,
+                    mesh.boundingRadius);
+      OutputDebugStringA(buf);
+      if (mesh.valid())
+        m_meshRadius = mesh.boundingRadius;
+      m_scene.SetMesh(std::move(mesh));
+    }
+    else
+    {
+      OutputDebugStringA("[EarthRise] CMO load: asset not found (using placeholder cube)\n");
     }
 
     // Start connecting to ERServer.
@@ -260,7 +313,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       se.yaw = 0.f;
       // entityType carries EntityKind (Components.h): Base = 1, Ship = 2.
       const bool isBase = (re.entityType == 1);
-      se.scale = isBase ? 10.f : 3.f; // half-extent metres (base larger; visible at the M1b camera)
+      // With a CMO mesh loaded, normalize by its bounding radius so the on-screen
+      // size is sensible regardless of the model's native units (Jumpgate r~333);
+      // otherwise use the unit-cube half-extents.
+      const float targetMetres = isBase ? 40.f : 15.f;
+      se.scale = (m_meshRadius > 0.f) ? (targetMetres / m_meshRadius) : (isBase ? 10.f : 3.f);
       // Darwinia palette: base = neon blue, ship = neon orange.
       if (isBase)
       {

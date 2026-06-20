@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string>
 #include <vector>
@@ -57,6 +58,14 @@ namespace er::format
     uint32_t totalIndices = 0;     // summed across all index buffers
     uint32_t totalVertices = 0;    // summed across all vertex buffers
     bool hasSkeletalAnimation = false;
+
+    // MeshExtents (model space): bounding-sphere centre + radius. Lets callers
+    // normalize on-screen size / cull regardless of the model's native scale.
+    float centerX = 0.0f;
+    float centerY = 0.0f;
+    float centerZ = 0.0f;
+    float boundingRadius = 0.0f;
+
     std::vector<CmoSubmeshInfo> submeshes;
     std::vector<CmoMaterialInfo> materials;
 
@@ -114,6 +123,14 @@ namespace er::format
         if (!ensure(1))
           return 0;
         return std::to_integer<uint8_t>(m_data[m_pos++]);
+      }
+
+      float readFloat() noexcept
+      {
+        const uint32_t bits = readU32();
+        float f = 0.0f;
+        std::memcpy(&f, &bits, sizeof(f));
+        return f;
       }
 
       // Skip `bytes`; flags overrun if it would pass the end.
@@ -280,7 +297,12 @@ namespace er::format
         cur.skip(static_cast<size_t>(n) * CMO_SKIN_VERTEX_SIZE);
       }
 
-      cur.skip(CMO_EXTENTS_SIZE); // MeshExtents
+      // MeshExtents: centre(3 float) + radius(1) + min(3) + max(3) = 40 bytes.
+      mesh.centerX = cur.readFloat();
+      mesh.centerY = cur.readFloat();
+      mesh.centerZ = cur.readFloat();
+      mesh.boundingRadius = cur.readFloat();
+      cur.skip(sizeof(float) * 6); // Min + Max (unused for now)
 
       // Optional skeleton + animation clips.
       if (mesh.hasSkeletalAnimation)

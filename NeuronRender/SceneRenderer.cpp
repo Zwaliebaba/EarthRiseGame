@@ -166,9 +166,10 @@ namespace Neuron::Render
     psoDesc.SampleMask = 0xFFFFFFFFu;
     psoDesc.SampleDesc.Count = 1;
 
-    // Rasterizer: solid, back-face cull
+    // Rasterizer: solid, no culling. Authored CMO winding varies (and may differ
+    // from the placeholder cube), so cull nothing to avoid an inside-out mesh.
     psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
     psoDesc.RasterizerState.DepthClipEnable = TRUE;
 
@@ -329,9 +330,17 @@ namespace Neuron::Render
     cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
     cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    D3D12_VERTEX_BUFFER_VIEW vbViews[] = {m_vbView, m_instView[fi]};
+    // Use the loaded CMO mesh if present, else the placeholder cube. Both expose
+    // POSITION@0 / NORMAL@12; the differing stride comes from the vertex-buffer
+    // view, so the same PSO/input layout works for either.
+    const bool useMesh = m_mesh.valid();
+    const D3D12_VERTEX_BUFFER_VIEW geomVb = useMesh ? m_mesh.vbView : m_vbView;
+    const D3D12_INDEX_BUFFER_VIEW geomIb = useMesh ? m_mesh.ibView : m_ibView;
+    const UINT geomIndexCount = useMesh ? m_mesh.indexCount : m_indexCount;
+
+    D3D12_VERTEX_BUFFER_VIEW vbViews[] = {geomVb, m_instView[fi]};
     cl->IASetVertexBuffers(0, 2, vbViews);
-    cl->IASetIndexBuffer(&m_ibView);
-    cl->DrawIndexedInstanced(m_indexCount, count, 0, 0, 0);
+    cl->IASetIndexBuffer(&geomIb);
+    cl->DrawIndexedInstanced(geomIndexCount, count, 0, 0, 0);
   }
 } // namespace Neuron::Render

@@ -110,6 +110,7 @@ namespace Neuron::Render
 
     out.vertexCount = mesh.vertexCounts[0];
     out.indexCount = mesh.indexCounts[0];
+    out.boundingRadius = mesh.boundingRadius;
     out.vbView = {out.vertexBuffer->GetGPUVirtualAddress(), static_cast<UINT>(vb.size()),
                   static_cast<UINT>(CMO_VERTEX_SIZE)};
     out.ibView = {out.indexBuffer->GetGPUVirtualAddress(), static_cast<UINT>(ib.size()),

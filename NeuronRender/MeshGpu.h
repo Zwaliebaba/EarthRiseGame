@@ -35,6 +35,7 @@ namespace Neuron::Render
     D3D12_INDEX_BUFFER_VIEW ibView{}; // DXGI_FORMAT_R16_UINT
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
+    float boundingRadius = 0.0f; // model-space bounding-sphere radius (for size normalization)
     std::vector<SubmeshGpu> submeshes;
     std::vector<std::string> materialDiffuse; // diffuse .dds filename per material
 

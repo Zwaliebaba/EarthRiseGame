@@ -21,6 +21,7 @@
 #include <cstdint>
 
 #include "DeviceResources.h"
+#include "MeshGpu.h"
 
 namespace Neuron::Render
 {
@@ -47,6 +48,11 @@ public:
     void Render(ID3D12GraphicsCommandList* cl,
                 const float viewProjT[16],
                 const SceneEntity* entities, uint32_t count);
+
+    // Use a loaded CMO mesh (CmoLoader) for all instances instead of the
+    // placeholder cube. Ignored if the mesh is invalid (keeps the cube), so the
+    // caller can fail-safe when an asset is missing.
+    void SetMesh(MeshGpu mesh) { if (mesh.valid()) m_mesh = std::move(mesh); }
 
     static constexpr UINT kMaxEntities = 512;
 
@@ -81,6 +87,9 @@ private:
     D3D12_VERTEX_BUFFER_VIEW m_vbView{};
     D3D12_INDEX_BUFFER_VIEW  m_ibView{};
     UINT m_indexCount{ 0 };
+
+    // Optional real CMO mesh; when valid() it replaces the cube for all draws.
+    MeshGpu m_mesh;
 };
 
 } // namespace Neuron::Render
