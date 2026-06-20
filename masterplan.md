@@ -1,6 +1,6 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.11 — for review
+> **Status:** DRAFT v0.12 — for review
 > **Date:** 2026-06-19
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
@@ -14,7 +14,19 @@
 
 ## Changelog
 
-**v0.11 (this revision) — completeness pass (client engine, UI/radar, navigation, live-ops)**
+**v0.12 (this revision) — overview-driven control model**
+- **§23 reworked around an overview-driven command model** (EVE-Echoes prior art) as
+  the **shared primary scheme for desktop *and* touch**: select/command via the §22.3
+  **overview list + smart-select buttons + a smart context action**, routed through the
+  existing intent layer (§8.4). The **3D view is camera-first**; **box-select is demoted
+  to a desktop convenience.**
+- **Touch ambiguity designed out:** camera lives on **two-finger gestures only**, so
+  one-finger select-vs-pan never conflicts; tap-and-hold = radial context menu. Full
+  gesture/smart-action tables in **`docs/design/touch-controls.md`**.
+- **R20 downgraded Med→Low** (decided approach with prior art, not an open UX gamble).
+- Updates §2 (Client input), §22.3, §23, R20.
+
+**v0.11 — completeness pass (client engine, UI/radar, navigation, live-ops)**
 - **DirectX 12 engine architecture written down (new §11.1):** adapter/feature-level
   selection (**target FL 12_0, Resource Binding Tier 2, SM6.0** — broad reach),
   **triple-buffered** flip-model swap chain + fences, command queues/allocators/lists,
@@ -216,7 +228,7 @@ players at launch and designed to grow well past that.
 | Dev / Prod | **Dev: Docker Desktop. Prod: Kubernetes** (Windows nodes + UDP LB). |
 | **Navigation / travel** | **Warp + jump-beacon network**: sublight combat move; **interdictable warp** to scanned points; long-haul **jump drive + fuel** between beacons (§13.12). |
 | **Renderer target** | **D3D12 FL 12_0, Resource Binding Tier 2, SM6.0**; **triple-buffered** flip-model; **HDR forward + bloom**, no MSAA; GPU-compute particles (§11.1–11.2). |
-| **Client input** | **Mouse+keyboard (primary) + touch (tablets)**; RTS scheme (box-select, control groups); commands → **server-validated intents** (§23). |
+| **Client input** | **Overview-driven command model** (EVE-Echoes-style; shared by desktop & touch): select/command via overview list + smart-select + smart action; **mouse+keyboard + touch**; box-select demoted to a desktop shortcut; commands → **server-validated intents** (§23). |
 | **Tactical UI / radar** | **3D bracket overlay + sortable overview list + 2D radar disc** (IFF, range rings) (§22). |
 | **Communications** | **Chat channels + in-game mail + offline notifications** (§24). |
 | **Server uptime** | **24/7, rolling restarts via warm-restart; no scheduled downtime** (§26). |
@@ -1121,7 +1133,7 @@ bots (mouse+keyboard and touch), with zero economy loss across a server restart.
 | R17 | **Conquest too brutal for newcomers → no growth** | High | High-sec protected onboarding (§13.5/13.9); ship insurance + base disable-not-destroy; catch-up/flattened power curve (§13.3); onboarding objective chain. |
 | R18 | **Thin social glue (light fleets only) hurts retention & conquest defense** | Med–High | Individual ownership works at ~100 players; **persistent corporations tracked as the first social expansion** (§13.8/§19) — promote forward if retention or coordinated defense suffers. |
 | R19 | **Audio on UWP / WAV-only / X3DAudio correctness** | Low | XAudio2 2.9 + X3DAudio are SDK components (UWP-supported); custom RIFF reader + `wavcheck` validate PCM-16; emitter math + parser unit-tested (NeuronAudioTest, testrunner); suspend/resume voice handling; audio is presentation-only (no sim/determinism impact). |
-| R20 | **UI/HUD scope, esp. RTS-on-touch** | Med | M+K is the primary, lowest-risk scheme; touch gets an explicit select-vs-pan mode + scalable hit targets (§23); custom immediate-mode toolkit on Canvas; HUD/radar built incrementally (M1b→M2→M3); validate touch separately before relying on it. |
+| R20 | **UI/HUD scope, esp. RTS-on-touch** | **Med→Low** | **Decided approach (§23.1):** an **overview-driven command model** shared by desktop & touch (per EVE Echoes prior art) — select/command via overview list + smart-select + smart action, **camera on two-finger only** (no one-finger select-vs-pan ambiguity), box-select demoted to a desktop shortcut. Stances/autopilot cut APM; custom immediate-mode toolkit on Canvas; touch spec in `docs/design/touch-controls.md`; still prototype/validate touch separately before relying on it. |
 | R21 | **Warp/jump interception netcode & fast interest churn** | Med | Warp/jump are sim-stepped & server-authoritative (interdiction validated); **prefetch destination-sector interest** on warp/jump start; beacon graph is data-driven; test interception + sector-transition churn at M3/M7 (§13.12, §8.4). |
 | R22 | **24/7 uptime depends on warm-restart reliability** | Med–High | Warm-restart (snapshot+outbox) is now an **uptime SLA**, not just crash recovery: restart drills in M5; reconnect **backoff/jitter** against thundering-herd; rolling-restart playbook (§26); economy stays zero-loss via outbox (§15). |
 
@@ -1270,8 +1282,9 @@ scale**; all strings flow through a **localization string table** (§22.4).
 Three synced views (selection is shared):
 - **3D bracket overlay** — IFF brackets on entities in the scene + **off-screen
   direction arrows** for out-of-view contacts (fits the minimalist Darwinia look).
-- **Sortable overview list** — the primary target-management tool: contacts with
-  **type / distance / velocity / IFF**, sortable & filterable (EVE-style "overview").
+- **Sortable overview list** — the **primary selection & command surface** on both
+  desktop and touch (§23.1): contacts with **type / distance / velocity / IFF**,
+  sortable & filterable (EVE-style "overview"); tap/click to select & issue actions.
 - **2D radar disc** — relative **bearing + range rings + IFF**, with vertical-offset
   indicators for true-3D awareness.
 - **IFF** = friend / neutral / hostile from **player standings** (§13.8), shown by
@@ -1295,23 +1308,53 @@ display strings**. The monospace bitmap-font pipeline (§12.2) stays **Unicode-c
 
 ---
 
-## 23. Input & Controls 🔒 (mouse+keyboard primary, touch on tablets)
+## 23. Input & Controls 🔒 (overview-driven; mouse+keyboard + touch)
 Input flows: UWP **CoreWindow** pointer/key/gesture events → an **`IInputSource`**
 abstraction → either UI events or **fleet commands → intents** (server-validated,
 §8.4; never client-authoritative). **Keymap is rebindable** (client config, §25).
 
-- **Mouse + keyboard (primary):** left-click select; **drag = box-select**;
-  right-click = context command (move/attack/harvest/guard/warp); double-click = select
-  by type; **`Ctrl+#` set / `#` recall control groups**; camera = WASD/edge-scroll pan,
-  wheel zoom, MMB/alt-drag orbit, **center-on-selection**; hotkeys for modules/abilities
-  and for warp/jump.
-- **Touch (tablets):** tap select; **drag box-select vs camera-pan disambiguated by an
-  explicit mode toggle / long-press**; tap-and-hold = context menu; **two-finger pan,
-  pinch zoom, two-finger twist rotate**; on-screen **command palette + control-group
-  bar**; large, **scalable hit targets** (§22.5). *(RTS-on-touch is the main UX risk —
-  R20.)*
-- **Selection model:** single / additive (shift) / box / by-type; commands queue
-  (shift-chain) and respect formations/stance.
+### 23.1 Primary model — overview-driven command (shared by desktop & touch) 🔒
+Following **EVE Echoes** (which proved this genre on touch), the **primary control
+surface is the §22.3 overview list + radar + smart-select buttons — not box-dragging
+in the 3D world.** Selection and commands route through the **same intent layer** on
+both desktop and touch; only the *input affordances* differ. This keeps required APM
+and precision low (suits "fleet **commander**", not "unit micromanager"), and makes the
+two platforms one game, not two.
+
+- **Selection:** tap/click a contact in the **overview** (or its bracket/radar blip);
+  **smart-select buttons** — *all combat ships · all of type · all harvesters · control
+  group #* — replace manual box-dragging for grouping.
+- **Commands:** a **smart single action** resolves by target (empty space = move; enemy
+  = attack/lock; node = harvest; beacon = warp/jump; ally = assist), plus a small
+  **contextual command bar** (move/attack/guard/orbit/keep-range/warp/retreat) and
+  module/ability buttons. The 3D view is **camera-first**; you rarely "drive" it.
+- **Autonomy reduces input:** stances + formations + control groups + **autopilot**
+  (route across the beacon graph, §13.12) mean a fight is "pick target → orbit/
+  focus-fire", not per-ship micro.
+
+### 23.2 Desktop (mouse + keyboard) affordances
+The overview model **plus** power-user shortcuts: left-click select; **drag = box-select
+(a desktop convenience, not the primary path)**; right-click = smart/context command;
+double-click = select-by-type; **`Ctrl+#` set / `#` recall control groups**; camera =
+WASD/edge-scroll pan, wheel zoom, MMB/alt-drag orbit, center-on-selection; hotkeys for
+modules/abilities and warp/jump.
+
+### 23.3 Touch (tablets) affordances
+Same overview model with touch affordances; **the camera never lives on one finger**, so
+the select-vs-pan ambiguity (R20) is designed out:
+- **One finger:** tap = select (overview blip/bracket); tap world = smart action;
+  **tap-and-hold = radial context menu** (recovers "right-click").
+- **Two fingers (camera only):** pan, **pinch-zoom**, twist-rotate.
+- **On-screen:** smart-select bar, contextual command bar, control-group bar, module
+  buttons — all **large, scalable hit targets** (§22.5).
+- **Box-select** is a *secondary* tool behind an explicit "marquee" toggle (not the
+  default drag), since grouping is normally done via smart-select buttons.
+- Full scheme + gesture/smart-action tables: **`docs/design/touch-controls.md`**.
+
+### 23.4 Selection & command model (shared)
+Single / additive / by-type / control-group selection; **smart context action** keyed
+by target; commands **queue** (shift-chain on desktop; sequential taps on touch) and
+respect formations/stance. All commands become validated **intents** (§8.4).
 
 ---
 
@@ -1446,10 +1489,9 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 
 ---
 
-*End of DRAFT v0.11 — completeness pass: DX12 engine architecture (§11.1), camera &
-GPU-compute VFX (§11.2), navigation/warp + jump-beacon network (§13.12), client UI/HUD/
-radar & accessibility (§22), input & controls incl. touch (§23), communications/mail/
-notifications (§24), client platform services (§25), game-data files & tooling (§12.6),
-world clock & live-ops 24/7 (§26); risks R20–R22; §2/§15/§17/§19/glossary updated.
-Earlier: v0.10 audio (NeuronAudio), v0.9 gameplay (§13). M0, M1a, M1b complete; M2 is
-next on the engineering track.*
+*End of DRAFT v0.12 — overview-driven control model (§23, EVE-Echoes-style; shared by
+desktop & touch; box-select demoted; touch ambiguity designed out; R20 Med→Low; spec in
+`docs/design/touch-controls.md`). Earlier: v0.11 completeness pass (DX12 §11.1, camera/
+VFX §11.2, navigation §13.12, UI/HUD/radar §22, input §23, comms §24, platform services
+§25, game-data §12.6, live-ops §26), v0.10 audio (NeuronAudio), v0.9 gameplay (§13).
+M0, M1a, M1b complete; M2 is next on the engineering track.*
