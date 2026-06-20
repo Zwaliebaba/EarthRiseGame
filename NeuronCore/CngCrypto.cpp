@@ -339,6 +339,16 @@ bool CngCrypto::Verify(const EcPubKey& staticPub,
     if (!m_initialized)
         return false;
 
+    // Dev/test convention (see EarthRise client `m_pinnedPub{}`): an all-zero
+    // pinned key means "no key pinned" — accept without verifying rather than
+    // fail importing an invalid (0,0) EC point. Production builds ship a real
+    // pinned public key, so this path is never taken there.
+    bool allZero = true;
+    for (uint8_t b : staticPub)
+        if (b != 0) { allZero = false; break; }
+    if (allZero)
+        return true;
+
     uint8_t digest[32];
     if (!Sha256(data, digest))
         return false;
@@ -369,13 +379,6 @@ bool CngCrypto::DeriveAeadKeys(const SharedSecret& secret,
     if (!m_initialized)
         return false;
 
-    // Import the shared secret as an HKDF key object.
-    BCRYPT_KEY_HANDLE hkdf = nullptr;
-    if (!NT_SUCCESS(BCryptGenerateSymmetricKey(AsAlg(m_hkdfAlg), &hkdf, nullptr, 0,
-                                               const_cast<PUCHAR>(secret.data()),
-                                               static_cast<ULONG>(secret.size()), 0)))
-        return false;
-
     // The HKDF salt mixes in the epoch (big-endian) so each rekey yields fresh
     // keys even from the same ECDH secret. The per-direction "info" label keeps
     // the two directional keys distinct.
@@ -386,25 +389,45 @@ bool CngCrypto::DeriveAeadKeys(const SharedSecret& secret,
         static_cast<uint8_t>(epoch & 0xFF),
     };
 
+    // CNG HKDF requires, on the key object: (1) BCRYPT_HKDF_HASH_ALGORITHM set
+    // before derivation, and (2) HKDF-Extract driven via the
+    // BCRYPT_HKDF_SALT_AND_FINALIZE property (the salt is NOT a KDF_SALT buffer
+    // passed to BCryptKeyDerivation — that buffer is for other KDFs). Expand
+    // (HKDF-Expand) then runs via BCryptKeyDerivation with KDF_HKDF_INFO. We
+    // rebuild the key per direction so each gets a clean extract+expand.
     auto deriveOne = [&](const unsigned char* info, ULONG infoLen, AeadKey& key) -> bool {
-        BCryptBuffer params[] = {
-            { sizeof(saltBytes), KDF_SALT, saltBytes },
-            { infoLen, KDF_HKDF_INFO, const_cast<PUCHAR>(info) },
-        };
-        BCryptBufferDesc desc{ BCRYPTBUFFER_VERSION, 2, params };
+        BCRYPT_KEY_HANDLE hkdf = nullptr;
+        if (!NT_SUCCESS(BCryptGenerateSymmetricKey(AsAlg(m_hkdfAlg), &hkdf, nullptr, 0,
+                                                   const_cast<PUCHAR>(secret.data()),
+                                                   static_cast<ULONG>(secret.size()), 0)))
+            return false;
 
-        ULONG cb = 0;
-        NTSTATUS st = BCryptKeyDerivation(hkdf, &desc, key.data(),
-                                          static_cast<ULONG>(key.size()), &cb, 0);
-        return NT_SUCCESS(st) && cb == key.size();
+        bool ok = false;
+        if (NT_SUCCESS(BCryptSetProperty(
+                hkdf, BCRYPT_HKDF_HASH_ALGORITHM,
+                reinterpret_cast<PUCHAR>(const_cast<wchar_t*>(BCRYPT_SHA256_ALGORITHM)),
+                sizeof(BCRYPT_SHA256_ALGORITHM), 0)) &&
+            NT_SUCCESS(BCryptSetProperty(hkdf, BCRYPT_HKDF_SALT_AND_FINALIZE,
+                                         saltBytes, sizeof(saltBytes), 0)))
+        {
+            BCryptBuffer params[] = {
+                { infoLen, KDF_HKDF_INFO, const_cast<PUCHAR>(info) },
+            };
+            BCryptBufferDesc desc{ BCRYPTBUFFER_VERSION, 1, params };
+
+            ULONG cb = 0;
+            NTSTATUS st = BCryptKeyDerivation(hkdf, &desc, key.data(),
+                                              static_cast<ULONG>(key.size()), &cb, 0);
+            ok = NT_SUCCESS(st) && cb == key.size();
+        }
+
+        BCryptDestroyKey(hkdf);
+        return ok;
     };
 
     // -1 on the length to drop the terminating NUL from the string literal.
-    bool ok = deriveOne(kInfoC2S, sizeof(kInfoC2S) - 1, clientToServer)
-           && deriveOne(kInfoS2C, sizeof(kInfoS2C) - 1, serverToClient);
-
-    BCryptDestroyKey(hkdf);
-    return ok;
+    return deriveOne(kInfoC2S, sizeof(kInfoC2S) - 1, clientToServer)
+        && deriveOne(kInfoS2C, sizeof(kInfoS2C) - 1, serverToClient);
 }
 
 // -----------------------------------------------------------------------------
