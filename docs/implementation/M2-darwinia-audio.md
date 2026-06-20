@@ -84,14 +84,24 @@
   - [ ] **`assets/`** top-level dir per §5 (`.dds`, font bitmaps, `.cmo`, `audio/*.wav`).
 - **Tests (`<project>Test`, §16.1):**
   - [ ] `NeuronRenderTest`: DDS parser — valid header, each BC format, mip count, truncated/
-        garbage → clean failure.
+        garbage → clean failure. *(logic covered in `testrunner` `DdsParseTests`; needs the
+        Windows MSTest mirror once `DdsLoader` exists.)*
   - [ ] `NeuronRenderTest`: CMO parser — submesh/material/index counts on a known mesh;
-        malformed → rejected, not crash.
-  - [ ] Platform-independent parser cases also added to `NeuronTools/testrunner/` (§16.2) so
-        Linux CI catches regressions without a Windows build.
+        malformed → rejected, not crash. *(logic covered in `testrunner` `CmoParseTests`;
+        needs the Windows MSTest mirror once `CmoLoader` exists.)*
+  - [x] Platform-independent parser cases also added to `NeuronTools/testrunner/` (§16.2) so
+        Linux CI catches regressions without a Windows build. **(done — WAV/DDS/CMO/font,
+        30 cases, `-Werror` clean.)**
   - [ ] `datacheck` referential-integrity run in CI for the cue catalog (cue→clip exists,
         3D⇒mono honored — §12.6).
 - **Depends on:** nothing (foundation). **Blocks:** B, E (wavcheck), F.
+
+> **Progress (this branch):** the platform-independent parser **cores** landed under
+> `NeuronTools/` (`WavParse.h`, `DdsParse.h`, `CmoParse.h`, `FontAtlasLayout.h`) with the
+> Linux `testrunner`. Remaining area-A work needs the Windows build: the runtime loaders
+> that wrap these cores (NeuronRender `DdsLoader`/`CmoLoader`/`FontAtlas`, NeuronAudio
+> `WavReader`), the `*check`/cook tool executables + `.vcxproj` wiring, the `assets/` tree,
+> and the MSTest mirrors.
 
 ### B. SceneRenderer upgrade — real instanced CMO ships
 
