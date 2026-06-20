@@ -232,11 +232,15 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     XMMATRIX view = XMMatrixLookAtRH(eye, at, up);
     XMMATRIX proj = XMMatrixPerspectiveFovRH(fov, asp, 0.1f, 10000.f);
-    // Transpose so columns match HLSL column-major layout expected by root constants.
-    XMMATRIX viewProjT = XMMatrixTranspose(view * proj);
+    // SceneVS reads viewProj from a (HLSL-default) COLUMN-MAJOR cbuffer and
+    // applies it as mul(viewProj, worldPos) (column-vector). Storing view*proj
+    // row-major lets the column-major load reinterpret it as the transpose that
+    // multiply needs — so we must NOT pre-transpose here. (Transposing in C++ as
+    // well cancels out and corrupts the transform — the old "thin box" bug.)
+    XMMATRIX viewProj = view * proj;
 
     float vpf[16];
-    XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(vpf), viewProjT);
+    XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(vpf), viewProj);
 
     // Gather scene entities from the interp buffer.
     const Neuron::Client::ReplicaSet& rs = m_interp.curr;

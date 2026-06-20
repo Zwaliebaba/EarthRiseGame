@@ -1,13 +1,16 @@
 // SceneVS.hlsl — 3D scene vertex shader (SM6, instanced geometry).
 //
-// Root constants at b0 carry the 4x4 viewProj matrix (16 floats, row-major
-// in HLSL memory, i.e. stored column-major from the C++ side after transpose).
+// Root constants at b0 carry the 4x4 viewProj matrix (16 floats). The cbuffer
+// is HLSL-default COLUMN-MAJOR, and the C++ side uploads `view*proj` row-major
+// WITHOUT transposing: the column-major load reinterprets those bytes as the
+// transpose, which is exactly what the column-vector `mul(viewProj, worldPos)`
+// below needs. (Do not also transpose on the C++ side — that cancels out.)
 // Per-instance world transform arrives via a second vertex buffer stream:
 // four float4 rows + one float4 emissive color (80 bytes per instance).
 
 cbuffer PerFrame : register(b0)
 {
-    float4x4 viewProj;  // column-major (transposed from C++ DirectXMath)
+    float4x4 viewProj;  // column-major; receives un-transposed view*proj from C++
 };
 
 struct VSIn
