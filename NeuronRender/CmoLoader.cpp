@@ -110,6 +110,7 @@ namespace Neuron::Render
 
     out.vertexCount = mesh.vertexCounts[0];
     out.indexCount = mesh.indexCounts[0];
+    out.boundingRadius = mesh.boundingRadius;
     out.vbView = {out.vertexBuffer->GetGPUVirtualAddress(), static_cast<UINT>(vb.size()),
                   static_cast<UINT>(CMO_VERTEX_SIZE)};
     out.ibView = {out.indexBuffer->GetGPUVirtualAddress(), static_cast<UINT>(ib.size()),
@@ -123,6 +124,11 @@ namespace Neuron::Render
     }
     for (const CmoMaterialInfo& mat : mesh.materials)
       out.materialDiffuse.push_back(mat.diffuseTexture);
+
+    // Carry skeleton + animation clips through (empty for static meshes) so the
+    // skinned-render path can sample poses + build a bone palette later.
+    out.bones = mesh.bones;
+    out.animations = mesh.animations;
 
     return out;
   }

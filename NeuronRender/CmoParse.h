@@ -16,8 +16,10 @@
 // Layout reference (VS / DirectXTK CMO): UTF-16 names are stored as a UINT
 // character count followed by that many 16-bit code units (no terminator).
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string>
 #include <vector>
@@ -46,6 +48,41 @@ namespace er::format
     std::string diffuseTexture; // CMO texture slot 0 = diffuse (a .dds filename)
   };
 
+  // --- Skeletal animation (parsed even though the current assets are static) ---
+
+  // Per-vertex skin binding (4 weighted bones), parallel to a skinning VB.
+  struct CmoSkinningVertex
+  {
+    uint32_t boneIndices[4] = {0, 0, 0, 0};
+    float    boneWeights[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  };
+
+  // One skeleton joint. Matrices are 16 floats (row-major XMFLOAT4X4 on disk).
+  struct CmoBone
+  {
+    std::string          name;
+    int32_t              parentIndex = -1; // -1 = root
+    std::array<float, 16> invBindPose{};   // bind-pose inverse (skinning)
+    std::array<float, 16> bindPose{};
+    std::array<float, 16> localTransform{}; // default local pose
+  };
+
+  // One animation key: a bone's local transform at a point in time.
+  struct CmoKeyframe
+  {
+    uint32_t              boneIndex = 0;
+    float                 time = 0.0f;
+    std::array<float, 16> transform{};
+  };
+
+  struct CmoAnimationClip
+  {
+    std::string              name;
+    float                    startTime = 0.0f;
+    float                    endTime = 0.0f;
+    std::vector<CmoKeyframe>  keyframes;
+  };
+
   struct CmoMeshInfo
   {
     uint32_t nameLength = 0;       // UTF-16 code units
@@ -57,6 +94,14 @@ namespace er::format
     uint32_t totalIndices = 0;     // summed across all index buffers
     uint32_t totalVertices = 0;    // summed across all vertex buffers
     bool hasSkeletalAnimation = false;
+
+    // MeshExtents (model space): bounding-sphere centre + radius. Lets callers
+    // normalize on-screen size / cull regardless of the model's native scale.
+    float centerX = 0.0f;
+    float centerY = 0.0f;
+    float centerZ = 0.0f;
+    float boundingRadius = 0.0f;
+
     std::vector<CmoSubmeshInfo> submeshes;
     std::vector<CmoMaterialInfo> materials;
 
@@ -66,6 +111,14 @@ namespace er::format
     std::vector<uint32_t> indexCounts;                    // indices per index buffer
     std::vector<std::span<const std::byte>> vertexData;   // bytes per vertex buffer
     std::vector<std::span<const std::byte>> indexData;    // bytes per index buffer
+
+    // Skeletal animation (empty for static meshes). skinningVertices is parallel
+    // to the skinning vertex buffers (one inner vector per buffer).
+    std::vector<std::vector<CmoSkinningVertex>> skinningVertices;
+    std::vector<CmoBone>           bones;
+    std::vector<CmoAnimationClip>  animations;
+
+    bool isSkinned() const noexcept { return !bones.empty(); }
   };
 
   struct CmoModel
@@ -114,6 +167,28 @@ namespace er::format
         if (!ensure(1))
           return 0;
         return std::to_integer<uint8_t>(m_data[m_pos++]);
+      }
+
+      float readFloat() noexcept
+      {
+        const uint32_t bits = readU32();
+        float f = 0.0f;
+        std::memcpy(&f, &bits, sizeof(f));
+        return f;
+      }
+
+      int32_t readI32() noexcept
+      {
+        const uint32_t bits = readU32();
+        int32_t v = 0;
+        std::memcpy(&v, &bits, sizeof(v));
+        return v;
+      }
+
+      void readMatrix(std::array<float, 16>& out) noexcept
+      {
+        for (float& f : out)
+          f = readFloat();
       }
 
       // Skip `bytes`; flags overrun if it would pass the end.
@@ -178,8 +253,6 @@ namespace er::format
     using detail::CmoCursor;
     CmoCursor cur(file);
     out.meshes.clear();
-
-    auto skipName = [&cur]() { cur.skip(static_cast<size_t>(cur.readU32()) * CMO_WCHAR_SIZE); };
 
     const uint32_t meshCount = cur.readU32();
     if (!cur.ok())
@@ -268,7 +341,7 @@ namespace er::format
         }
       }
 
-      // Skinning vertex buffers (walked for bounds validation only).
+      // Skinning vertex buffers (4 weighted bone influences per vertex).
       mesh.skinningBufferCount = cur.readU32();
       if (mesh.skinningBufferCount > CMO_SANE_COUNT_LIMIT)
         return CmoStatus::TooLarge;
@@ -277,10 +350,28 @@ namespace er::format
         const uint32_t n = cur.readU32();
         if (n > CMO_SANE_COUNT_LIMIT)
           return CmoStatus::TooLarge;
-        cur.skip(static_cast<size_t>(n) * CMO_SKIN_VERTEX_SIZE);
+        std::vector<CmoSkinningVertex> verts;
+        verts.reserve(n);
+        for (uint32_t k = 0; k < n && cur.ok(); ++k)
+        {
+          CmoSkinningVertex sv;
+          for (uint32_t b = 0; b < 4; ++b)
+            sv.boneIndices[b] = cur.readU32();
+          for (uint32_t b = 0; b < 4; ++b)
+            sv.boneWeights[b] = cur.readFloat();
+          if (cur.ok())
+            verts.push_back(sv);
+        }
+        if (cur.ok())
+          mesh.skinningVertices.push_back(std::move(verts));
       }
 
-      cur.skip(CMO_EXTENTS_SIZE); // MeshExtents
+      // MeshExtents: centre(3 float) + radius(1) + min(3) + max(3) = 40 bytes.
+      mesh.centerX = cur.readFloat();
+      mesh.centerY = cur.readFloat();
+      mesh.centerZ = cur.readFloat();
+      mesh.boundingRadius = cur.readFloat();
+      cur.skip(sizeof(float) * 6); // Min + Max (unused for now)
 
       // Optional skeleton + animation clips.
       if (mesh.hasSkeletalAnimation)
@@ -288,23 +379,44 @@ namespace er::format
         const uint32_t boneCount = cur.readU32();
         if (boneCount > CMO_SANE_COUNT_LIMIT)
           return CmoStatus::TooLarge;
+        mesh.bones.reserve(boneCount);
         for (uint32_t i = 0; i < boneCount && cur.ok(); ++i)
         {
-          skipName();
-          cur.skip(CMO_BONE_SIZE);
+          CmoBone bone;
+          bone.name = cur.readName();
+          bone.parentIndex = cur.readI32();
+          cur.readMatrix(bone.invBindPose);
+          cur.readMatrix(bone.bindPose);
+          cur.readMatrix(bone.localTransform);
+          if (cur.ok())
+            mesh.bones.push_back(std::move(bone));
         }
 
         const uint32_t clipCount = cur.readU32();
         if (clipCount > CMO_SANE_COUNT_LIMIT)
           return CmoStatus::TooLarge;
+        mesh.animations.reserve(clipCount);
         for (uint32_t i = 0; i < clipCount && cur.ok(); ++i)
         {
-          skipName();
-          cur.skip(sizeof(float) * 2); // StartTime, EndTime
+          CmoAnimationClip clip;
+          clip.name = cur.readName();
+          clip.startTime = cur.readFloat();
+          clip.endTime = cur.readFloat();
           const uint32_t keyframes = cur.readU32();
           if (keyframes > CMO_SANE_COUNT_LIMIT)
             return CmoStatus::TooLarge;
-          cur.skip(static_cast<size_t>(keyframes) * CMO_KEYFRAME_SIZE);
+          clip.keyframes.reserve(keyframes);
+          for (uint32_t k = 0; k < keyframes && cur.ok(); ++k)
+          {
+            CmoKeyframe key;
+            key.boneIndex = cur.readU32();
+            key.time = cur.readFloat();
+            cur.readMatrix(key.transform);
+            if (cur.ok())
+              clip.keyframes.push_back(key);
+          }
+          if (cur.ok())
+            mesh.animations.push_back(std::move(clip));
         }
       }
 

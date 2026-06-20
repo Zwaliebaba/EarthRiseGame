@@ -118,6 +118,7 @@ namespace Neuron::Render
   // ---------------------------------------------------------------------------
   bool SceneRenderer::Initialize(DeviceResources* dr)
   {
+    m_dr = dr;
     m_device = dr->Device();
 
     // --- Root signature: one entry — root constants (16 floats = 1 float4x4) ---
@@ -165,9 +166,10 @@ namespace Neuron::Render
     psoDesc.SampleMask = 0xFFFFFFFFu;
     psoDesc.SampleDesc.Count = 1;
 
-    // Rasterizer: solid, back-face cull
+    // Rasterizer: solid, no culling. Authored CMO winding varies (and may differ
+    // from the placeholder cube), so cull nothing to avoid an inside-out mesh.
     psoDesc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+    psoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
     psoDesc.RasterizerState.DepthClipEnable = TRUE;
 
@@ -224,7 +226,7 @@ namespace Neuron::Render
     m_vbView = {m_vb->GetGPUVirtualAddress(), sizeof(cubeVerts), sizeof(Vertex)};
     m_ibView = {m_ib->GetGPUVirtualAddress(), sizeof(cubeIdx), DXGI_FORMAT_R16_UINT};
 
-    // --- Per-instance upload buffer (CPU-mapped, written each frame) ---
+    // --- Per-instance upload buffers (one per in-flight frame, CPU-mapped) ---
     constexpr UINT64 instBufSize = kMaxEntities * sizeof(InstanceData);
     D3D12_HEAP_PROPERTIES hpUpload{};
     hpUpload.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -234,22 +236,27 @@ namespace Neuron::Render
     instDesc.Height = instDesc.DepthOrArraySize = instDesc.MipLevels = 1;
     instDesc.SampleDesc.Count = 1;
     instDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    winrt::check_hresult(m_device->CreateCommittedResource(&hpUpload, D3D12_HEAP_FLAG_NONE, &instDesc,
-                                                           D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                           IID_PPV_ARGS(m_instBuf.put())));
-    D3D12_RANGE readRange{};
-    winrt::check_hresult(m_instBuf->Map(0, &readRange, reinterpret_cast<void**>(&m_instPtr)));
-
-    m_instView = {m_instBuf->GetGPUVirtualAddress(), static_cast<UINT>(instBufSize), sizeof(InstanceData)};
+    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    {
+      winrt::check_hresult(m_device->CreateCommittedResource(&hpUpload, D3D12_HEAP_FLAG_NONE, &instDesc,
+                                                             D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                             IID_PPV_ARGS(m_instBuf[i].put())));
+      D3D12_RANGE readRange{};
+      winrt::check_hresult(m_instBuf[i]->Map(0, &readRange, reinterpret_cast<void**>(&m_instPtr[i])));
+      m_instView[i] = {m_instBuf[i]->GetGPUVirtualAddress(), static_cast<UINT>(instBufSize), sizeof(InstanceData)};
+    }
     return true;
   }
 
   void SceneRenderer::Uninitialize()
   {
-    if (m_instBuf && m_instPtr)
+    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
     {
-      m_instBuf->Unmap(0, nullptr);
-      m_instPtr = nullptr;
+      if (m_instBuf[i] && m_instPtr[i])
+      {
+        m_instBuf[i]->Unmap(0, nullptr);
+        m_instPtr[i] = nullptr;
+      }
     }
   }
 
@@ -259,14 +266,17 @@ namespace Neuron::Render
   void SceneRenderer::Render(ID3D12GraphicsCommandList* cl, const float viewProjT[16], const SceneEntity* entities,
                              uint32_t count)
   {
-    if (!count || !m_instPtr) return;
+    // Select this frame's instance buffer (avoids racing the GPU on the buffer
+    // still being read by the previous in-flight frame).
+    const UINT fi = m_dr->FrameIndex();
+    if (!count || !m_instPtr[fi]) return;
     count = (std::min)(count, kMaxEntities);
 
     // Fill per-instance buffer.
     for (uint32_t i = 0; i < count; ++i)
     {
       const auto& e = entities[i];
-      InstanceData& inst = m_instPtr[i];
+      InstanceData& inst = m_instPtr[fi][i];
 
       // World matrix (scale × rotation around Y × translation), row-major.
       const float c = std::cos(e.yaw), s = std::sin(e.yaw);
@@ -320,9 +330,17 @@ namespace Neuron::Render
     cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
     cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    D3D12_VERTEX_BUFFER_VIEW vbViews[] = {m_vbView, m_instView};
+    // Use the loaded CMO mesh if present, else the placeholder cube. Both expose
+    // POSITION@0 / NORMAL@12; the differing stride comes from the vertex-buffer
+    // view, so the same PSO/input layout works for either.
+    const bool useMesh = m_mesh.valid();
+    const D3D12_VERTEX_BUFFER_VIEW geomVb = useMesh ? m_mesh.vbView : m_vbView;
+    const D3D12_INDEX_BUFFER_VIEW geomIb = useMesh ? m_mesh.ibView : m_ibView;
+    const UINT geomIndexCount = useMesh ? m_mesh.indexCount : m_indexCount;
+
+    D3D12_VERTEX_BUFFER_VIEW vbViews[] = {geomVb, m_instView[fi]};
     cl->IASetVertexBuffers(0, 2, vbViews);
-    cl->IASetIndexBuffer(&m_ibView);
-    cl->DrawIndexedInstanced(m_indexCount, count, 0, 0, 0);
+    cl->IASetIndexBuffer(&geomIb);
+    cl->DrawIndexedInstanced(geomIndexCount, count, 0, 0, 0);
   }
 } // namespace Neuron::Render

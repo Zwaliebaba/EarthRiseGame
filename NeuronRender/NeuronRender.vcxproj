@@ -32,6 +32,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CanvasRenderer.h" />
+    <ClInclude Include="CmoAnimation.h" />
     <ClInclude Include="CmoLoader.h" />
     <ClInclude Include="CmoParse.h" />
     <ClInclude Include="DdsLoader.h" />
