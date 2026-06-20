@@ -41,8 +41,10 @@ namespace er::format
     std::span<const std::byte> pcm{}; // 16-bit PCM frames, interleaved by channel
   };
 
-  // Wave audio format tag for linear PCM.
-  inline constexpr uint16_t WAVE_FORMAT_PCM = 0x0001;
+  // Linear-PCM format tag. Named WAV_PCM_TAG (not WAVE_FORMAT_PCM) because the
+  // Windows SDK defines WAVE_FORMAT_PCM as a *macro* in <mmreg.h>, which would
+  // otherwise rewrite this declaration when both headers are included.
+  inline constexpr uint16_t WAV_PCM_TAG = 0x0001;
 
   inline constexpr bool isMono(const WavFormat& f) noexcept { return f.channels == 1; }
 
@@ -109,7 +111,7 @@ namespace er::format
         fmt.sampleRate = readU32(f + 4);
         fmt.bitsPerSample = readU16(f + 14);
 
-        if (audioFormat != WAVE_FORMAT_PCM)
+        if (audioFormat != WAV_PCM_TAG)
           return WavStatus::UnsupportedFormat;
         if (fmt.bitsPerSample != 16)
           return WavStatus::NotPcm16;

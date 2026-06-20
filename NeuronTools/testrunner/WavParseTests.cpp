@@ -9,7 +9,7 @@ using namespace ertest;
 
 ER_TEST(WavParse, ValidMono16)
 {
-  auto file = makeWav(WAVE_FORMAT_PCM, 1, 44100, 16, 64);
+  auto file = makeWav(WAV_PCM_TAG, 1, 44100, 16, 64);
   WavData out{};
   ER_CHECK(parseWav(file, out) == WavStatus::Ok);
   ER_CHECK_EQ(out.format.channels, static_cast<uint16_t>(1));
@@ -21,7 +21,7 @@ ER_TEST(WavParse, ValidMono16)
 
 ER_TEST(WavParse, ValidStereo16)
 {
-  auto file = makeWav(WAVE_FORMAT_PCM, 2, 48000, 16, 128);
+  auto file = makeWav(WAV_PCM_TAG, 2, 48000, 16, 128);
   WavData out{};
   ER_CHECK(parseWav(file, out) == WavStatus::Ok);
   ER_CHECK_EQ(out.format.channels, static_cast<uint16_t>(2));
@@ -39,7 +39,7 @@ ER_TEST(WavParse, RejectsNonPcm)
 
 ER_TEST(WavParse, RejectsNon16Bit)
 {
-  auto file = makeWav(WAVE_FORMAT_PCM, 1, 44100, 24, 30);
+  auto file = makeWav(WAV_PCM_TAG, 1, 44100, 24, 30);
   WavData out{};
   ER_CHECK(parseWav(file, out) == WavStatus::NotPcm16);
 }
@@ -53,7 +53,7 @@ ER_TEST(WavParse, RejectsNotRiff)
 
 ER_TEST(WavParse, RejectsTruncatedDataChunk)
 {
-  auto file = makeWav(WAVE_FORMAT_PCM, 1, 44100, 16, 64);
+  auto file = makeWav(WAV_PCM_TAG, 1, 44100, 16, 64);
   // Inflate the declared 'data' size beyond the buffer. 'data' size field sits
   // right after the 16-byte fmt chunk body: 12 (RIFF) +8+16 (fmt) +4 ('data').
   WavData out{};
@@ -76,7 +76,7 @@ ER_TEST(WavParse, MissingDataChunk)
   w.tag('W', 'A', 'V', 'E');
   w.tag('f', 'm', 't', ' ');
   w.u32(16);
-  w.u16(WAVE_FORMAT_PCM);
+  w.u16(WAV_PCM_TAG);
   w.u16(1);
   w.u32(44100);
   w.u32(88200);
@@ -104,7 +104,7 @@ ER_TEST(WavParse, SkipsUnknownChunkBeforeData)
 
   w.tag('f', 'm', 't', ' ');
   w.u32(16);
-  w.u16(WAVE_FORMAT_PCM);
+  w.u16(WAV_PCM_TAG);
   w.u16(1);
   w.u32(22050);
   w.u32(44100);
