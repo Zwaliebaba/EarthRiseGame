@@ -16,6 +16,8 @@
 #include <chrono>
 #include <cstdio>
 
+#include <winrt/Windows.Graphics.Display.h> // DisplayInformation (DPI scale)
+
 // NeuronRender
 #include "DeviceResources.h"
 #include "SceneRenderer.h"
@@ -60,6 +62,12 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   std::array<uint8_t, 4096> m_snapBuf{};
   bool m_running{true};
 
+  // ---- window / dpi / timing ----
+  Windows::UI::Core::CoreWindow m_window{nullptr};
+  float m_dpiScale{1.0f};
+  std::chrono::steady_clock::time_point m_connectStart{};
+  bool m_connectedLogged{false};
+
   // ── IFrameworkViewSource ─────────────────────────────────────────────────
   Windows::ApplicationModel::Core::IFrameworkView CreateView() { return *this; }
 
@@ -77,19 +85,53 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
   void SetWindow(const Windows::UI::Core::CoreWindow& window)
   {
-    auto bounds = window.Bounds();
-    const UINT w = static_cast<UINT>(bounds.Width);
-    const UINT h = static_cast<UINT>(bounds.Height);
+    m_window = window;
 
+    // CoreWindow::Bounds() is in logical DIPs; the swap chain needs PHYSICAL
+    // pixels. On a scaled display (e.g. 125%) using DIPs makes the back buffer
+    // smaller than the window → the rendered region sits in the top-left with
+    // black margins. Convert via the display DPI scale.
+    auto disp = Windows::Graphics::Display::DisplayInformation::GetForCurrentView();
+    m_dpiScale = disp.LogicalDpi() / 96.0f;
+
+    const auto bounds = window.Bounds();
+    const UINT w = PhysPx(bounds.Width);
+    const UINT h = PhysPx(bounds.Height);
+
+    const auto initStart = std::chrono::steady_clock::now();
     check_bool(m_dr.Initialize(winrt::get_unknown(window), w, h));
     check_bool(m_scene.Initialize(&m_dr));
     check_bool(m_canvas.Initialize(&m_dr));
+    {
+      const long long initMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - initStart)
+                                   .count();
+      char buf[112];
+      std::snprintf(buf, sizeof(buf), "[EarthRise] DX init %lld ms (backbuffer %ux%u, dpi %.2f)\n",
+                    initMs, w, h, m_dpiScale);
+      OutputDebugStringA(buf);
+    }
 
     // Start connecting to ERServer.
+    m_connectStart = std::chrono::steady_clock::now();
     m_session->Connect("127.0.0.1", kServerPort);
 
+    // Keep the back buffer matched to the window across resize / maximize.
+    window.SizeChanged([this](Windows::UI::Core::CoreWindow const&,
+                              Windows::UI::Core::WindowSizeChangedEventArgs const&) { ApplyResize(); });
     window.KeyDown({this, &App::OnKeyDown});
     window.Closed({this, &App::OnClosed});
+  }
+
+  // Logical DIP -> physical pixels for the swap chain.
+  UINT PhysPx(float dip) const noexcept { return static_cast<UINT>(dip * m_dpiScale + 0.5f); }
+
+  void ApplyResize()
+  {
+    if (!m_window)
+      return;
+    const auto b = m_window.Bounds();
+    m_dr.Resize(PhysPx(b.Width), PhysPx(b.Height));
   }
 
   void Load(const hstring&) {}
@@ -98,6 +140,21 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   {
     auto window = Windows::UI::Core::CoreWindow::GetForCurrentThread();
     window.Activate();
+
+    // Pump the handshake to completion up front so connect isn't paced one
+    // round-trip per vsynced frame. Each Tick() sends the next step; the brief
+    // sleep lets the server reply over loopback. Bounded (~400 ms) so a missing
+    // server just falls through to the normal retrying render loop.
+    for (int i = 0; i < 200 && m_running &&
+                    m_session->GetState() != Neuron::Client::SessionState::Connected;
+         ++i)
+    {
+      window.Dispatcher().ProcessEvents(Windows::UI::Core::CoreProcessEventsOption::ProcessAllIfPresent);
+      m_session->Tick();
+      if (m_session->GetState() == Neuron::Client::SessionState::Connected)
+        break;
+      Sleep(2);
+    }
 
     while (m_running)
     {
@@ -122,6 +179,18 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   {
     // 1. Network I/O.
     m_session->Tick();
+
+    // One-shot: how long from Connect() to fully connected (handshake cost).
+    if (!m_connectedLogged && m_session->GetState() == Neuron::Client::SessionState::Connected)
+    {
+      m_connectedLogged = true;
+      const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - m_connectStart)
+                               .count();
+      char buf[80];
+      std::snprintf(buf, sizeof(buf), "[EarthRise] connected in %lld ms\n", ms);
+      OutputDebugStringA(buf);
+    }
 
     // 2. Consume any new snapshots.
     size_t snapSize = 0;
