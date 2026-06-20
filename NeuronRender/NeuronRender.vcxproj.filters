@@ -13,4 +13,14 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="SceneRenderer.h" />
   </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Project Files">
+      <UniqueIdentifier>{bd627d28-e1bf-49f3-9722-5f2f0824a3e1}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config">
+      <Filter>Project Files</Filter>
+    </None>
+  </ItemGroup>
 </Project>

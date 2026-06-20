@@ -55,6 +55,7 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
     psoDesc.NumRenderTargets      = 1;
     psoDesc.RTVFormats[0]         = DXGI_FORMAT_B8G8R8A8_UNORM;
     psoDesc.DSVFormat             = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleMask            = 0xFFFFFFFFu;
     psoDesc.SampleDesc.Count      = 1;
 
     psoDesc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;

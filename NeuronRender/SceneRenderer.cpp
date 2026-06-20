@@ -80,7 +80,7 @@ namespace Neuron::Render
 
     winrt::com_ptr<ID3D12Resource> buf;
     winrt::check_hresult(device->CreateCommittedResource(&hpDefault, D3D12_HEAP_FLAG_NONE, &rd,
-                                                         D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                         D3D12_RESOURCE_STATE_COMMON, nullptr,
                                                          IID_PPV_ARGS(buf.put())));
 
     // Upload heap (CPU write → GPU copy)
@@ -96,14 +96,18 @@ namespace Neuron::Render
     std::memcpy(mapped, data, size);
     uploadOut->Unmap(0, nullptr);
 
-    cl->CopyResource(buf.get(), uploadOut.get());
-
     D3D12_RESOURCE_BARRIER rb{};
     rb.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     rb.Transition.pResource = buf.get();
+    rb.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    rb.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+    rb.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    cl->ResourceBarrier(1, &rb);
+
+    cl->CopyResource(buf.get(), uploadOut.get());
+
     rb.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
     rb.Transition.StateAfter = finalState;
-    rb.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     cl->ResourceBarrier(1, &rb);
 
     return buf;
@@ -158,6 +162,7 @@ namespace Neuron::Render
     psoDesc.NumRenderTargets = 1;
     psoDesc.RTVFormats[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
     psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.SampleMask = 0xFFFFFFFFu;
     psoDesc.SampleDesc.Count = 1;
 
     // Rasterizer: solid, back-face cull

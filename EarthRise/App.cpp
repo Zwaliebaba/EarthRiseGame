@@ -63,9 +63,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   // ── IFrameworkView ───────────────────────────────────────────────────────
   void Initialize(const Windows::ApplicationModel::Core::CoreApplicationView&)
   {
-    // Winsock init happens inside WinsockSocket constructor.
+    check_bool(Neuron::Net::WinsockSocket::GlobalStartup());
+    check_bool(m_crypto.Initialize());
+
     m_socket = std::make_unique<Neuron::Net::WinsockSocket>();
-    m_socket->Bind(0); // ephemeral port
+    check_bool(m_socket->Open(0)); // ephemeral port
 
     m_session = std::make_unique<Neuron::Client::SessionImpl>(&m_crypto, m_pinnedPub, m_socket.get(), "player1");
   }
@@ -107,6 +109,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_canvas.Uninitialize();
     m_session.reset();
     m_socket.reset();
+    Neuron::Net::WinsockSocket::GlobalCleanup();
   }
 
   // ── Game tick ────────────────────────────────────────────────────────────
