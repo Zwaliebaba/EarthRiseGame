@@ -547,7 +547,7 @@ both ends — already committed by the deterministic ECS simulation.
   **single-threaded 30 Hz simulation** owns state; a **persistence thread** does the
   outbox + write-behind via ODBC. MPSC queues. Reliability/decrypt state is
   **per-connection-affinitised** (or lock-free per-conn queues) so IOCP threads never
-  race on a connection's sequence/nonce/reassembly state.
+  race on a connection's sequence/nonce/decrypt state.
 - **Tick:** commands → systems (movement, harvest, build, **PvE AI**, **PvP**) →
   advance fixed step → per-player interest snapshots → net → periodic persistence
   batch.
@@ -1311,7 +1311,8 @@ You cannot hold the M4 bandwidth budget you cannot measure. ERServer exposes,
 per-shard and per-client:
 - **Sim:** tick time p50/p99, catch-up steps used, entity/system counts.
 - **Net:** per-client downstream/upstream bytes, packet loss / retransmit / reorder
-  rates, fragment counts, **AEAD-auth failures**, replay-window rejects.
+  rates, **cold-start convergence time** (∅ baseline → interest set, §8.4),
+  **AEAD-auth failures**, replay-window rejects.
 - **Persistence:** outbox depth & drain latency, write-behind batch size/lag, RPO
   watermark.
 - **Auth:** login attempts / lockouts / rate-limit hits.

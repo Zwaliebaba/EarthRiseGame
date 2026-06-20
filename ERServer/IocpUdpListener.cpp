@@ -164,8 +164,8 @@ struct IocpUdpListenerImpl
                 if (SockaddrToEndpoint(reinterpret_cast<const sockaddr*>(&op->from), from)) {
                     // NOTE (§9): this runs on an arbitrary worker thread. The
                     // callback must hand off to the connection's affinitised lane
-                    // (see LaneForEndpoint) before touching reliability/decrypt/
-                    // reassembly state. Do NOT mutate per-connection state here.
+                    // (see LaneForEndpoint) before touching reliability/decrypt
+                    // state. Do NOT mutate per-connection state here.
                     if (callback)
                         callback(from, std::span<const uint8_t>(op->buffer, bytes));
                 }

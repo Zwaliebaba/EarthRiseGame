@@ -39,7 +39,6 @@
 #include "SequenceMath.h"
 #include "ReplayWindow.h"
 #include "Reliability.h"
-#include "Fragmentation.h"
 #include "PacketCodec.h"
 #include "ICrypto.h"
 #include "ISocket.h"

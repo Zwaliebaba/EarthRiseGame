@@ -7,9 +7,9 @@
 // the datagram to the registered callback, and re-posting a fresh WSARecvFrom.
 //
 // IMPORTANT (§9) — per-connection affinity:
-//   Reliability state (per-channel sequence/ack), the AEAD decrypt state (packet
-//   number / nonce, replay window) and fragment reassembly buffers are all
-//   PER-CONNECTION and are NOT safe to touch from multiple IOCP threads at once.
+//   Reliability state (per-channel sequence/ack) and the AEAD decrypt state (packet
+//   number / nonce, replay window) are all PER-CONNECTION and are NOT safe to touch
+//   from multiple IOCP threads at once.
 //   The IOCP threads here only do the raw recv + dispatch; the callback MUST route
 //   each datagram to the owning connection's single-threaded context. The intended
 //   scheme is hash(remote endpoint) % numWorkers -> a fixed worker/lane so that all
