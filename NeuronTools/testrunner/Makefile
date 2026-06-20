@@ -17,7 +17,12 @@ all: run
 
 build: $(BIN)
 
-$(BIN): $(SRCS) $(wildcard *.h) $(wildcard ../*.h)
+# The parser headers under test live in their owning libraries (NeuronAudio /
+# NeuronRender), not in NeuronTools — nothing depends on NeuronTools.
+PARSER_HEADERS := ../../NeuronAudio/WavParse.h ../../NeuronRender/DdsParse.h \
+                  ../../NeuronRender/CmoParse.h ../../NeuronRender/FontAtlasLayout.h
+
+$(BIN): $(SRCS) $(wildcard *.h) $(PARSER_HEADERS)
 	$(CXX) $(CXXFLAGS) $(SRCS) -o $(BIN)
 
 run: $(BIN)

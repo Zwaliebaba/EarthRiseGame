@@ -12,6 +12,9 @@
     <ClInclude Include="DeviceResources.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="SceneRenderer.h" />
+    <ClInclude Include="DdsParse.h" />
+    <ClInclude Include="CmoParse.h" />
+    <ClInclude Include="FontAtlasLayout.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Project Files">

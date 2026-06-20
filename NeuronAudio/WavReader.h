@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "AudioTypes.h"
-#include "WavParse.h" // NeuronTools — added to the include path by the .vcxproj
+#include "WavParse.h" // platform-independent RIFF/PCM-16 core (owned by NeuronAudio)
 
 namespace Neuron::Audio
 {

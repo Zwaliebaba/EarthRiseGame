@@ -1,7 +1,7 @@
 // CMO structural parser tests (mirror NeuronRenderTest, M2 area B gate:
 // "submesh/material/index counts on a known mesh; malformed → rejected").
 
-#include "../CmoParse.h"
+#include "../../NeuronRender/CmoParse.h"
 #include "Fixtures.h"
 #include "TestRunner.h"
 

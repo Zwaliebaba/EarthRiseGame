@@ -1,38 +1,36 @@
 # NeuronTools
 
-Asset-pipeline parsers and build-time validators for EarthRise (masterplan
-§12, §12.5, §12.6; M2 implementation plan **area A**).
+Build-time asset tooling and a Linux test harness for EarthRise (masterplan
+§12.5, §12.6, §16.2).
 
-Direct3D ships no model loader and DirectXTK is barred, so EarthRise parses its
-own assets. The **parsing logic is platform-independent** and lives here as
-dependency-free headers so a single implementation drives both:
+> **`NeuronTools` is intentionally a leaf with no dependents.** Nothing in the
+> solution links or includes anything from here; `testrunner` reaches *into* the
+> libraries for the parser headers, never the other way around. The goal is to
+> remove `NeuronTools` entirely once asset checking runs natively on Windows.
 
-- the **Windows runtime loaders** — `DdsLoader`/`CmoLoader`/`FontAtlas` in
-  NeuronRender and `WavReader` in NeuronAudio wrap these cores (adding D3D12 /
-  XAudio2 upload), and
-- the **build-time `*check` tools** (`ddscheck`, `wavcheck`, `meshcook`,
-  `fontpack`, `datacook`, `datacheck`) that validate/cook assets in CI.
+## Where the parsers live
 
-Keeping the core dependency-free also lets it be exercised on **Linux CI**
-without a Windows build (masterplan §16.2).
+The platform-independent parsing **cores** live in their **owning** libraries,
+not here — so the runtime loaders and any build-time validators share one
+implementation:
 
-## Parser headers
+| Header | Owning library | Used by |
+| --- | --- | --- |
+| `WavParse.h` | `NeuronAudio/` | `WavReader` (NeuronAudio), future `wavcheck` |
+| `DdsParse.h` | `NeuronRender/` | future `DdsLoader` (NeuronRender), `ddscheck` |
+| `CmoParse.h` | `NeuronRender/` | future `CmoLoader` (NeuronRender), `meshcook` |
+| `FontAtlasLayout.h` | `NeuronRender/` | future `FontAtlas` (NeuronRender), `fontpack` |
 
-| Header | Parses | Used by | Spec |
-| --- | --- | --- | --- |
-| `WavParse.h` | RIFF/WAVE → PCM-16 (mono/stereo); rejects non-PCM/non-16-bit | NeuronAudio `WavReader`, `wavcheck` | §11.3, §12.5; `neuronaudio-api.md` §3 |
-| `DdsParse.h` | `DDS_HEADER`(+`DXT10`) → `DxgiFormat` (BC1–BC7, 32-bit BGRA/RGBA), mips, data offset | NeuronRender `DdsLoader`, `ddscheck` | §12.1; `neuronrender-architecture.md` §9; `darwinia-menu-ui.md` §2.1 |
-| `CmoParse.h` | CMO structure → mesh/material/submesh/index/vertex counts (static meshes; skinning walked for bounds only) | NeuronRender `CmoLoader`, `meshcook` | §12.3; `neuronrender-architecture.md` §9 |
-| `FontAtlasLayout.h` | fixed-grid monospace codepoint→cell→UV (EditorFont: 256×224, 16×14, cp 32) | NeuronRender `FontAtlas`, `fontpack` | §12.2; `darwinia-menu-ui.md` §2.2 |
-
-All parsers are bounds-checked and reject malformed input with a status enum
+Each parser is bounds-checked and rejects malformed input with a status enum
 rather than crashing.
 
 ## testrunner/
 
 A minimal, dependency-free test harness (`TestRunner.h`) plus parser test
 suites that mirror the cases in the Windows MSTest projects
-(`NeuronRenderTest` / `NeuronAudioTest`). It builds and runs on any platform:
+(`NeuronRenderTest` / `NeuronAudioTest`). It `#include`s the parser headers from
+their owning libraries (e.g. `../../NeuronAudio/WavParse.h`) and builds on any
+platform:
 
 ```sh
 cd NeuronTools/testrunner
@@ -44,10 +42,9 @@ CI runs this so parser regressions are caught without a Windows toolchain.
 
 ## Status
 
-- **Done:** platform-independent parser cores (WAV/DDS/CMO/font) + Linux
-  `testrunner` (30 cases passing, `-Werror` clean). `WavParse.h` is now consumed
-  by the `NeuronAudio` library's `WavReader` (Area E).
-- **Next (needs the Windows build):** the remaining runtime loaders that wrap
-  these cores in NeuronRender (`DdsLoader`/`CmoLoader`/`FontAtlas`), the
-  `*check`/cook tool executables and their `.vcxproj` wiring, and the matching
-  Windows MSTest cases.
+- **Done:** parser cores (WAV in NeuronAudio; DDS/CMO/font in NeuronRender) +
+  Linux `testrunner` (30 cases passing, `-Werror` clean). `WavParse.h` is
+  consumed by NeuronAudio's `WavReader`.
+- **Planned build-time tools (Windows):** `wavcheck`, `ddscheck`, `meshcook`,
+  `fontpack`, `datacook`/`datacheck` — to be added here (or run natively),
+  still without introducing any dependency *on* `NeuronTools`.

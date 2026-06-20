@@ -1,6 +1,6 @@
 // Font-atlas layout tests (mirror NeuronRenderTest, darwinia-menu-ui.md §2.2).
 
-#include "../FontAtlasLayout.h"
+#include "../../NeuronRender/FontAtlasLayout.h"
 #include "TestRunner.h"
 
 #include <cmath>

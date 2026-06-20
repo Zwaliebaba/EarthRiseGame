@@ -58,6 +58,9 @@
     <ClInclude Include="WavReader.h">
       <Filter>Wav</Filter>
     </ClInclude>
+    <ClInclude Include="WavParse.h">
+      <Filter>Wav</Filter>
+    </ClInclude>
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>

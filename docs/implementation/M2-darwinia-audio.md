@@ -96,12 +96,14 @@
         3D⇒mono honored — §12.6).
 - **Depends on:** nothing (foundation). **Blocks:** B, E (wavcheck), F.
 
-> **Progress (this branch):** the platform-independent parser **cores** landed under
-> `NeuronTools/` (`WavParse.h`, `DdsParse.h`, `CmoParse.h`, `FontAtlasLayout.h`) with the
-> Linux `testrunner`. Remaining area-A work needs the Windows build: the runtime loaders
-> that wrap these cores (NeuronRender `DdsLoader`/`CmoLoader`/`FontAtlas`, NeuronAudio
-> `WavReader`), the `*check`/cook tool executables + `.vcxproj` wiring, the `assets/` tree,
-> and the MSTest mirrors.
+> **Progress (this branch):** the platform-independent parser **cores** landed in their
+> **owning** libraries — `WavParse.h` in `NeuronAudio/`, `DdsParse.h`/`CmoParse.h`/
+> `FontAtlasLayout.h` in `NeuronRender/` — with a Linux `testrunner` under `NeuronTools/`
+> that includes them from there. **Nothing depends on `NeuronTools`** (it's a leaf, intended
+> to be removed once checks run natively on Windows). Remaining area-A work needs the Windows
+> build: the runtime loaders that wrap these cores (NeuronRender `DdsLoader`/`CmoLoader`/
+> `FontAtlas`, NeuronAudio `WavReader` — done), the `*check`/cook tool executables, the
+> `assets/` tree, and the MSTest mirrors.
 
 ### B. SceneRenderer upgrade — real instanced CMO ships
 
@@ -175,10 +177,11 @@
   written but unverified (needs a Windows build).
 - **Work:**
   - [x] Create `NeuronAudio/` (`Engine`/`Spatial`/`Wav`/`Mixer` VS Filters) + `NeuronAudioTest`.
-        Links NeuronCore (math/types) + NeuronTools (`WavParse.h`), **not** NeuronRender. Both
-        added to `EarthRise.slnx` → **14 projects**.
+        Links NeuronCore (math/types), **not** NeuronRender. Both added to `EarthRise.slnx`
+        → **14 projects**.
   - [x] **WAV/RIFF reader** — `WavClip`/`WavReader.h` wraps the tested `er::format::parseWav`
-        core → `WAVEFORMATEX` + PCM-16 (mono 3D / stereo). No MP3/OGG/ADPCM.
+        core (`NeuronAudio/WavParse.h`) → `WAVEFORMATEX` + PCM-16 (mono 3D / stereo). No
+        MP3/OGG/ADPCM.
   - [~] **Voice graph** — mastering voice → 4 submix buses → pooled source voices (`VoicePool`,
         generation-checked) + per-bus/master volume (`Mixer`) **done**; event SFX loaded fully
         **done**. *Ambient/music currently loop **in-memory**; buffer-queue

@@ -1,6 +1,6 @@
 // WAV/RIFF parser tests (mirror NeuronAudioTest, docs/design/neuronaudio-api.md §10).
 
-#include "../WavParse.h"
+#include "../../NeuronAudio/WavParse.h"
 #include "Fixtures.h"
 #include "TestRunner.h"
 

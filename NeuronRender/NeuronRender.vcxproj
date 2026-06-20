@@ -30,7 +30,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CanvasRenderer.h" />
+    <ClInclude Include="CmoParse.h" />
+    <ClInclude Include="DdsParse.h" />
     <ClInclude Include="DeviceResources.h" />
+    <ClInclude Include="FontAtlasLayout.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="SceneRenderer.h" />
   </ItemGroup>

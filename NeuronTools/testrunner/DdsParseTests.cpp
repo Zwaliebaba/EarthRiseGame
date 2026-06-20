@@ -1,7 +1,7 @@
 // DDS header parser tests (mirror NeuronRenderTest, docs/design/
 // neuronrender-architecture.md §11 + darwinia-menu-ui.md §2.1).
 
-#include "../DdsParse.h"
+#include "../../NeuronRender/DdsParse.h"
 #include "Fixtures.h"
 #include "TestRunner.h"
 
