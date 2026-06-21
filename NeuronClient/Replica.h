@@ -13,6 +13,7 @@ struct ReplicaEntity
     uint32_t networkId{ 0 }; // server-assigned entity ID
     float    x{ 0 }, y{ 0 }, z{ 0 }; // sector-local position from last snapshot
     uint8_t  entityType{ 0 };
+    uint16_t shapeId{ 0xFFFF }; // ShapeCatalog index (selects the mesh); kInvalidShapeId
     bool     valid{ false };
 };
 

@@ -20,7 +20,7 @@
 | Area | Status | Notes |
 | --- | --- | --- |
 | **A** Asset pipeline & tooling | 🟢 mostly done | DDS/CMO/font/WAV parser cores + `NeuronTools/testrunner` (35 cases, Linux CI); MSTest parser mirrors. Loaders done (see B/E). Remaining: the `*check`/cook tool executables, `datacook`/`datacheck` cue catalog. |
-| **B** Instanced CMO ships | 🟡 in progress | `DdsLoader`/`CmoLoader`→GPU done; `SceneRenderer` renders the real `Jumpgate.cmo` instanced (size-normalized, cube fallback), validated vs the real file. **Diffuse texturing done** — separate textured root sig/PSO (root constants b0 + SRV table t0 + static linear-wrap sampler s0), `SceneTexVS/PS`, binds `dif_512.dds` via `SetDiffuseTexture`; untextured emissive path kept as fail-safe. **Next: per-kind mesh mapping;** then GPU skinned-render path. |
+| **B** Instanced CMO ships | 🟢 mostly done | `DdsLoader`/`CmoLoader`→GPU; `SceneRenderer` renders real CMO meshes instanced (size-normalized per kind, cube fallback). **Diffuse texturing** (textured root sig/PSO, `SceneTexVS/PS`). **Full catalog integrated** — all 70 `Assets/Shapes` meshes in a generated `ShapeCatalog` (NeuronCore), `ShapeId` ECS component + snapshot field, server spawns scenery, client loads the catalog and draws the right mesh+diffuse **per entity** (grouped/instanced by shape). **Remaining: `nrm`/`spec` maps; GPU skinned-render path.** |
 | **C** HDR + bloom + tone-map | 🟡 in progress | `PostProcess` renders the scene into an HDR (`R16G16B16A16_FLOAT`) target, then bright-pass→half-res→separable Gaussian blur (H+V ping-pong)→additive composite into the LDR back buffer. Full-screen-triangle passes, shared root sig (root constants + two SRV tables + static sampler). Fail-safe: falls back to direct LDR render if init fails. Composite is conservative (additive glow, base tone preserved) — **remaining: HDR tone-map curve + threshold/intensity tuning once seen in Windows.** *Rendered blind.* |
 | **D** GPU-compute particles | ⚪ not started | — |
 | **E** NeuronAudio | 🟡 in progress | library scaffolded — voice graph / 4 buses / `WavReader` / X3DAudio `Spatializer` / `VoicePool` / `AudioEngine` + `NeuronAudioTest` (14 projects). Device-free math Linux-verified. Remaining: buffer-queue streaming, cue catalog, `wavcheck`, Windows device smoke test. |
@@ -155,8 +155,12 @@
         creates the SRV in a shader-visible heap; the client loads `dif_512.dds` via `DdsLoader`
         and binds it. Untextured emissive path kept untouched as a fail-safe. *Rendered blind —
         pending Windows visual confirmation.* **Remaining:** `nrm`/`spec` maps (normal/specular).
-  - [ ] **Per-kind mesh mapping** — a small mesh catalog (Base/Ship/structure → `.cmo`);
-        currently every entity uses the one loaded mesh. Needs a base/ship mesh.
+  - [x] **Per-shape mesh mapping** — generated **`ShapeCatalog`** (NeuronCore) registers all
+        70 `Assets/Shapes` meshes with a stable id + category→`EntityKind`. A `ShapeId`
+        component (mesh id + kind) is replicated in the snapshot (`+u16 shapeId`); the server
+        spawns catalog scenery and stamps each entity, the client loads the whole catalog and
+        `SceneRenderer::SetShape`/grouped draws render the right mesh+diffuse per entity
+        (cube fallback for an unregistered/failed shape). +7 Linux catalog/snapshot tests.
   - [~] **Skeletal animation** — `CmoParse` fully extracts the skeleton (bones + parents +
         bind/inverse-bind/local matrices), animation clips (keyframes), and skinning vertices;
         `CmoAnimation.h` samples a clip → per-bone pose and builds the skinning palette

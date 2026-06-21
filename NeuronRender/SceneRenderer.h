@@ -19,6 +19,7 @@
 
 #include <array>
 #include <cstdint>
+#include <unordered_map>
 
 #include "DeviceResources.h"
 #include "MeshGpu.h"
@@ -30,11 +31,12 @@ namespace Neuron::Render
 // Public description of one renderable entity (sector-relative coordinates).
 struct SceneEntity
 {
-    float   x, y, z;   // render-space position (floating-origin-relative metres)
-    float   yaw;        // rotation around Y (radians)
-    float   scale;      // half-extent in metres (100 for base, 20 for ship)
-    float   r, g, b;   // emissive color override (< 0 = use kind default)
-    uint8_t kind;       // 0 = Base, 1 = Ship, others use orange
+    float    x, y, z;   // render-space position (floating-origin-relative metres)
+    float    yaw;        // rotation around Y (radians)
+    float    scale;      // uniform world scale applied to the mesh
+    float    r, g, b;   // emissive color override (< 0 = use kind default)
+    uint8_t  kind;       // EntityKind (color default when no override)
+    uint16_t shapeId;    // ShapeCatalog index → which registered mesh to draw
 };
 
 class SceneRenderer
@@ -55,16 +57,15 @@ public:
                 const float viewProjT[16],
                 const SceneEntity* entities, uint32_t count);
 
-    // Use a loaded CMO mesh (CmoLoader) for all instances instead of the
-    // placeholder cube. Ignored if the mesh is invalid (keeps the cube), so the
-    // caller can fail-safe when an asset is missing.
-    void SetMesh(MeshGpu mesh) { if (mesh.valid()) m_mesh = std::move(mesh); }
-
-    // Bind a diffuse texture for the mesh; creates its SRV. When both a mesh and
-    // a diffuse are set, Render uses the textured pipeline. Ignored if invalid.
-    void SetDiffuseTexture(TextureGpu tex);
+    // Register a catalog shape: the mesh drawn for entities whose SceneEntity::
+    // shapeId == id, plus an optional diffuse texture (creates its SRV; when
+    // present the textured pipeline is used for that shape). Invalid meshes are
+    // ignored. Entities referencing an unregistered shape fall back to the
+    // placeholder cube, so a missing asset never blanks the scene.
+    void SetShape(uint16_t id, MeshGpu mesh, TextureGpu diffuse);
 
     static constexpr UINT kMaxEntities = 512;
+    static constexpr UINT kMaxShapes   = 128; // SRV heap capacity (diffuse per shape)
 
 private:
     void BuildUnitCube();
@@ -98,15 +99,28 @@ private:
     D3D12_INDEX_BUFFER_VIEW  m_ibView{};
     UINT m_indexCount{ 0 };
 
-    // Optional real CMO mesh; when valid() it replaces the cube for all draws.
-    MeshGpu m_mesh;
+    // Registered catalog shape: its GPU mesh, optional diffuse, and the SRV-heap
+    // slot the diffuse was placed in (only meaningful when diffuse.valid()).
+    struct Shape
+    {
+        MeshGpu    mesh;
+        TextureGpu diffuse;
+        UINT       srvIndex{ 0 };
+    };
+    std::unordered_map<uint16_t, Shape> m_shapes;
 
-    // Textured pipeline (separate root sig/PSO so the untextured geometry path
-    // is untouched). Used only when both a mesh and a diffuse texture are set.
+    // Draw one contiguous run of instances [startInstance, startInstance+count)
+    // sharing shapeId 'sid', picking the textured/untextured pipeline and mesh.
+    void DrawRun(ID3D12GraphicsCommandList* cl, const float viewProjT[16],
+                 uint16_t sid, UINT startInstance, UINT count, UINT fi);
+
+    // Textured pipeline (separate root sig/PSO so the untextured geometry path is
+    // untouched). The SRV heap holds one diffuse per registered shape.
     winrt::com_ptr<ID3D12RootSignature> m_rootSigTex;
     winrt::com_ptr<ID3D12PipelineState> m_psoTex;
-    winrt::com_ptr<ID3D12DescriptorHeap> m_srvHeap; // shader-visible, 1 SRV (diffuse)
-    TextureGpu m_diffuse;
+    winrt::com_ptr<ID3D12DescriptorHeap> m_srvHeap; // shader-visible, kMaxShapes SRVs
+    UINT m_srvDescSize{ 0 };
+    UINT m_nextSrv{ 0 };
 };
 
 } // namespace Neuron::Render

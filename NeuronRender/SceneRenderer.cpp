@@ -243,10 +243,11 @@ namespace Neuron::Render
       winrt::check_hresult(m_device->CreateGraphicsPipelineState(&texPso, IID_PPV_ARGS(m_psoTex.put())));
 
       D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
-      srvHeapDesc.NumDescriptors = 1;
+      srvHeapDesc.NumDescriptors = kMaxShapes; // one diffuse SRV per registered shape
       srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
       srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
       winrt::check_hresult(m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(m_srvHeap.put())));
+      m_srvDescSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
     // --- Upload geometry via a temporary command list ---
@@ -329,22 +330,34 @@ namespace Neuron::Render
   }
 
   // ---------------------------------------------------------------------------
-  // SetDiffuseTexture — store the texture and create its SRV in m_srvHeap so the
-  // textured pipeline can sample it. Ignored if invalid (keeps the untextured
-  // path), so a missing asset never breaks rendering.
+  // SetShape — register the mesh (and optional diffuse) drawn for a catalog id.
+  // Invalid meshes are ignored; a missing/invalid diffuse leaves the shape on the
+  // untextured emissive path. Each diffuse gets its own SRV-heap slot.
   // ---------------------------------------------------------------------------
-  void SceneRenderer::SetDiffuseTexture(TextureGpu tex)
+  void SceneRenderer::SetShape(uint16_t id, MeshGpu mesh, TextureGpu diffuse)
   {
-    if (!tex.valid() || !m_srvHeap || !m_device) return;
-    m_diffuse = std::move(tex);
+    if (!mesh.valid() || !m_device) return;
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-    srv.Format = m_diffuse.format;
-    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srv.Texture2D.MipLevels = m_diffuse.mipCount ? m_diffuse.mipCount : 1u;
-    m_device->CreateShaderResourceView(m_diffuse.resource.get(), &srv,
-                                       m_srvHeap->GetCPUDescriptorHandleForHeapStart());
+    Shape shape;
+    shape.mesh = std::move(mesh);
+
+    if (diffuse.valid() && m_srvHeap && m_nextSrv < kMaxShapes)
+    {
+      shape.srvIndex = m_nextSrv++;
+      shape.diffuse = std::move(diffuse);
+
+      D3D12_CPU_DESCRIPTOR_HANDLE h = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+      h.ptr += static_cast<SIZE_T>(shape.srvIndex) * m_srvDescSize;
+
+      D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+      srv.Format = shape.diffuse.format;
+      srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+      srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      srv.Texture2D.MipLevels = shape.diffuse.mipCount ? shape.diffuse.mipCount : 1u;
+      m_device->CreateShaderResourceView(shape.diffuse.resource.get(), &srv, h);
+    }
+
+    m_shapes[id] = std::move(shape);
   }
 
   // ---------------------------------------------------------------------------
@@ -361,11 +374,19 @@ namespace Neuron::Render
 
     NEURON_PIX_SCOPED(cl, PixColors::Scene, "Scene (%u instances)", count);
 
-    // Fill per-instance buffer.
-    for (uint32_t i = 0; i < count; ++i)
+    // Group entities by shapeId so each registered mesh is drawn in one instanced
+    // call. Sort a stable index list, fill the per-instance buffer in that order,
+    // then issue one DrawRun per contiguous shapeId run (StartInstanceLocation
+    // indexes into the shared instance buffer).
+    std::array<uint32_t, kMaxEntities> order;
+    for (uint32_t i = 0; i < count; ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.begin() + count,
+                     [&](uint32_t a, uint32_t b) { return entities[a].shapeId < entities[b].shapeId; });
+
+    for (uint32_t k = 0; k < count; ++k)
     {
-      const auto& e = entities[i];
-      InstanceData& inst = m_instPtr[fi][i];
+      const auto& e = entities[order[k]];
+      InstanceData& inst = m_instPtr[fi][k];
 
       // World matrix (scale × rotation around Y × translation), row-major.
       const float c = std::cos(e.yaw), s = std::sin(e.yaw);
@@ -387,7 +408,8 @@ namespace Neuron::Render
       inst.world[3][2] = 0.f;
       inst.world[3][3] = 1.f;
 
-      // Color: use per-entity override if >= 0, else default by kind.
+      // Color: per-entity override if >= 0, else default by kind. (Only used by
+      // the untextured path / as a tint; textured shapes sample their diffuse.)
       if (e.r >= 0.f)
       {
         inst.color[0] = e.r;
@@ -395,9 +417,8 @@ namespace Neuron::Render
         inst.color[2] = e.b;
         inst.color[3] = 1.f;
       }
-      else if (e.kind == 0)
+      else if (e.kind == static_cast<uint8_t>(1)) // Base
       {
-        // Base: neon blue
         inst.color[0] = 0.f;
         inst.color[1] = 0.5f;
         inst.color[2] = 1.f;
@@ -405,7 +426,6 @@ namespace Neuron::Render
       }
       else
       {
-        // Ship: orange
         inst.color[0] = 1.f;
         inst.color[1] = 0.3f;
         inst.color[2] = 0.f;
@@ -413,45 +433,59 @@ namespace Neuron::Render
       }
     }
 
-    // Textured path: requires a real CMO mesh (carries UVs at offset 44), a bound
-    // diffuse texture, and the textured PSO/heap. Otherwise fall back to the
-    // emissive untextured path (placeholder cube or untextured mesh) so a missing
-    // asset never blanks the scene.
-    const bool textured = m_mesh.valid() && m_diffuse.valid() && m_psoTex && m_srvHeap;
-
     cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    if (m_srvHeap)
+    {
+      // Bind the shared SRV heap once; textured runs index into it per shape.
+      ID3D12DescriptorHeap* heaps[] = {m_srvHeap.get()};
+      cl->SetDescriptorHeaps(1, heaps);
+    }
+
+    uint32_t k = 0;
+    while (k < count)
+    {
+      const uint16_t sid = entities[order[k]].shapeId;
+      uint32_t start = k;
+      while (k < count && entities[order[k]].shapeId == sid) ++k;
+      DrawRun(cl, viewProjT, sid, start, k - start, fi);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // DrawRun — draw [startInstance, startInstance+count) for one shapeId, choosing
+  // the textured pipeline when the shape has a diffuse, else the untextured
+  // emissive path; unregistered shapes fall back to the placeholder cube.
+  // ---------------------------------------------------------------------------
+  void SceneRenderer::DrawRun(ID3D12GraphicsCommandList* cl, const float viewProjT[16], uint16_t sid,
+                              UINT startInstance, UINT count, UINT fi)
+  {
+    auto it = m_shapes.find(sid);
+    const Shape* shape = (it != m_shapes.end() && it->second.mesh.valid()) ? &it->second : nullptr;
+    const bool textured = shape && shape->diffuse.valid() && m_psoTex && m_srvHeap;
 
     if (textured)
     {
       cl->SetGraphicsRootSignature(m_rootSigTex.get());
       cl->SetPipelineState(m_psoTex.get());
       cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
-      ID3D12DescriptorHeap* heaps[] = {m_srvHeap.get()};
-      cl->SetDescriptorHeaps(1, heaps);
-      cl->SetGraphicsRootDescriptorTable(1, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
-
-      D3D12_VERTEX_BUFFER_VIEW vbViews[] = {m_mesh.vbView, m_instView[fi]};
-      cl->IASetVertexBuffers(0, 2, vbViews);
-      cl->IASetIndexBuffer(&m_mesh.ibView);
-      cl->DrawIndexedInstanced(m_mesh.indexCount, count, 0, 0, 0);
-      return;
+      D3D12_GPU_DESCRIPTOR_HANDLE srv = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
+      srv.ptr += static_cast<UINT64>(shape->srvIndex) * m_srvDescSize;
+      cl->SetGraphicsRootDescriptorTable(1, srv);
+    }
+    else
+    {
+      cl->SetGraphicsRootSignature(m_rootSig.get());
+      cl->SetPipelineState(m_pso.get());
+      cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
     }
 
-    // Untextured path. Use the loaded CMO mesh if present, else the placeholder
-    // cube. Both expose POSITION@0 / NORMAL@12; the differing stride comes from
-    // the vertex-buffer view, so the same PSO/input layout works for either.
-    cl->SetGraphicsRootSignature(m_rootSig.get());
-    cl->SetPipelineState(m_pso.get());
-    cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
-
-    const bool useMesh = m_mesh.valid();
-    const D3D12_VERTEX_BUFFER_VIEW geomVb = useMesh ? m_mesh.vbView : m_vbView;
-    const D3D12_INDEX_BUFFER_VIEW geomIb = useMesh ? m_mesh.ibView : m_ibView;
-    const UINT geomIndexCount = useMesh ? m_mesh.indexCount : m_indexCount;
+    const D3D12_VERTEX_BUFFER_VIEW geomVb = shape ? shape->mesh.vbView : m_vbView;
+    const D3D12_INDEX_BUFFER_VIEW geomIb = shape ? shape->mesh.ibView : m_ibView;
+    const UINT geomIndexCount = shape ? shape->mesh.indexCount : m_indexCount;
 
     D3D12_VERTEX_BUFFER_VIEW vbViews[] = {geomVb, m_instView[fi]};
     cl->IASetVertexBuffers(0, 2, vbViews);
     cl->IASetIndexBuffer(&geomIb);
-    cl->DrawIndexedInstanced(geomIndexCount, count, 0, 0, 0);
+    cl->DrawIndexedInstanced(geomIndexCount, count, 0, 0, startInstance);
   }
 } // namespace Neuron::Render

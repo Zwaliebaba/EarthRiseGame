@@ -59,6 +59,7 @@ public:
             r.y          = rs.y;
             r.z          = rs.z;
             r.entityType = static_cast<uint8_t>(e.kind);
+            r.shapeId    = e.shapeId;
             r.valid      = true;
         }
         return true;

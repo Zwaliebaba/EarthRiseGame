@@ -12,6 +12,7 @@
 
 #include "Components.h"
 #include "Movement.h"
+#include "ShapeCatalog.h"
 #include "Snapshot.h"
 #include "Ecs.h"
 #include "WorldPos.h"
@@ -33,6 +34,15 @@ public:
         m_world.RegisterComponent<NetId>();
         m_world.RegisterComponent<BaseTag>();
         m_world.RegisterComponent<Health>();
+        m_world.RegisterComponent<ShapeId>();
+        SpawnScenery();
+    }
+
+    // Shape used for a player's mobile home base (a station hull reads as a base).
+    static uint16_t BaseShapeId()
+    {
+        const uint16_t id = ShapeIdByName("Outpost01");
+        return id != kInvalidShapeId ? id : 0; // 0 is always a valid catalog entry
     }
 
     // Spawn a mobile base for a player. Returns the assigned network id.
@@ -49,6 +59,23 @@ public:
         m_world.AddComponent<NetId>(e).value = netId;
         m_world.AddComponent<BaseTag>(e);
         m_world.AddComponent<Health>(e) = { 1000, 1000 };
+        m_world.AddComponent<ShapeId>(e) = { BaseShapeId(), EntityKind::Base };
+        m_netIdToEntity[netId] = e;
+        return netId;
+    }
+
+    // Spawn a static catalog prop (scenery: stations, asteroids, jumpgates, ...).
+    // Replicated like any entity (gets a NetId); no Velocity, so it stays put.
+    // Kind defaults to the catalog category's kind. Returns the net id.
+    uint32_t SpawnProp(uint16_t shapeId, Neuron::World::WorldPos pos)
+    {
+        const ShapeDef* def = ShapeById(shapeId);
+        const EntityKind kind = def ? KindForCategory(def->category) : EntityKind::Unknown;
+        const uint32_t netId = m_nextNetId++;
+        auto e = m_world.CreateEntity();
+        m_world.AddComponent<Transform>(e).pos = pos;
+        m_world.AddComponent<NetId>(e).value = netId;
+        m_world.AddComponent<ShapeId>(e) = { shapeId, kind };
         m_netIdToEntity[netId] = e;
         return netId;
     }
@@ -80,18 +107,21 @@ public:
         ++m_tick;
     }
 
-    // Build the full snapshot for this tick (M1a: identical for all players).
+    // Build the full snapshot for this tick (interest = everything until M4).
+    // Every replicated entity carries a ShapeId (mesh + kind), so the client can
+    // render the right catalog mesh per entity.
     [[nodiscard]] Snapshot BuildSnapshot()
     {
         Snapshot snap;
         snap.tick = m_tick;
-        m_world.ForEach<NetId, Transform>([&snap, this](NetId& id, Transform& t) {
+        m_world.ForEach<NetId, Transform, ShapeId>([&snap](NetId& id, Transform& t, ShapeId& s) {
             SnapshotEntity e;
             e.netId       = id.value;
-            e.kind        = EntityKind::Base; // M1a: all replicated entities are bases
+            e.kind        = s.kind;
             e.pos         = t.pos;
             e.localOffset = t.localOffset;
             e.hp          = 1000;
+            e.shapeId     = s.value;
             snap.entities.push_back(e);
         });
         return snap;
@@ -112,6 +142,37 @@ public:
     static constexpr float kMaxBaseSpeed = 50.0f; // m/s cap (server validates intents)
 
 private:
+    // Populate the world with a spread of static catalog props near the sector-0
+    // origin so the client exercises the whole shape catalog (a jumpgate, a few
+    // stations, asteroids, debris and a sampling of ship hulls). Runs once at
+    // construction, before any player connects.
+    void SpawnScenery()
+    {
+        struct Placement { const char* name; int64_t x, y, z; };
+        // Ring of landmarks around the origin (metres). Names fall back to the
+        // first shape in the matching category if an asset was renamed.
+        static constexpr Placement kProps[] = {
+            { "Jumpgate01",   0,   0,  600 },
+            { "Outpost01",  500,   0,    0 },
+            { "Science01", -500,   0,    0 },
+            { "Mining01",     0,   0, -500 },
+            { "Asteroid01Rock",  300, 100,  300 },
+            { "Asteroid04Ice",  -300, -80,  300 },
+            { "Asteroid06Lava",  300, -60, -300 },
+            { "Satellite01",   -300, 120, -300 },
+            { "Crate01",        120,  0,  120 },
+            { "DebrisGenericWreck01", -150, 0, 150 },
+            { "HullFreighter",  250,  0,   80 },
+            { "HullShuttle",   -250,  0,   80 },
+            { "HullAurora",       0, 50,  250 },
+        };
+        for (const auto& p : kProps) {
+            const uint16_t id = ShapeIdByName(p.name);
+            if (id != kInvalidShapeId)
+                SpawnProp(id, { p.x, p.y, p.z });
+        }
+    }
+
     Neuron::ECS::World m_world;
     std::unordered_map<uint32_t, Neuron::ECS::EntityHandle> m_netIdToEntity;
     uint32_t m_nextNetId{ 1 };

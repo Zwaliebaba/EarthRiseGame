@@ -13,6 +13,7 @@
 
 #include "pch.h"
 
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -40,6 +41,7 @@
 #include "CngCrypto.h"
 #include "DatagramSocketAdapter.h"
 #include "Protocol.h"
+#include "ShapeCatalog.h"
 #include "Snapshot.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -103,7 +105,33 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   float m_dpiScale{1.0f};
   std::chrono::steady_clock::time_point m_connectStart{};
   bool m_connectedLogged{false};
-  float m_meshRadius{0.0f}; // loaded CMO bounding radius (0 = cube fallback)
+  // Per-shape bounding radius (indexed by ShapeCatalog id; 0 = not loaded / cube
+  // fallback) used to normalize each mesh to a per-kind on-screen size.
+  std::array<float, Neuron::Sim::kShapeCount> m_shapeRadius{};
+
+  // Bounding radius of a shape (0 if unknown). Safe for any id.
+  float ShapeRadius(uint16_t shapeId) const noexcept
+  {
+    return (shapeId < Neuron::Sim::kShapeCount) ? m_shapeRadius[shapeId] : 0.f;
+  }
+
+  // Target on-screen size (metres) the mesh is normalized to, per entity kind.
+  static float TargetMetresForKind(uint8_t kind) noexcept
+  {
+    using K = Neuron::Sim::EntityKind;
+    switch (static_cast<K>(kind))
+    {
+      case K::Base:          return 40.f;
+      case K::Station:       return 70.f;
+      case K::Structure:     return 80.f; // jumpgates, large platforms
+      case K::Asteroid:      return 30.f;
+      case K::Decoration:    return 25.f;
+      case K::Debris:        return 12.f;
+      case K::LootContainer: return 8.f;
+      case K::Ship:
+      default:               return 20.f;
+    }
+  }
 
   // ── IFrameworkViewSource ─────────────────────────────────────────────────
   Windows::ApplicationModel::Core::IFrameworkView CreateView() { return *this; }
@@ -159,43 +187,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       OutputDebugStringA(buf);
     }
 
-    // Load the real CMO mesh (fail-safe: SceneRenderer keeps the cube if the
-    // asset is missing or unparseable).
-    if (auto cmo = LoadPackagedAsset(L"Assets\\Shapes\\Jumpgates\\Jumpgate.cmo"); !cmo.empty())
-    {
-      auto mesh = Neuron::Render::CmoLoader::Load(m_dr.Device(), cmo);
-      char buf[128];
-      std::snprintf(buf, sizeof(buf),
-                    "[EarthRise] CMO load: %zu bytes, valid=%d verts=%u idx=%u radius=%.1f\n",
-                    cmo.size(), static_cast<int>(mesh.valid()), mesh.vertexCount, mesh.indexCount,
-                    mesh.boundingRadius);
-      OutputDebugStringA(buf);
-      if (mesh.valid())
-        m_meshRadius = mesh.boundingRadius;
-      m_scene.SetMesh(std::move(mesh));
-
-      // Bind the mesh's diffuse texture (fail-safe: SceneRenderer keeps the
-      // untextured emissive path if the DDS is missing or unparseable).
-      if (auto dds = LoadPackagedAsset(L"Assets\\Shapes\\Jumpgates\\dif_512.dds"); !dds.empty())
-      {
-        auto tex = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
-        char tbuf[128];
-        std::snprintf(tbuf, sizeof(tbuf),
-                      "[EarthRise] DDS load: %zu bytes, valid=%d %ux%u mips=%u fmt=%d\n",
-                      dds.size(), static_cast<int>(tex.valid()), tex.width, tex.height,
-                      tex.mipCount, static_cast<int>(tex.format));
-        OutputDebugStringA(tbuf);
-        m_scene.SetDiffuseTexture(std::move(tex));
-      }
-      else
-      {
-        OutputDebugStringA("[EarthRise] DDS load: diffuse not found (untextured mesh)\n");
-      }
-    }
-    else
-    {
-      OutputDebugStringA("[EarthRise] CMO load: asset not found (using placeholder cube)\n");
-    }
+    // Load the whole shape catalog into the renderer (fail-safe per shape: a
+    // missing/unparseable asset just leaves that shape on the cube fallback).
+    LoadShapeCatalog();
 
     // Start connecting to ERServer.
     m_connectStart = std::chrono::steady_clock::now();
@@ -259,6 +253,52 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_session->Disconnect(); // best-effort graceful notice while the socket is alive
     m_session.reset();
     m_socket.reset();
+  }
+
+  // Load every ShapeCatalog entry into the renderer: the CMO mesh plus its
+  // derived diffuse (<stem>1.dds). Per-shape fail-safe — a missing/unparseable
+  // asset is skipped (that shape draws the placeholder cube). Logs a summary.
+  void LoadShapeCatalog()
+  {
+    const auto t0 = std::chrono::steady_clock::now();
+    uint32_t loaded = 0, textured = 0, failed = 0;
+
+    for (const auto& def : Neuron::Sim::kShapes)
+    {
+      // Widen the (ASCII) package-relative paths for the file APIs.
+      const std::wstring cmoW(def.cmoPath.begin(), def.cmoPath.end());
+
+      auto cmoBytes = LoadPackagedAsset(cmoW.c_str());
+      if (cmoBytes.empty()) { ++failed; continue; }
+
+      auto mesh = Neuron::Render::CmoLoader::Load(m_dr.Device(), cmoBytes);
+      if (!mesh.valid()) { ++failed; continue; }
+      m_shapeRadius[def.id] = mesh.boundingRadius;
+
+      // Diffuse path: replace the ".cmo" suffix with "1.dds".
+      std::string diffuse(def.cmoPath);
+      diffuse.replace(diffuse.size() - 4, 4, "1.dds");
+      const std::wstring diffW(diffuse.begin(), diffuse.end());
+
+      Neuron::Render::TextureGpu tex;
+      if (auto dds = LoadPackagedAsset(diffW.c_str()); !dds.empty())
+      {
+        tex = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
+        if (tex.valid()) ++textured;
+      }
+
+      m_scene.SetShape(def.id, std::move(mesh), std::move(tex));
+      ++loaded;
+    }
+
+    const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - t0)
+                             .count();
+    char buf[160];
+    std::snprintf(buf, sizeof(buf),
+                  "[EarthRise] ShapeCatalog: %u/%u meshes loaded (%u textured, %u failed) in %lld ms\n",
+                  loaded, static_cast<unsigned>(Neuron::Sim::kShapeCount), textured, failed, ms);
+    OutputDebugStringA(buf);
   }
 
   // ── Game tick ────────────────────────────────────────────────────────────
@@ -345,27 +385,19 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       se.y = re.y;
       se.z = re.z;
       se.yaw = 0.f;
-      // entityType carries EntityKind (Components.h): Base = 1, Ship = 2.
-      const bool isBase = (re.entityType == 1);
-      // With a CMO mesh loaded, normalize by its bounding radius so the on-screen
-      // size is sensible regardless of the model's native units (Jumpgate r~333);
-      // otherwise use the unit-cube half-extents.
-      const float targetMetres = isBase ? 40.f : 15.f;
-      se.scale = (m_meshRadius > 0.f) ? (targetMetres / m_meshRadius) : (isBase ? 10.f : 3.f);
-      // Darwinia palette: base = neon blue, ship = neon orange.
-      if (isBase)
-      {
-        se.r = 0.2f;
-        se.g = 0.6f;
-        se.b = 1.0f;
-      }
-      else
-      {
-        se.r = 1.0f;
-        se.g = 0.5f;
-        se.b = 0.1f;
-      }
       se.kind = re.entityType;
+      se.shapeId = re.shapeId;
+
+      // Normalize the mesh by its bounding radius to a per-kind display size so
+      // models with different authored units sit at a sensible relative scale.
+      const float radius = ShapeRadius(re.shapeId);
+      const float targetMetres = TargetMetresForKind(re.entityType);
+      se.scale = (radius > 0.f) ? (targetMetres / radius) : (targetMetres / 20.f);
+
+      // Textured shapes sample their diffuse; the colour is only a fallback tint
+      // for shapes that loaded without a texture. Negative r = "use kind default".
+      se.r = -1.f;
+      se.g = se.b = 0.f;
     }
 
     // Once-per-second diagnostic (VS Output / DebugView; the on-screen HUD font

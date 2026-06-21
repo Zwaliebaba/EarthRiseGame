@@ -25,9 +25,13 @@ enum ComponentSlot : uint8_t
     Slot_ShipTag   = 3,
     Slot_NetId     = 4,
     Slot_Health    = 5,
+    Slot_ShapeId   = 6,
 };
 
-// Entity kinds carried in snapshots (matches §13 entity list).
+// Entity kinds carried in snapshots (matches §13 entity list). The first seven
+// are the original gameplay roles; the trailing ones classify the static/scenery
+// catalog families (see ShapeCatalog.h ShapeCategory→EntityKind) so the client
+// can pick sensible default colours/scales per family.
 enum class EntityKind : uint8_t
 {
     Unknown   = 0,
@@ -37,6 +41,11 @@ enum class EntityKind : uint8_t
     ResourceNode = 4,
     Projectile= 5,
     LootContainer = 6,
+    Station    = 7,
+    Asteroid   = 8,
+    Debris     = 9,
+    Decoration = 10,
+    Structure  = 11, // jumpgates, special platforms/devices
 };
 
 // --- Components ---
@@ -57,6 +66,15 @@ struct Velocity
 
 struct BaseTag { uint8_t _pad{ 0 }; }; // marks the mobile home base
 struct ShipTag { uint8_t shipType{ 0 }; };
+
+// Render identity for a replicated entity: an index into the ShapeCatalog
+// (ShapeCatalog.h, selects the mesh + diffuse) plus the entity kind the snapshot
+// carries (colour/scale class on the client). Both are replicated.
+struct ShapeId
+{
+    uint16_t   value{ 0xFFFF };            // kInvalidShapeId
+    EntityKind kind{ EntityKind::Unknown };
+};
 
 // Network identity assigned by the server; stable across snapshots.
 struct NetId { uint32_t value{ 0 }; };
