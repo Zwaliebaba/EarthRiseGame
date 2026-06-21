@@ -65,6 +65,36 @@ bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
     winrt::check_hresult(m_device->CreateCommandQueue(&qDesc, IID_PPV_ARGS(m_cmdQueue.put())));
 
     // -----------------------------------------------------------------------
+    // GPU timestamp queries (perf gate). Best-effort: on failure m_tsOk stays
+    // false and GpuFrameMs() just reports 0.
+    // -----------------------------------------------------------------------
+    if (SUCCEEDED(m_cmdQueue->GetTimestampFrequency(&m_tsFreq)) && m_tsFreq != 0)
+    {
+        D3D12_QUERY_HEAP_DESC qhd{};
+        qhd.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+        qhd.Count = kFrameCount * 2; // begin + end per in-flight frame
+        if (SUCCEEDED(m_device->CreateQueryHeap(&qhd, IID_PPV_ARGS(m_tsHeap.put()))))
+        {
+            D3D12_HEAP_PROPERTIES hpReadback{};
+            hpReadback.Type = D3D12_HEAP_TYPE_READBACK;
+            D3D12_RESOURCE_DESC rb{};
+            rb.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            rb.Width = static_cast<UINT64>(kFrameCount) * 2 * sizeof(UINT64);
+            rb.Height = rb.DepthOrArraySize = rb.MipLevels = 1;
+            rb.SampleDesc.Count = 1;
+            rb.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            if (SUCCEEDED(m_device->CreateCommittedResource(
+                    &hpReadback, D3D12_HEAP_FLAG_NONE, &rb, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                    IID_PPV_ARGS(m_tsReadback.put()))) &&
+                SUCCEEDED(m_tsReadback->Map(0, nullptr, reinterpret_cast<void**>(&m_tsMapped))))
+            {
+                for (UINT i = 0; i < kFrameCount * 2; ++i) m_tsMapped[i] = 0; // avoid first-frame garbage
+                m_tsOk = true;
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Swap chain for CoreWindow (UWP flip-discard)
     // -----------------------------------------------------------------------
     DXGI_SWAP_CHAIN_DESC1 scDesc{};
@@ -184,6 +214,17 @@ void DeviceResources::BeginFrame()
     winrt::check_hresult(m_cmdAllocators[m_frameIndex]->Reset());
     winrt::check_hresult(m_cmdList->Reset(m_cmdAllocators[m_frameIndex].get(), nullptr));
 
+    // GPU timing: this slot's previous frame is now complete (fence waited
+    // above), so its resolved timestamps are readable. Then open this frame's
+    // begin timestamp.
+    if (m_tsOk)
+    {
+        const UINT base = m_frameIndex * 2;
+        const UINT64 t0 = m_tsMapped[base], t1 = m_tsMapped[base + 1];
+        if (t1 > t0) m_gpuMs = static_cast<double>(t1 - t0) * 1000.0 / static_cast<double>(m_tsFreq);
+        m_cmdList->EndQuery(m_tsHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, base);
+    }
+
     // Open the frame-wide PIX event; the matching End is in EndFrame so the whole
     // recorded command list (clear, scene, canvas, present) nests under one "Frame".
     NEURON_PIX_BEGIN(m_cmdList.get(), PixColors::Frame, "Frame %u", m_frameIndex);
@@ -230,6 +271,15 @@ void DeviceResources::EndFrame()
 
     NEURON_PIX_END(m_cmdList.get()); // "Present transition"
     NEURON_PIX_END(m_cmdList.get()); // "Frame" (opened in BeginFrame)
+
+    // GPU timing: end timestamp + resolve both into this slot's readback range.
+    if (m_tsOk)
+    {
+        const UINT base = m_frameIndex * 2;
+        m_cmdList->EndQuery(m_tsHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, base + 1);
+        m_cmdList->ResolveQueryData(m_tsHeap.get(), D3D12_QUERY_TYPE_TIMESTAMP, base, 2,
+                                    m_tsReadback.get(), static_cast<UINT64>(base) * sizeof(UINT64));
+    }
 
     winrt::check_hresult(m_cmdList->Close());
 

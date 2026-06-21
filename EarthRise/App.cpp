@@ -1269,6 +1269,19 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_canvas.DrawText(12.f * hudS, 10.f * hudS, er::ui::str("app.title"), 0.35f, 0.85f, 1.0f, hudS);
     m_canvas.DrawText(12.f * hudS, 30.f * hudS, stateStr, 0.95f, 0.80f, 0.35f, hudS);
 
+    // Perf gate readout (§16.3): GPU (timestamp queries) + CPU ms + FPS, red
+    // when over the ~16.6 ms / 60 Hz frame budget.
+    {
+      const double gpuMs = m_dr.GpuFrameMs();
+      const float cpuMs = (m_fps > 0.f) ? (1000.f / m_fps) : 0.f;
+      char perf[64];
+      std::snprintf(perf, sizeof(perf), "GPU %.1f  CPU %.1f  %d FPS",
+                    gpuMs, static_cast<double>(cpuMs), static_cast<int>(m_fps + 0.5f));
+      const bool over = gpuMs > 16.6 || cpuMs > 16.6f;
+      m_canvas.DrawText(12.f * hudS, 50.f * hudS, perf,
+                        over ? 1.0f : 0.4f, over ? 0.4f : 0.9f, over ? 0.35f : 0.5f, hudS * 0.85f);
+    }
+
     // 2D radar disc (under the windowed UI).
     DrawRadar(w, h, entities, entCount, cx, cy, cz);
 

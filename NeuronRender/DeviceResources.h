@@ -60,6 +60,10 @@ public:
     // VSync toggle (settings). On = present synced to vblank; off = uncapped.
     void SetVSync(bool on) noexcept { m_vsync = on; }
 
+    // Measured GPU time for the last completed frame, in milliseconds (0 until
+    // the first frame resolves, or if timestamp queries are unavailable).
+    [[nodiscard]] double GpuFrameMs() const noexcept { return m_gpuMs; }
+
 private:
     void CreateRenderTargetViews();
     void CreateDepthStencil();
@@ -89,6 +93,15 @@ private:
     UINT    m_width{ 1280 };
     UINT    m_height{ 720 };
     bool    m_vsync{ true };
+
+    // GPU timestamp queries (perf gate): 2 timestamps (begin/end) per in-flight
+    // frame, resolved into a READBACK buffer and read back one frame later.
+    winrt::com_ptr<ID3D12QueryHeap> m_tsHeap;
+    winrt::com_ptr<ID3D12Resource>  m_tsReadback;
+    UINT64*                         m_tsMapped{ nullptr };
+    UINT64                          m_tsFreq{ 0 };
+    double                          m_gpuMs{ 0.0 };
+    bool                            m_tsOk{ false };
 };
 
 } // namespace Neuron::Render
