@@ -130,6 +130,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   int   m_ddHover{-1};                    // hovered popup row
   int   m_sel[Win_Count][16]{};           // dropdown selection per panel row
   int   m_zorder[Win_Count]{ Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other }; // back→front
+  UINT  m_lastW{0}, m_lastH{0}; // last screen size (for window cascade clamping)
   float m_fps{0.f};
   // Live-applied settings state (area G).
   float m_particleDensity{1.0f}; // scales emitter rate + ambient field
@@ -610,6 +611,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   // Per-frame UI interaction. Run before DrawUi; consumes pointer edges.
   void UpdateUi(UINT screenW, UINT screenH)
   {
+    m_lastW = screenW; m_lastH = screenH;
     if (!m_uiPlaced) { PlaceWindows(screenW, screenH); m_uiPlaced = true; }
     if (!m_uiReady) { m_ptrPressed = m_ptrReleased = false; return; }
     const float s = MenuScale(screenH);
@@ -707,7 +709,24 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   {
     PlayUi(m_clipClick);
     if (idx == count - 1) { m_winOpen[win] = false; return; } // trailing Close
-    auto open = [&](int w) { m_winOpen[w] = true; RaiseWindow(w); };
+    // Open a window; if it was closed, cascade it off the current front window
+    // so it never opens exactly on top of another (wraps near the screen edge).
+    auto open = [&](int w) {
+      if (!m_winOpen[w])
+      {
+        int front = -1;
+        for (int oi = Win_Count - 1; oi >= 0; --oi) { const int x = m_zorder[oi]; if (m_winOpen[x]) { front = x; break; } }
+        if (front >= 0)
+        {
+          float nx = m_winX[front] + 36.f, ny = m_winY[front] + 36.f;
+          if (m_lastW > 140u && nx > static_cast<float>(m_lastW) - 140.f) nx = 40.f;
+          if (m_lastH > 140u && ny > static_cast<float>(m_lastH) - 140.f) ny = 40.f;
+          m_winX[w] = nx; m_winY[w] = ny;
+        }
+      }
+      m_winOpen[w] = true;
+      RaiseWindow(w);
+    };
     if (win == Win_MainMenu)
     {
       if (idx == 2) open(Win_Options);              // Options
@@ -1264,9 +1283,23 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   // ── Input handlers ───────────────────────────────────────────────────────
   void OnKeyDown(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::KeyEventArgs& args)
   {
-    // Esc toggles the Main Menu; Quit EarthRise (or the window Close) exits.
+    // Esc closes the active (frontmost) window; the previous one becomes active.
     if (args.VirtualKey() == Windows::System::VirtualKey::Escape)
-      m_winOpen[Win_MainMenu] = !m_winOpen[Win_MainMenu];
+      CloseTopWindow();
+  }
+
+  // Close an open dropdown first; else close the frontmost open window; if
+  // nothing is open, bring the Main Menu back.
+  void CloseTopWindow()
+  {
+    if (m_ddWin >= 0) { m_ddWin = m_ddRow = -1; return; }
+    for (int oi = Win_Count - 1; oi >= 0; --oi)
+    {
+      const int w = m_zorder[oi];
+      if (m_winOpen[w]) { m_winOpen[w] = false; return; }
+    }
+    m_winOpen[Win_MainMenu] = true;
+    RaiseWindow(Win_MainMenu);
   }
 
   void OnClosed(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::CoreWindowEventArgs&)
