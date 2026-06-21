@@ -497,15 +497,18 @@
     <None Include="Assets\Shapes\Jumpgates\Jumpgate01.cmo">
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
     </None>
-    <None Include="Assets\Audio\ambient_space.wav">
+    <Media Include="Assets\Audio\ambient_space.wav">
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
-    </None>
-    <None Include="Assets\Audio\ui_click.wav">
+      <FileType>Document</FileType>
+    </Media>
+    <Media Include="Assets\Audio\ui_click.wav">
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
-    </None>
-    <None Include="Assets\Audio\ui_select.wav">
+      <FileType>Document</FileType>
+    </Media>
+    <Media Include="Assets\Audio\ui_select.wav">
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
-    </None>
+      <FileType>Document</FileType>
+    </Media>
     <None Include="Assets\Shapes\SpaceObjects\DebrisGenericBarrel01.cmo">
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
     </None>
