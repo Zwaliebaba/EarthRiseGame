@@ -703,6 +703,156 @@
     <Image Include="Assets\Shapes\SpaceObjects\Mine012.dds">
       <Filter>Assets\Shapes\SpaceObjects</Filter>
     </Image>
+    <Image Include="Assets\Icons\SmallTile.scale-100.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\SmallTile.scale-125.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\SmallTile.scale-150.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\SmallTile.scale-200.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\SmallTile.scale-400.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square150x150Logo.scale-100.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square150x150Logo.scale-125.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square150x150Logo.scale-150.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square150x150Logo.scale-200.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square150x150Logo.scale-400.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\WideTile.scale-100.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\WideTile.scale-125.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\WideTile.scale-150.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\WideTile.scale-200.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\WideTile.scale-400.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\LargeTile.scale-100.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\LargeTile.scale-125.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\LargeTile.scale-150.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\LargeTile.scale-200.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\LargeTile.scale-400.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.scale-100.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.scale-125.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.scale-150.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.scale-200.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.scale-400.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.targetsize-16.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.targetsize-24.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.targetsize-32.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.targetsize-48.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.targetsize-256.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-unplated_targetsize-16.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-unplated_targetsize-24.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-unplated_targetsize-32.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-unplated_targetsize-48.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-unplated_targetsize-256.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-lightunplated_targetsize-16.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-lightunplated_targetsize-24.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-lightunplated_targetsize-32.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-lightunplated_targetsize-48.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\Square44x44Logo.altform-lightunplated_targetsize-256.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\SplashScreen.scale-100.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\SplashScreen.scale-125.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\SplashScreen.scale-150.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\SplashScreen.scale-200.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\SplashScreen.scale-400.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\StoreLogo.scale-100.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\StoreLogo.scale-125.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\StoreLogo.scale-150.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\StoreLogo.scale-200.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
+    <Image Include="Assets\Icons\StoreLogo.scale-400.png">
+      <Filter>Assets\Icons</Filter>
+    </Image>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Assets">
@@ -761,6 +911,9 @@
     </Filter>
     <Filter Include="Assets\Audio">
       <UniqueIdentifier>{b42cfbb7-9b19-41d5-88b4-b5ecc9224ce6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Assets\Icons">
+      <UniqueIdentifier>{97e31ad0-c5a4-488a-bfc2-30d32bdda87d}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
