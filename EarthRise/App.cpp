@@ -88,6 +88,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   Neuron::Render::PostProcess m_post;
   bool m_bloom{false}; // true once PostProcess initialized (HDR path active)
 
+  // UI chrome textures (Darwinia menu skins, docs/design/darwinia-menu-ui.md).
+  Neuron::Render::TextureGpu m_uiGrey; // InterfaceGrey — title bars, highlight beam
+  Neuron::Render::TextureGpu m_uiRed;  // InterfaceRed  — buttons, window body
+  bool m_uiReady{false};
+
   // ---- network ----
   Neuron::Net::CngCrypto m_crypto;
   std::unique_ptr<Neuron::Net::DatagramSocketAdapter> m_socket; // WinRT DatagramSocket (§8.1)
@@ -177,6 +182,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     check_bool(m_scene.Initialize(&m_dr, sceneFmt));
     check_bool(m_canvas.Initialize(&m_dr));
+    LoadUiAssets(); // bitmap font + menu chrome (fail-safe: HUD falls back to blocks)
     {
       const long long initMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                    std::chrono::steady_clock::now() - initStart)
@@ -253,6 +259,96 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_session->Disconnect(); // best-effort graceful notice while the socket is alive
     m_session.reset();
     m_socket.reset();
+  }
+
+  // Load the UI font atlas + menu chrome textures (uncompressed BGRA DDS). The
+  // font drives real DrawText; the grey/red gradient strips skin the windows.
+  // Fail-safe: if anything is missing the HUD just won't render the menu.
+  void LoadUiAssets()
+  {
+    if (auto dds = LoadPackagedAsset(L"Assets\\Fonts\\EditorFont-ENG.dds"); !dds.empty())
+    {
+      auto font = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
+      if (font.valid())
+        m_canvas.SetFont(std::move(font), er::format::FontAtlasConfig{}); // 256x224, 16x16, cp32
+    }
+    if (auto dds = LoadPackagedAsset(L"Assets\\Textures\\InterfaceGrey.dds"); !dds.empty())
+      m_uiGrey = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
+    if (auto dds = LoadPackagedAsset(L"Assets\\Textures\\InterfaceRed.dds"); !dds.empty())
+      m_uiRed = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
+
+    m_uiReady = m_canvas.hasFont() && m_uiGrey.valid() && m_uiRed.valid();
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "[EarthRise] UI assets: font=%d grey=%d red=%d\n",
+                  static_cast<int>(m_canvas.hasFont()), static_cast<int>(m_uiGrey.valid()),
+                  static_cast<int>(m_uiRed.valid()));
+    OutputDebugStringA(buf);
+  }
+
+  // Draw one Darwinia-style skinned button. selected = the light "beam" highlight.
+  void DrawButton(float x, float y, float w, float h, const char* caption, float s, bool selected)
+  {
+    // Skin: red gradient strip normally; grey (cool, brighter) when selected.
+    if (selected)
+      m_canvas.DrawTexturedQuad(x, y, w, h, 0, 0, 1, 1, m_uiGrey, 1.15f, 1.25f, 1.6f, 1.f);
+    else
+      m_canvas.DrawTexturedQuad(x, y, w, h, 0, 0, 1, 1, m_uiRed, 1.0f, 1.0f, 1.0f, 1.f);
+
+    const float ts = s * 0.85f;
+    const float tw = m_canvas.TextWidth(caption, ts);
+    const float th = m_canvas.TextHeight(ts);
+    // Cream caption (dark when selected, like the reference's highlighted row).
+    if (selected)
+      m_canvas.DrawText(x + (w - tw) * 0.5f, y + (h - th) * 0.5f, caption, 0.10f, 0.12f, 0.16f, ts);
+    else
+      m_canvas.DrawText(x + (w - tw) * 0.5f, y + (h - th) * 0.5f, caption, 0.92f, 0.88f, 0.80f, ts);
+  }
+
+  // Draw the Main Menu window (chrome + buttons) from docs/design/darwinia-menu-ui.md.
+  // Static for now (MU-1 visual); pointer interactivity + the toolkit land in MU-2/3.
+  void DrawMainMenu(UINT screenW, UINT screenH)
+  {
+    if (!m_uiReady) return;
+    const float s = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f; // HUD scale
+
+    const float titleH = 30.f * s;
+    const float pad = 14.f * s;
+    const float btnH = 34.f * s;
+    const float gap = 9.f * s;
+    const float w = 300.f * s;
+
+    static const char* kItems[] = { "Profile", "Mods", "Options", "Visit Website",
+                                    "Play Tutorial", "Quit EarthRise" };
+    const int n = static_cast<int>(std::size(kItems));
+    const float bodyH = pad + n * (btnH + gap) + gap + btnH + pad; // n buttons + gap + Close
+    const float totalH = titleH + bodyH;
+
+    // Centre the window a touch above mid-screen.
+    const float gx = (static_cast<float>(screenW) - w) * 0.5f;
+    const float gy = static_cast<float>(screenH) * 0.5f - totalH * 0.5f - 40.f * s;
+
+    // Window body (dark translucent red), then title bar (bright grey).
+    m_canvas.DrawTexturedQuad(gx, gy, w, totalH, 0, 0, 1, 1, m_uiRed, 0.55f, 0.5f, 0.5f, 0.92f);
+    m_canvas.DrawTexturedQuad(gx, gy, w, titleH, 0, 0, 1, 1, m_uiGrey, 1.35f, 1.4f, 1.5f, 1.f);
+
+    const float tts = s * 0.95f;
+    const char* title = "MAIN MENU";
+    m_canvas.DrawText(gx + (w - m_canvas.TextWidth(title, tts)) * 0.5f,
+                      gy + (titleH - m_canvas.TextHeight(tts)) * 0.5f, title, 0.08f, 0.08f, 0.11f, tts);
+
+    // Close box (top-right).
+    const float cb = 16.f * s;
+    m_canvas.DrawTexturedQuad(gx + w - cb - 7.f * s, gy + (titleH - cb) * 0.5f, cb, cb,
+                              0, 0, 1, 1, m_uiGrey, 1.2f, 1.2f, 1.3f, 1.f);
+
+    float by = gy + titleH + pad;
+    for (int i = 0; i < n; ++i)
+    {
+      DrawButton(gx + pad, by, w - 2 * pad, btnH, kItems[i], s, i == 2 /*Options highlighted*/);
+      by += btnH + gap;
+    }
+    by += gap;
+    DrawButton(gx + pad, by, w - 2 * pad, btnH, "Close", s, false);
   }
 
   // Load every ShapeCatalog entry into the renderer: the CMO mesh plus its
@@ -473,8 +569,13 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                              : (st == Neuron::Client::SessionState::Authenticating)
                              ? "AUTH"
                              : "OFFLINE";
-    m_canvas.DrawText(10.f, 10.f, "EarthRise", 0.2f, 1.0f, 0.4f);
-    m_canvas.DrawText(10.f, 28.f, stateStr, 0.8f, 0.8f, 0.2f);
+    const float hudS = (h > 0 ? static_cast<float>(h) : 1080.f) / 1080.f;
+    m_canvas.DrawText(12.f * hudS, 10.f * hudS, "EarthRise", 0.35f, 0.85f, 1.0f, hudS);
+    m_canvas.DrawText(12.f * hudS, 30.f * hudS, stateStr, 0.95f, 0.80f, 0.35f, hudS);
+
+    // Darwinia Main Menu window (MU-1 visual; interactivity lands in MU-2/3).
+    DrawMainMenu(w, h);
+
     m_canvas.Render(cl, w, h);
 
     m_dr.EndFrame();

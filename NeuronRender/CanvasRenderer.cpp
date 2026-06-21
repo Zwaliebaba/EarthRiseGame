@@ -1,4 +1,4 @@
-// CanvasRenderer.cpp — 2D HUD pass implementation.
+// CanvasRenderer.cpp — 2D HUD/UI pass: batched solid + textured + font primitives.
 
 #include "pch.h"
 #include "CanvasRenderer.h"
@@ -19,18 +19,39 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
 {
     m_device = dr->Device();
 
-    // --- Root signature: root constants — 2 floats (invScreenSize.xy) + 2 pad ---
-    D3D12_ROOT_PARAMETER param{};
-    param.ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    param.ShaderVisibility         = D3D12_SHADER_VISIBILITY_VERTEX;
-    param.Constants.ShaderRegister = 0;
-    param.Constants.RegisterSpace  = 0;
-    param.Constants.Num32BitValues = 4; // float2 invScreenSize + float2 pad
+    // --- Root signature: b0 root constants (invScreenSize + mode) + SRV table t0
+    //     + two static samplers (s0 linear chrome, s1 point font). ---
+    D3D12_DESCRIPTOR_RANGE srvRange{};
+    srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    srvRange.NumDescriptors = 1;
+    srvRange.BaseShaderRegister = 0; // t0
+
+    D3D12_ROOT_PARAMETER params[2]{};
+    params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL; // VS reads size, PS reads mode
+    params[0].Constants.ShaderRegister = 0; // b0
+    params[0].Constants.Num32BitValues = 4; // invX, invY, mode, pad
+    params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    params[1].DescriptorTable.NumDescriptorRanges = 1;
+    params[1].DescriptorTable.pDescriptorRanges = &srvRange;
+
+    D3D12_STATIC_SAMPLER_DESC samps[2]{};
+    samps[0].Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR; // chrome gradient
+    samps[0].AddressU = samps[0].AddressV = samps[0].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    samps[0].MaxLOD = D3D12_FLOAT32_MAX;
+    samps[0].ShaderRegister = 0; // s0
+    samps[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    samps[1] = samps[0];
+    samps[1].Filter = D3D12_FILTER_MIN_MAG_MIP_POINT; // crisp font
+    samps[1].ShaderRegister = 1; // s1
 
     D3D12_ROOT_SIGNATURE_DESC rsDesc{};
-    rsDesc.NumParameters = 1;
-    rsDesc.pParameters   = &param;
-    rsDesc.Flags         = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    rsDesc.NumParameters = 2;
+    rsDesc.pParameters = params;
+    rsDesc.NumStaticSamplers = 2;
+    rsDesc.pStaticSamplers = samps;
+    rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     winrt::com_ptr<ID3DBlob> sigBlob, errBlob;
     if (FAILED(D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1,
@@ -40,13 +61,14 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
         0, sigBlob->GetBufferPointer(), sigBlob->GetBufferSize(),
         IID_PPV_ARGS(m_rootSig.put())));
 
-    // --- Input layout: float2 pos + float4 color ---
+    // --- Input layout: float2 pos + float2 uv + float4 color ---
     static constexpr D3D12_INPUT_ELEMENT_DESC kLayout[] = {
         { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,       0,  0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0,  8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0,  8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
     };
 
-    // --- PSO: alpha-blend over the 3D scene, no depth test ---
+    // --- PSO: alpha-blend over the scene, no depth ---
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
     psoDesc.pRootSignature        = m_rootSig.get();
     psoDesc.VS                    = { g_pCanvasVS, sizeof(g_pCanvasVS) };
@@ -63,7 +85,6 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
     psoDesc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
     psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
 
-    // Alpha blend: dst = src.a*src.rgb + (1-src.a)*dst.rgb
     auto& rt = psoDesc.BlendState.RenderTarget[0];
     rt.BlendEnable           = TRUE;
     rt.SrcBlend              = D3D12_BLEND_SRC_ALPHA;
@@ -74,13 +95,21 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
     rt.BlendOpAlpha          = D3D12_BLEND_OP_ADD;
     rt.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 
-    psoDesc.DepthStencilState.DepthEnable = FALSE; // HUD draws over depth
+    psoDesc.DepthStencilState.DepthEnable = FALSE;
 
     winrt::check_hresult(m_device->CreateGraphicsPipelineState(
         &psoDesc, IID_PPV_ARGS(m_pso.put())));
 
+    // --- Shader-visible SRV heap (font + chrome textures) ---
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+    heapDesc.NumDescriptors = kMaxTextures;
+    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    winrt::check_hresult(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(m_srvHeap.put())));
+    m_srvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
     // --- Dynamic vertex buffer (upload heap, persistently CPU-mapped) ---
-    constexpr UINT64 vtxBufSize = kMaxQuads * 6 * sizeof(CanvasVertex);
+    constexpr UINT64 vtxBufSize = kMaxVerts * sizeof(CanvasVertex);
     D3D12_HEAP_PROPERTIES hpUpload{};
     hpUpload.Type = D3D12_HEAP_TYPE_UPLOAD;
     D3D12_RESOURCE_DESC rd{};
@@ -93,8 +122,7 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
         &hpUpload, D3D12_HEAP_FLAG_NONE, &rd,
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(m_vtxBuf.put())));
     D3D12_RANGE readRange{};
-    winrt::check_hresult(m_vtxBuf->Map(0, &readRange,
-        reinterpret_cast<void**>(&m_vtxPtr)));
+    winrt::check_hresult(m_vtxBuf->Map(0, &readRange, reinterpret_cast<void**>(&m_vtxPtr)));
 
     return true;
 }
@@ -104,68 +132,158 @@ void CanvasRenderer::Uninitialize()
     if (m_vtxBuf && m_vtxPtr) { m_vtxBuf->Unmap(0, nullptr); m_vtxPtr = nullptr; }
 }
 
+void CanvasRenderer::SetFont(TextureGpu font, er::format::FontAtlasConfig cfg)
+{
+    if (!font.valid()) return;
+    m_font = std::move(font);
+    m_fontCfg = cfg;
+    m_fontSrv = EnsureSrv(m_font);
+}
+
+UINT CanvasRenderer::EnsureSrv(const TextureGpu& tex)
+{
+    auto it = m_srvByTex.find(tex.resource.get());
+    if (it != m_srvByTex.end()) return it->second;
+    if (m_nextSrv >= kMaxTextures) return 0; // out of slots: reuse slot 0 (font)
+
+    const UINT idx = m_nextSrv++;
+    D3D12_CPU_DESCRIPTOR_HANDLE h = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+    h.ptr += static_cast<SIZE_T>(idx) * m_srvSize;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Format = tex.format;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2D.MipLevels = tex.mipCount ? tex.mipCount : 1u;
+    m_device->CreateShaderResourceView(tex.resource.get(), &srv, h);
+
+    m_srvByTex[tex.resource.get()] = idx;
+    return idx;
+}
+
 void CanvasRenderer::Reset()
 {
     m_vtxCount = 0;
+    m_batches.clear();
 }
 
-void CanvasRenderer::AddQuad(float x, float y, float w, float h,
-                              float r, float g, float b, float a)
+void CanvasRenderer::Prim(Mode mode, UINT srvIndex)
 {
-    if (m_vtxCount + 6 > kMaxQuads * 6) return;
-    auto* v = m_vtxPtr + m_vtxCount;
-    // Two triangles, CCW, screen-space pixels
-    v[0] = { x,   y,   r, g, b, a };
-    v[1] = { x+w, y,   r, g, b, a };
-    v[2] = { x+w, y+h, r, g, b, a };
-    v[3] = { x,   y,   r, g, b, a };
-    v[4] = { x+w, y+h, r, g, b, a };
-    v[5] = { x,   y+h, r, g, b, a };
-    m_vtxCount += 6;
+    if (m_batches.empty() || m_batches.back().mode != mode || m_batches.back().srvIndex != srvIndex)
+        m_batches.push_back({ mode, srvIndex, m_vtxCount, 0 });
 }
 
-void CanvasRenderer::DrawRect(float x, float y, float w, float h,
-                               float r, float g, float b, float a)
+void CanvasRenderer::Vtx(float x, float y, float u, float v, float r, float g, float b, float a)
 {
-    AddQuad(x, y, w, h, r, g, b, a);
+    if (m_vtxCount >= kMaxVerts) return;
+    m_vtxPtr[m_vtxCount++] = { x, y, u, v, r, g, b, a };
+    if (!m_batches.empty()) ++m_batches.back().count;
 }
 
-void CanvasRenderer::DrawText(float x, float y, const char* text,
-                               float r, float g, float b)
+void CanvasRenderer::DrawRect(float x, float y, float w, float h, float r, float g, float b, float a)
 {
-    // M1b placeholder: draw a narrow bar per character (8×12 px cells).
-    // M2 replaces this with a font-atlas texture lookup.
-    constexpr float kCharW = 8.f, kCharH = 12.f, kCharGap = 1.f;
+    Prim(Mode::Solid, 0);
+    Vtx(x,     y,     0, 0, r, g, b, a);
+    Vtx(x + w, y,     0, 0, r, g, b, a);
+    Vtx(x + w, y + h, 0, 0, r, g, b, a);
+    Vtx(x,     y,     0, 0, r, g, b, a);
+    Vtx(x + w, y + h, 0, 0, r, g, b, a);
+    Vtx(x,     y + h, 0, 0, r, g, b, a);
+}
+
+void CanvasRenderer::DrawTriangle(float x0, float y0, float x1, float y1, float x2, float y2,
+                                  float r, float g, float b, float a)
+{
+    Prim(Mode::Solid, 0);
+    Vtx(x0, y0, 0, 0, r, g, b, a);
+    Vtx(x1, y1, 0, 0, r, g, b, a);
+    Vtx(x2, y2, 0, 0, r, g, b, a);
+}
+
+void CanvasRenderer::DrawTexturedQuad(float x, float y, float w, float h,
+                                      float u0, float v0, float u1, float v1,
+                                      const TextureGpu& tex, float r, float g, float b, float a)
+{
+    if (!tex.valid()) return;
+    const UINT srv = EnsureSrv(tex);
+    Prim(Mode::TexLinear, srv);
+    Vtx(x,     y,     u0, v0, r, g, b, a);
+    Vtx(x + w, y,     u1, v0, r, g, b, a);
+    Vtx(x + w, y + h, u1, v1, r, g, b, a);
+    Vtx(x,     y,     u0, v0, r, g, b, a);
+    Vtx(x + w, y + h, u1, v1, r, g, b, a);
+    Vtx(x,     y + h, u0, v1, r, g, b, a);
+}
+
+void CanvasRenderer::DrawText(float x, float y, const char* text, float r, float g, float b, float scale)
+{
+    if (!text || !m_font.valid()) return;
+    const float cell = static_cast<float>(m_fontCfg.cellPx) * scale;
     float cx = x;
-    for (const char* p = text; *p; ++p) {
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(text); *p; ++p)
+    {
         if (*p != ' ')
-            AddQuad(cx, y, kCharW, kCharH, r, g, b, 0.85f);
-        cx += kCharW + kCharGap;
+        {
+            const auto uv = er::format::glyphUv(m_fontCfg, *p);
+            Prim(Mode::TexPoint, m_fontSrv);
+            Vtx(cx,        y,        uv.u0, uv.v0, r, g, b, 1.f);
+            Vtx(cx + cell, y,        uv.u1, uv.v0, r, g, b, 1.f);
+            Vtx(cx + cell, y + cell, uv.u1, uv.v1, r, g, b, 1.f);
+            Vtx(cx,        y,        uv.u0, uv.v0, r, g, b, 1.f);
+            Vtx(cx + cell, y + cell, uv.u1, uv.v1, r, g, b, 1.f);
+            Vtx(cx,        y + cell, uv.u0, uv.v1, r, g, b, 1.f);
+        }
+        cx += cell;
     }
 }
 
-void CanvasRenderer::Render(ID3D12GraphicsCommandList* cl,
-                             UINT screenWidth, UINT screenHeight)
+float CanvasRenderer::TextWidth(const char* text, float scale) const
 {
-    if (!m_vtxCount) return;
+    if (!text) return 0.f;
+    return static_cast<float>(std::strlen(text)) * static_cast<float>(m_fontCfg.cellPx) * scale;
+}
 
-    NEURON_PIX_SCOPED(cl, PixColors::Canvas, "Canvas HUD (%u verts)", m_vtxCount);
+float CanvasRenderer::TextHeight(float scale) const
+{
+    return static_cast<float>(m_fontCfg.cellPx) * scale;
+}
+
+void CanvasRenderer::Render(ID3D12GraphicsCommandList* cl, UINT screenWidth, UINT screenHeight)
+{
+    if (!m_vtxCount || m_batches.empty() || m_nextSrv == 0) return;
+
+    NEURON_PIX_SCOPED(cl, PixColors::Canvas, "Canvas UI (%u verts, %zu batches)",
+                      m_vtxCount, m_batches.size());
 
     cl->SetGraphicsRootSignature(m_rootSig.get());
     cl->SetPipelineState(m_pso.get());
-
-    const float invSize[4] = { 1.f / screenWidth, 1.f / screenHeight, 0.f, 0.f };
-    cl->SetGraphicsRoot32BitConstants(0, 4, invSize, 0);
-
     cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    ID3D12DescriptorHeap* heaps[] = { m_srvHeap.get() };
+    cl->SetDescriptorHeaps(1, heaps);
 
     D3D12_VERTEX_BUFFER_VIEW vbView{
         m_vtxBuf->GetGPUVirtualAddress(),
-        m_vtxCount * sizeof(CanvasVertex),
-        sizeof(CanvasVertex)
+        m_vtxCount * static_cast<UINT>(sizeof(CanvasVertex)),
+        static_cast<UINT>(sizeof(CanvasVertex))
     };
     cl->IASetVertexBuffers(0, 1, &vbView);
-    cl->DrawInstanced(m_vtxCount, 1, 0, 0);
+
+    const float invW = screenWidth ? 1.f / static_cast<float>(screenWidth) : 0.f;
+    const float invH = screenHeight ? 1.f / static_cast<float>(screenHeight) : 0.f;
+
+    for (const Batch& b : m_batches)
+    {
+        if (!b.count) continue;
+        const float consts[4] = { invW, invH, static_cast<float>(b.mode), 0.f };
+        cl->SetGraphicsRoot32BitConstants(0, 4, consts, 0);
+
+        D3D12_GPU_DESCRIPTOR_HANDLE srv = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
+        srv.ptr += static_cast<UINT64>(b.srvIndex) * m_srvSize;
+        cl->SetGraphicsRootDescriptorTable(1, srv);
+
+        cl->DrawInstanced(b.count, 1, b.start, 0);
+    }
 }
 
 } // namespace Neuron::Render
