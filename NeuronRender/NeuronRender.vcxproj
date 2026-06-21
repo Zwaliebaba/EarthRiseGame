@@ -49,6 +49,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+    <!-- Shared HLSL include (#included by the scene pixel shaders; not compiled directly). -->
+    <None Include="Shaders\Lighting.hlsli" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="Shaders\CanvasPS.hlsl">

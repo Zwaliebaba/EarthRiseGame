@@ -371,6 +371,35 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     float vpf[16];
     XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(vpf), viewProj);
 
+    // Camera-relative three-point lighting (see Lighting.hlsli). Derive a camera
+    // basis and place the key over the upper-right shoulder, the fill on the
+    // opposite (left) side near camera level, and the rim from the view dir — so
+    // every object is lit the same flattering way regardless of where it sits.
+    {
+      const XMVECTOR fwd = XMVector3Normalize(XMVectorSubtract(at, eye));
+      const XMVECTOR right = XMVector3Normalize(XMVector3Cross(up, fwd));
+      const XMVECTOR cup = XMVector3Cross(fwd, right);
+
+      // Directions point FROM the surface TOWARD each light (world space).
+      const XMVECTOR keyDir = XMVector3Normalize(
+          XMVectorAdd(XMVectorSubtract(right, fwd), cup));       // up-right, behind cam
+      const XMVECTOR fillDir = XMVector3Normalize(
+          XMVectorSubtract(XMVectorScale(right, -1.f), XMVectorScale(fwd, 0.3f))); // left, slight back
+      const XMVECTOR viewDir = XMVectorScale(fwd, -1.f);          // surface -> camera
+
+      Neuron::Render::SceneRenderer::Lighting lit{};
+      XMFLOAT3 v;
+      XMStoreFloat3(&v, keyDir);  lit.keyDir[0] = v.x;  lit.keyDir[1] = v.y;  lit.keyDir[2] = v.z;
+      XMStoreFloat3(&v, fillDir); lit.fillDir[0] = v.x; lit.fillDir[1] = v.y; lit.fillDir[2] = v.z;
+      XMStoreFloat3(&v, viewDir); lit.viewDir[0] = v.x; lit.viewDir[1] = v.y; lit.viewDir[2] = v.z;
+      lit.keyIntensity = 0.9f;
+      lit.fillIntensity = 0.35f;
+      lit.ambient = 0.16f;
+      lit.rimColor[0] = 0.35f; lit.rimColor[1] = 0.45f; lit.rimColor[2] = 0.65f;
+      lit.rimPower = 3.0f;
+      m_scene.SetLighting(lit);
+    }
+
     // Gather scene entities from the interp buffer.
     const Neuron::Client::ReplicaSet& rs = m_interp.curr;
     Neuron::Render::SceneEntity entities[Neuron::Client::ReplicaSet::kMaxEntities];

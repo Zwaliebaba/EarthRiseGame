@@ -57,6 +57,19 @@ public:
                 const float viewProjT[16],
                 const SceneEntity* entities, uint32_t count);
 
+    // Camera-relative three-point lighting, uploaded to the pixel shaders as
+    // root constants b1 (matches Lighting.hlsli's cbuffer layout). The caller
+    // (App) recomputes this each frame from the camera basis.
+    struct Lighting
+    {
+        float keyDir[3];   float keyIntensity;   // dir surface->key (world)
+        float fillDir[3];  float fillIntensity;  // dir surface->fill (world)
+        float viewDir[3];  float ambient;        // dir surface->camera (rim)
+        float rimColor[3]; float rimPower;       // rim tint + Fresnel exponent
+    };
+    static_assert(sizeof(Lighting) == 16 * sizeof(float), "Lighting cbuffer layout");
+    void SetLighting(const Lighting& l) { m_light = l; }
+
     // Register a catalog shape: the mesh drawn for entities whose SceneEntity::
     // shapeId == id, plus an optional diffuse texture (creates its SRV; when
     // present the textured pipeline is used for that shape). Invalid meshes are
@@ -121,6 +134,15 @@ private:
     winrt::com_ptr<ID3D12DescriptorHeap> m_srvHeap; // shader-visible, kMaxShapes SRVs
     UINT m_srvDescSize{ 0 };
     UINT m_nextSrv{ 0 };
+
+    // Current frame's lighting (b1). Default is a sane forward-key rig so the
+    // scene is lit even if SetLighting is never called.
+    Lighting m_light{
+        { 0.4f, 0.6f, -0.7f }, 0.9f,   // key:  up-right, toward camera
+        { -0.5f, 0.1f, -0.3f }, 0.35f, // fill: opposite side, near level
+        { 0.0f, 0.0f, -1.0f }, 0.16f,  // view dir (rim), ambient floor
+        { 0.35f, 0.45f, 0.65f }, 3.0f, // cool rim tint, Fresnel power
+    };
 };
 
 } // namespace Neuron::Render

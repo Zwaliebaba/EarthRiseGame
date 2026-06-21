@@ -638,6 +638,17 @@ mesh shaders / ray tracing.
   tactical range. The camera **is** the **floating-origin** render origin (§6.4) —
   panning far triggers a rebase — and supplies the **X3DAudio listener** (§11.3). Touch
   adds pinch-zoom / two-finger rotate (§23).
+- **Scene lighting — camera-relative three-point 🔒:** every object is shaded with a
+  **key + fill + rim** rig whose directions are recomputed from the **camera basis each
+  frame** (not per-subject film rigs), so the look is consistent under a moving follow
+  camera. **Key** = brightest, hard Lambert, over the camera's upper-right shoulder;
+  **fill** = dim, soft half-Lambert from the opposite/left side near camera level (lifts the
+  shadow side); **rim** = a **Fresnel** silhouette highlight (the cheap real-time stand-in
+  for a back light) that separates ships from the dark void and feeds the bloom pass for a
+  glowing edge. Shared HLSL (`Lighting.hlsli`, cbuffer `b1`); intensities are tunable.
+  **Cast shadows** (the other half of a film key light — shadow maps) and **IBL/ambient
+  probes** (the modern fill replacement) are **deferred** as future upgrades; the flat
+  ambient floor + fill is enough for the Darwinia look at launch.
 - **VFX — GPU-compute particles:** particle pools in structured buffers (UAV);
   **spawn/update in compute shaders** (FL 12_1), drawn as **additive instanced
   billboards** into the HDR target. Categories: thrusters, weapon tracers/muzzle,
