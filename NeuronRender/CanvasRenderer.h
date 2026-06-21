@@ -18,7 +18,6 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
-#include <d3d12.h>
 #include <winrt/base.h>
 
 #include <array>
@@ -26,12 +25,20 @@
 #include <unordered_map>
 #include <vector>
 
-#include "DeviceResources.h"
 #include "FontAtlasLayout.h"
 #include "TextureGpu.h"
 
+struct ID3D12DescriptorHeap;
+struct ID3D12Device;
+struct ID3D12GraphicsCommandList;
+struct ID3D12PipelineState;
+struct ID3D12Resource;
+struct ID3D12RootSignature;
+
 namespace Neuron::Render
 {
+
+class DeviceResources;
 
 class CanvasRenderer
 {
@@ -70,6 +77,7 @@ public:
 
     void Render(ID3D12GraphicsCommandList* cl, UINT screenWidth, UINT screenHeight);
 
+    static constexpr UINT kFrameCount = 2;
     static constexpr UINT kMaxQuads = 4096;
     static constexpr UINT kMaxVerts = kMaxQuads * 6;
     static constexpr UINT kMaxTextures = 16; // SRV-heap slots (font + chrome + ...)
@@ -94,8 +102,8 @@ private:
     // One CPU-mapped vertex buffer PER in-flight frame — a single shared buffer
     // races the GPU still reading the previous frame (flicker / garbage flashes
     // when the content changes, e.g. menu hover).
-    std::array<winrt::com_ptr<ID3D12Resource>, DeviceResources::kFrameCount> m_vtxBuf;
-    std::array<CanvasVertex*, DeviceResources::kFrameCount>                  m_vtxPtr{};
+    std::array<winrt::com_ptr<ID3D12Resource>, kFrameCount> m_vtxBuf;
+    std::array<CanvasVertex*, kFrameCount>                  m_vtxPtr{};
     UINT                                m_frame{ 0 }; // selected in Reset()
     UINT                                m_vtxCount{ 0 };
 

@@ -22,12 +22,13 @@
 #include <cstdint>
 #include <unordered_map>
 
-#include "DeviceResources.h"
 #include "MeshGpu.h"
 #include "TextureGpu.h"
 
 namespace Neuron::Render
 {
+
+class DeviceResources;
 
 // Public description of one renderable entity (sector-relative coordinates).
 struct SceneEntity
@@ -82,6 +83,7 @@ public:
     // placeholder cube, so a missing asset never blanks the scene.
     void SetShape(uint16_t id, MeshGpu mesh, TextureGpu diffuse);
 
+    static constexpr UINT kFrameCount  = 2;
     static constexpr UINT kMaxEntities = 512;
     static constexpr UINT kMaxShapes   = 128; // SRV heap capacity (diffuse per shape)
 
@@ -109,9 +111,9 @@ private:
 
     // One CPU-mapped instance buffer PER in-flight frame — writing a single
     // shared buffer races the GPU still reading the previous frame (flicker).
-    std::array<winrt::com_ptr<ID3D12Resource>, DeviceResources::kFrameCount> m_instBuf;
-    std::array<InstanceData*, DeviceResources::kFrameCount>                  m_instPtr{};
-    std::array<D3D12_VERTEX_BUFFER_VIEW, DeviceResources::kFrameCount>       m_instView{};
+    std::array<winrt::com_ptr<ID3D12Resource>, kFrameCount> m_instBuf;
+    std::array<InstanceData*, kFrameCount>                  m_instPtr{};
+    std::array<D3D12_VERTEX_BUFFER_VIEW, kFrameCount>       m_instView{};
 
     D3D12_VERTEX_BUFFER_VIEW m_vbView{};
     D3D12_INDEX_BUFFER_VIEW  m_ibView{};

@@ -2,6 +2,7 @@
 
 #include "pch.h"
 #include "ParticleRenderer.h"
+#include "DeviceResources.h"
 #include "PixMarkers.h"
 
 #include "CompiledShaders/ParticleVS.h"
