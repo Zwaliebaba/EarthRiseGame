@@ -89,3 +89,17 @@ tuning {
   ship_fuel_max   = 100
   base_fuel_max   = 300
 }
+
+# --- economy & fleet balance (§13.1, §13.4) — first-pass --------------------
+economy {
+  fleet_cap         = 8
+  cargo_capacity    = 1000
+  storage_capacity  = 50000
+  harvest_rate      = 50
+  sensor_range_ship = 5000
+  sensor_range_base = 12000
+  build_ore         = 500
+  build_ice         = 200
+  build_seconds     = 20
+  build_ship_type   = 1
+}

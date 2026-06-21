@@ -29,6 +29,13 @@ enum ComponentSlot : uint8_t
     Slot_Fuel      = 7,
     Slot_NavState  = 8,
     Slot_BeaconTag = 9,
+    Slot_OwnerId         = 10,
+    Slot_ResourceNodeTag = 11,
+    Slot_Cargo           = 12,
+    Slot_Storage         = 13,
+    Slot_BuildQueue      = 14,
+    Slot_FleetMember     = 15,
+    Slot_Sensor          = 16,
 };
 
 // Entity kinds carried in snapshots (matches §13 entity list). The first seven
@@ -109,5 +116,32 @@ struct NavState
 // Marks a jump-beacon entity; indexes into the cooked UniverseDataset for its
 // links/kind/region (BeaconDef). Kept index-only so Components.h has no data dep.
 struct BeaconTag { uint16_t beaconIndex{ 0xFFFF }; };
+
+// --- economy & fleet (§13.1, §13.4) — server-authoritative; in-memory at M3 ---
+
+// Owning player (a session/base net id; 0 = NPC/unowned). Ties a fleet + base to
+// a player (§13.8) so the server can enforce "command only your own" (§8.4).
+struct OwnerId { uint32_t player{ 0 }; };
+
+// A harvestable resource node (§13.11): one resource type with a remaining yield
+// the harvest rule decrements. 'type' holds a ResourceType value (Ore/Ice/Gas).
+struct ResourceNodeTag { uint8_t type{ 0 }; float remaining{ 0.0f }; };
+
+// Itemised cargo / storage (§13.4). Index = ResourceType value (Ore=0/Ice=1/Gas=2);
+// kResourceSlots must match UniverseData::kResourceTypeCount (asserted in Economy.h).
+inline constexpr int kResourceSlots = 3;
+struct Cargo   { float amount[kResourceSlots]{}; float capacity{ 0.0f }; };
+struct Storage { float amount[kResourceSlots]{}; float capacity{ 0.0f }; };
+
+// Per-base build queue (§13.4 economy chain). M3: one slot building one recipe —
+// consumes Storage, advances over time, spawns a ship at the base on completion.
+struct BuildQueue { bool active{ false }; bool paid{ false }; uint8_t recipe{ 0 }; float progress{ 0.0f }; };
+
+// Fleet membership / control-group tag (§23.4). Light server-side group state;
+// the client maps groups to selection sets.
+struct FleetMember { uint8_t group{ 0 }; };
+
+// Sensor range in metres (§13.0 eXplore). Drives per-player detection / fog (area E).
+struct Sensor { float range{ 0.0f }; };
 
 } // namespace Neuron::Sim

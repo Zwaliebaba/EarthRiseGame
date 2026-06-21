@@ -76,25 +76,27 @@
 - **Masterplan refs:** §13.0 (4X loop), §13.1 (fleet of 6–12 ships + base), §13.4 (economy
   chain, in-memory only at M3), §13.11 (entities), §7.2 (shared sim rules, identical
   client/server), §6 (movement/sectors).
-- **Current state:** only `Base` + `MovementSystem`; ship/node/cargo/fuel components absent.
+- **Current state:** ✅ **done** — components + pure economy rules (`NeuronCore/Economy.h`) +
+  the build-queue system & fleet spawning on `ServerUniverse`; balance is the cooked `EconomyTuning`.
 - **Work:**
-  - [ ] New components (`NeuronCore/sim/Components.h`, stable IDs — they're wire contract):
-        `ResourceNodeTag` (resource type + remaining yield), `Cargo`/`Storage` (itemized,
-        capacity), `BuildQueue` (recipe id + progress), `Fuel`, `OwnerId` (player → entity),
-        `FleetMember`/control-group tag, `Sensor` (range). Keep them snapshot-friendly for M5.
-  - [ ] **Fleet spawning & ownership:** a player owns base + up to **data-driven fleet cap**
-        (💡 8) ships; `OwnerId` ties entities to the owning player/session.
-  - [ ] **Shared sim rules** (pure functions, §7.2) for: harvest rate/yield, refine/build
-        cost & progress, fuel consumption, sensor/scan range. One dataset drives server +
-        client + bots (§12.6) — **no balance constants in code**.
-  - [ ] **Build queue system:** consume stored resources → advance build → spawn a new ship
-        at the base (the M3 *Done* "build a ship"). Emits a "build complete" sim event
-        (client-side feedback hook for M2 audio; **not** persisted until M5).
-- **Tests (`NeuronCoreTest`, §16.1):**
-  - [ ] Harvest rule: node yield decrements, cargo fills, capacity clamps.
-  - [ ] Build rule: insufficient/sufficient resources; progress over N ticks; ship spawns.
-  - [ ] Fuel consumption math; sensor-range queries.
-  - [ ] Platform-independent rule cases mirrored in `NeuronTools/testrunner/` (§16.2).
+  - [x] New components (`Components.h`, stable IDs — wire contract): `OwnerId`(10),
+        `ResourceNodeTag`(11), `Cargo`(12)/`Storage`(13) (itemised by `ResourceType` + capacity),
+        `BuildQueue`(14), `FleetMember`(15), `Sensor`(16); `Fuel`(7) from area D. Bound in
+        `SimComponents.cpp` + the test TU; snapshot-friendly for M5.
+  - [x] **Fleet spawning & ownership:** `ServerUniverse::SpawnFleetShip` enforces the
+        **data-driven fleet cap** (`EconomyTuning.fleetCap`, default 8); `OwnerId` ties base +
+        ships to a player (≈ their base net id); `OwnedShipCount` counts per owner.
+  - [x] **Shared sim rules** (pure, §7.2, `Economy.h`): `HarvestStep`, `DepositAll`,
+        `CanAfford`/`BuildStep`, `ConsumeFuel`, `SensorDetect` — all read `EconomyTuning`
+        (cooked `economy {}` block), **no balance constants in code**.
+  - [x] **Build queue system:** `ServerUniverse::BuildSystem` consumes `Storage` → advances →
+        spawns a ship at the base (`EnqueueBuild` enqueues; `DrainBuildCompleted` is the
+        "build complete" feedback hook; in-memory until M5).
+- **Tests (mirrored in `NeuronTools/testrunner/`, §16.1/§16.2):**
+  - [x] Harvest: node yield decrements, cargo fills, capacity clamps (`EconomyTests`).
+  - [x] Build: insufficient vs sufficient resources; progress over ticks; ship spawns +
+        fleet-cap enforced (`EconomyTests`).
+  - [x] Fuel consumption + sensor-range queries (`EconomyTests`).
 - **Depends on:** nothing (server-side). **Blocks:** B, C, D, F.
 
 ### B. Fleet command — intents & validation (§8.4 / §23.4)

@@ -48,6 +48,7 @@
 
 // Simulation (shared sim rules + fixed-step time)
 #include "Components.h"
+#include "Economy.h"
 #include "FixedStepAccumulator.h"
 #include "Movement.h"
 #include "Navigation.h"

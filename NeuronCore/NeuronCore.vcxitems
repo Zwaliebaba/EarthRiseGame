@@ -28,6 +28,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Connection.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Debug.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Ecs.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Economy.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)FakeCrypto.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)FixedStepAccumulator.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)GameMath.h" />

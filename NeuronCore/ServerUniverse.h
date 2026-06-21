@@ -13,6 +13,7 @@
 // the test TU for the test runner.
 
 #include "Components.h"
+#include "Economy.h"
 #include "Movement.h"
 #include "Navigation.h"
 #include "ShapeCatalog.h"
@@ -27,6 +28,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace Neuron::Sim
@@ -41,11 +43,19 @@ public:
         m_world.RegisterComponent<Velocity>();
         m_world.RegisterComponent<NetId>();
         m_world.RegisterComponent<BaseTag>();
+        m_world.RegisterComponent<ShipTag>();
         m_world.RegisterComponent<Health>();
         m_world.RegisterComponent<ShapeId>();
         m_world.RegisterComponent<Fuel>();
         m_world.RegisterComponent<NavState>();
         m_world.RegisterComponent<BeaconTag>();
+        m_world.RegisterComponent<OwnerId>();
+        m_world.RegisterComponent<ResourceNodeTag>();
+        m_world.RegisterComponent<Cargo>();
+        m_world.RegisterComponent<Storage>();
+        m_world.RegisterComponent<BuildQueue>();
+        m_world.RegisterComponent<FleetMember>();
+        m_world.RegisterComponent<Sensor>();
         SpawnScenery();
     }
 
@@ -60,6 +70,13 @@ public:
     static uint16_t BeaconShapeId()
     {
         const uint16_t id = ShapeIdByName("Jumpgate01");
+        return id != kInvalidShapeId ? id : 0;
+    }
+
+    // Placeholder hull for a freshly built ship (M3; fitting/roles are M6).
+    static uint16_t ShipShapeId()
+    {
+        const uint16_t id = ShapeIdByName("HullShuttle");
         return id != kInvalidShapeId ? id : 0;
     }
 
@@ -79,6 +96,10 @@ public:
         m_world.AddComponent<ShapeId>(e) = { BaseShapeId(), EntityKind::Base };
         m_world.AddComponent<Fuel>(e)    = { m_nav.baseFuelMax, m_nav.baseFuelMax };
         m_world.AddComponent<NavState>(e);
+        m_world.AddComponent<OwnerId>(e).player   = netId;    // a player ≈ their base
+        m_world.AddComponent<Storage>(e).capacity = m_economy.storageCapacity;
+        m_world.AddComponent<BuildQueue>(e);
+        m_world.AddComponent<Sensor>(e).range     = m_economy.sensorRangeBase;
         m_netIdToEntity[netId] = e;
         return netId;
     }
@@ -114,6 +135,7 @@ public:
     {
         m_universe = data;
         m_nav      = data.nav;
+        m_economy  = data.economy;
         for (uint16_t bi = 0; bi < static_cast<uint16_t>(m_universe.beacons.size()); ++bi) {
             const BeaconDef& b = m_universe.beacons[bi];
             const uint32_t netId = m_nextNetId++;
@@ -200,6 +222,58 @@ public:
     }
     [[nodiscard]] Neuron::Universe::SectorId LastTravelSector() const noexcept { return m_lastTravelSector; }
 
+    // --- fleet & economy (§13.1, §13.4) --------------------------------------
+
+    // Spawn a ship owned by 'player', up to the data-driven fleet cap. Returns the
+    // new net id, or 0 if the player is already at cap.
+    uint32_t SpawnFleetShip(uint32_t player, uint16_t shapeId, Neuron::Universe::UniversePos pos)
+    {
+        if (OwnedShipCount(player) >= m_economy.fleetCap) return 0;
+        const ShapeDef* def = ShapeById(shapeId);
+        const uint32_t netId = m_nextNetId++;
+        auto e = m_world.CreateEntity();
+        m_world.AddComponent<Transform>(e).pos = pos;
+        m_world.AddComponent<Velocity>(e);
+        m_world.AddComponent<NetId>(e).value = netId;
+        m_world.AddComponent<ShipTag>(e).shipType = def ? static_cast<uint8_t>(def->category) : 0;
+        m_world.AddComponent<ShapeId>(e) = { shapeId, EntityKind::Ship };
+        m_world.AddComponent<OwnerId>(e).player   = player;
+        m_world.AddComponent<Cargo>(e).capacity   = m_economy.cargoCapacity;
+        m_world.AddComponent<Fuel>(e)  = { m_nav.shipFuelMax, m_nav.shipFuelMax };
+        m_world.AddComponent<NavState>(e);
+        m_world.AddComponent<Sensor>(e).range     = m_economy.sensorRangeShip;
+        m_world.AddComponent<FleetMember>(e);
+        m_netIdToEntity[netId] = e;
+        return netId;
+    }
+
+    // Number of ships a player currently owns (the base is not a ship).
+    [[nodiscard]] uint16_t OwnedShipCount(uint32_t player)
+    {
+        uint16_t n = 0;
+        m_world.ForEach<OwnerId, ShipTag>([&](OwnerId& o, ShipTag&) { if (o.player == player) ++n; });
+        return n;
+    }
+
+    // Enqueue the basic-ship build at a player's base (server-validated entry point).
+    bool EnqueueBuild(uint32_t baseNetId)
+    {
+        auto* q = m_world.GetComponent<BuildQueue>(EntityOf(baseNetId));
+        if (!q || q->active) return false;
+        q->active = true; q->paid = false; q->progress = 0.0f; q->recipe = m_economy.buildShipType;
+        return true;
+    }
+
+    // Drain (and clear) the net ids of ships finished since the last call — the
+    // "build complete" feedback hook (client SFX is M2; not persisted until M5).
+    [[nodiscard]] std::vector<uint32_t> DrainBuildCompleted() { return std::exchange(m_buildCompleted, {}); }
+
+    // Accessors (tests / diagnostics).
+    [[nodiscard]] Cargo*      CargoOf(uint32_t netId)      { return m_world.GetComponent<Cargo>(EntityOf(netId)); }
+    [[nodiscard]] Storage*    StorageOf(uint32_t netId)    { return m_world.GetComponent<Storage>(EntityOf(netId)); }
+    [[nodiscard]] BuildQueue* BuildQueueOf(uint32_t netId) { return m_world.GetComponent<BuildQueue>(EntityOf(netId)); }
+    [[nodiscard]] const EconomyTuning& Economy() const noexcept { return m_economy; }
+
     // Remove a player's base from the universe (on disconnect/timeout). Returns
     // true if a base for that net id existed.
     bool DespawnBase(uint32_t netId)
@@ -216,6 +290,7 @@ public:
     {
         MovementSystem(m_world, dtSeconds);
         NavigationSystem(m_world, m_nav, dtSeconds);
+        BuildSystem(dtSeconds);
         ++m_tick;
     }
 
@@ -281,6 +356,24 @@ private:
         m_lastTravelSector = Neuron::Universe::UniverseToSector(dest);
     }
 
+    // Advance every base's build queue; on completion spawn a ship for the owner
+    // at the base and record it for the "build complete" feedback hook. Entities
+    // are spawned after the iteration so the ECS isn't mutated mid-ForEach.
+    void BuildSystem(float dt)
+    {
+        struct Done { uint32_t player; Neuron::Universe::UniversePos pos; };
+        std::vector<Done> done;
+        m_world.ForEach<BuildQueue, Storage, OwnerId, Transform>(
+            [&](BuildQueue& q, Storage& s, OwnerId& o, Transform& t) {
+                if (BuildStep(q, s, m_economy, dt) == BuildResult::Completed)
+                    done.push_back({ o.player, t.pos });
+            });
+        for (const auto& d : done) {
+            const uint32_t ship = SpawnFleetShip(d.player, ShipShapeId(), d.pos);
+            if (ship) m_buildCompleted.push_back(ship);
+        }
+    }
+
     // Populate the universe with a spread of static catalog props clustered around
     // the player spawn point so the client exercises the whole shape catalog (a
     // jumpgate, a few stations, asteroids, debris and a sampling of ship hulls).
@@ -313,6 +406,8 @@ private:
     std::unordered_map<uint32_t, Neuron::ECS::EntityHandle> m_netIdToEntity;
     UniverseDataset                            m_universe;
     NavTuning                                  m_nav{};
+    EconomyTuning                              m_economy{};
+    std::vector<uint32_t>                      m_buildCompleted;
     std::unordered_map<uint16_t, uint32_t>     m_beaconEntity; // beaconIndex → netId
     std::unordered_map<std::string, uint16_t>  m_beaconName;   // beacon name → beaconIndex
     Neuron::Universe::SectorId                 m_lastTravelSector{};
