@@ -4,7 +4,7 @@
 EarthRiseGame is a multi-project Visual Studio C++ solution (`EarthRise.slnx`) centered on a shared simulation/networking core.
 
 Current top-level projects in the solution:
-- `NeuronCore/` - shared core for platform, ECS, world math, serialization, networking, and simulation. Packaged as a **shared items project** (`NeuronCore.vcxitems`); its sources compile directly into each consumer rather than building a standalone `.lib`.
+- `NeuronCore/` - shared core for platform, ECS, universe math, serialization, networking, and simulation. Packaged as a **shared items project** (`NeuronCore.vcxitems`); its sources compile directly into each consumer rather than building a standalone `.lib`.
 - `NeuronClient/` - client-side session, replica, interpolation, and controller code (static library).
 - `NeuronRender/` - rendering library with D3D12 device, scene, and canvas/HUD systems (static library).
 - `NeuronAudio/` - **client-only** audio library: XAudio2 (2.9) voice graph + four submix buses, custom WAV/PCM-16 reader, X3DAudio 3D (static library). Links `NeuronCore`, **not** `NeuronRender`. ERHeadless/NeuronClient do **not** link it.

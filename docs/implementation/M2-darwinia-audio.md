@@ -2,7 +2,7 @@
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M2**).
 > **Status:** ✅ Complete (M0/M1a/M1b also complete; **M3 is now the active milestone**).
-> The engine **renders and sounds the world**; all eight areas (A–H) landed. A short tail of
+> The engine **renders and sounds the universe**; all eight areas (A–H) landed. A short tail of
 > **carry-overs** — Windows-only device/visual verification, the `NeuronTools` cook/check
 > *executables*, and content that depends on later milestones (thruster/weapon SFX) — is
 > listed under the [Done gate](#done-gate-mirrors-17-done) and does **not** block M3.
@@ -47,7 +47,7 @@
   with radar/overview basics, and a settings screen.
 - **Out of scope (later milestones):** gameplay/sim of fleets and harvesting (M3), warp/jump
   (M3), interest/scale (M4), accounts/persistence (M5), combat model (M6), full UI suite
-  /mail/touch (M7). M2 renders and sounds the world; it does not yet *play* the 4X loop.
+  /mail/touch (M7). M2 renders and sounds the universe; it does not yet *play* the 4X loop.
 - **Open questions touching M2** (from §19), and how they're handled here:
   - **Particle/voice budgets in big fights (R16)** — M2 establishes the *budget knobs* and
     the perf gate; tuning the numbers is validated later (M4 contested-sector test). Does

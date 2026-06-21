@@ -254,7 +254,7 @@ audio.SetListener(l);
 audio.Update(dt);
 
 // --- a 3D weapon shot (camera-relative position from the replicated firing ship) ---
-Emitter e{ .position = toCameraRelative(ship.worldPos), .velocity = ship.vel };
+Emitter e{ .position = toCameraRelative(ship.universePos), .velocity = ship.vel };
 audio.Play(pew, { .bus = Bus::Sfx, .pitch = jitter(0.95f,1.05f), .emitter = &e });
 
 // --- a 2D UI click ---

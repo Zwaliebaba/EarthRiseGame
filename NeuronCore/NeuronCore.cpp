@@ -27,7 +27,7 @@
 // ECS
 #include "Ecs.h"
 
-// World
+// Universe
 #include "UniversePos.h"
 
 // Serialization

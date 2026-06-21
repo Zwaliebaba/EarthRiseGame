@@ -50,7 +50,7 @@ enum class EntityKind : uint8_t
 
 // --- Components ---
 
-// Absolute world position (int64 metres) + sector-local float offset for
+// Absolute universe position (int64 metres) + sector-local float offset for
 // smooth sub-metre motion (§6.1). The offset is kept in [0, kSectorSize) and
 // rebased into 'pos' by the movement system when it leaves the sector.
 struct Transform

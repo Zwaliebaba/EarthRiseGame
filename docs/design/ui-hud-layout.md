@@ -52,7 +52,7 @@ shield/armor/hull bars (`#`=full, `-`=partial); `(!)`=alert toast.
 ### Panel map
 | Zone | Panel | Notes (refs) |
 | --- | --- | --- |
-| **TC/TR** | Top bar | credits, **jump fuel**, world-clock UTC (§26), current **region + security tier** (§13.5) |
+| **TC/TR** | Top bar | credits, **jump fuel**, universe-clock UTC (§26), current **region + security tier** (§13.5) |
 | **TL/ML** | **Overview list** | primary selection/command surface; filters + **smart-select** bar (§23.1) |
 | **Center** | 3D scene + **bracket overlay** | IFF brackets, off-screen arrows; camera-first (§22.3) |
 | **TR/MR** | Selected + Target panels | shield/armor/hull + resists, range, modules; base fuel/jump cooldown (§13.2) |
@@ -98,7 +98,7 @@ shield/armor/hull bars (`#`=full, `-`=partial); `(!)`=alert toast.
 ```
 
 - **Modeless where possible:** management screens are **overlays over a dimmed,
-  still-running HUD** (the world is live — §26), not full context switches; the radar/
+  still-running HUD** (the universe is live — §26), not full context switches; the radar/
   alerts stay visible so you're never blind while fitting or trading.
 - **Universal back:** ESC / on-screen back / two-finger swipe-down closes the top overlay.
 - **Deep-links:** notifications (§24) and killmails open the relevant screen (e.g.

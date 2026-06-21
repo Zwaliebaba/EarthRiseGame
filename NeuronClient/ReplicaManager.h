@@ -44,14 +44,14 @@ public:
             if (m_current.count >= ReplicaSet::kMaxEntities) break;
 
             // Combine base UniversePos with the sub-metre localOffset before projection.
-            const Neuron::Universe::UniversePos worldWithOffset{
+            const Neuron::Universe::UniversePos universeWithOffset{
                 e.pos.x + static_cast<int64_t>(e.localOffset.x),
                 e.pos.y + static_cast<int64_t>(e.localOffset.y),
                 e.pos.z + static_cast<int64_t>(e.localOffset.z)
             };
             // ToRenderSpace returns a float3 relative to the floating origin —
             // no int64_t is propagated past this point.
-            const auto rs = m_floatingOrigin.ToRenderSpace(worldWithOffset);
+            const auto rs = m_floatingOrigin.ToRenderSpace(universeWithOffset);
 
             ReplicaEntity& r = m_current.entities[m_current.count++];
             r.networkId  = e.netId;

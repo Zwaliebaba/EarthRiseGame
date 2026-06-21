@@ -15,7 +15,7 @@
 //     reliability framing per channel: sequence u16, ack u16, ack_bits u32
 //
 // There is no fragmentation: every message fits one safe-MTU datagram by
-// construction (§8.4 — no bulk world sync; cold-start streams interest-scoped
+// construction (§8.4 — no bulk universe sync; cold-start streams interest-scoped
 // delta snapshots from an empty baseline).
 //
 // The 64-bit packet_number is the AEAD nonce input and feeds the replay window.
@@ -57,7 +57,7 @@ enum class Channel : uint8_t
     ReliableOrdered  = 1, // commands / chat / events
     ReliableUnordered= 2, // notifications
     Count
-    // No Bulk channel: the world is never shipped as one large artifact (§8.4).
+    // No Bulk channel: the universe is never shipped as one large artifact (§8.4).
 };
 inline constexpr uint8_t kChannelCount = static_cast<uint8_t>(Channel::Count);
 
@@ -79,7 +79,7 @@ enum class MsgType : uint8_t
     // -- Post-encryption (over the encrypted channel) --
     LoginRequest      = 20, // step 5: username/password (dev: name only)
     LoginResponse     = 21, // step 5: session token or failure
-    // No WorldSync* messages: a fresh client enters the snapshot loop directly with
+    // No UniverseSync* messages: a fresh client enters the snapshot loop directly with
     // an empty baseline and converges via interest-scoped delta snapshots (§8.4).
 
     Snapshot          = 40, // server → client per-tick delta snapshot

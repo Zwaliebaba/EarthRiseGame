@@ -30,7 +30,7 @@
 --   prerequisites*, anomaly/invasion *definitions* are GAME DATA (versioned with
 --   the build, loaded by NeuronCore) — NOT stored here. SQL keeps only the
 --   canonical item-id space (ItemDefs) so player-owned state has referential
---   integrity, plus the mutable player/economy/world state itself.
+--   integrity, plus the mutable player/economy/universe state itself.
 -- =============================================================================
 
 

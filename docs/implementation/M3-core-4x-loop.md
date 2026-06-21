@@ -54,7 +54,7 @@
   ResourceNode,Projectile,LootContainer}` as placeholders — **no systems for them yet**.
 - **Commands** (`sim/Command.h`) carry only `MoveCommand` (base velocity). M3 expands this
   to the full intent set.
-- **Snapshots** build full-world state (interest = everything until M4). Client has
+- **Snapshots** build full-universe state (interest = everything until M4). Client has
   `replica`/`interp`/`session`/`control` (M1b) and renders via NeuronRender.
 - **M2 (complete)** provides the render/HUD foundation M3's UI builds on: monospace
   Canvas HUD + **radar/overview basics** (M2 area F) and instanced CMO ships (M2 area B) —

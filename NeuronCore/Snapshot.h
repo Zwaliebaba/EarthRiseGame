@@ -7,7 +7,7 @@
 // so adding fields per record is a versioned change. Built on the tested serde
 // primitives (versioned WriteBuffer/ReadBuffer).
 //
-// This loop is also the cold-start path: there is no bulk world sync (§8.4). A
+// This loop is also the cold-start path: there is no bulk universe sync (§8.4). A
 // freshly connected client starts from an empty baseline and converges as these
 // interest-scoped snapshots arrive, so no transfer ever exceeds the safe MTU.
 // Records are keyed by netId and applied last-writer-wins by snapshot `tick`, so

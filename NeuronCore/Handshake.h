@@ -6,7 +6,7 @@
 //   3. CNG ECDH + server static-key ECDSA signature (MITM resistance)
 //   4. Clock sync (RTT/offset)
 //   → hands the derived per-direction AEAD keys + connection token to the
-//     SecureChannel; login (step 5) and world sync (step 6) run on the higher
+//     SecureChannel; login (step 5) and universe sync (step 6) run on the higher
 //     Connection layer over the now-encrypted channel.
 //
 // Platform-independent: depends only on ICrypto, so it is unit-tested with
