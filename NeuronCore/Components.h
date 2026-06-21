@@ -26,6 +26,9 @@ enum ComponentSlot : uint8_t
     Slot_NetId     = 4,
     Slot_Health    = 5,
     Slot_ShapeId   = 6,
+    Slot_Fuel      = 7,
+    Slot_NavState  = 8,
+    Slot_BeaconTag = 9,
 };
 
 // Entity kinds carried in snapshots (matches §13 entity list). The first seven
@@ -80,5 +83,31 @@ struct ShapeId
 struct NetId { uint32_t value{ 0 }; };
 
 struct Health { int32_t hp{ 100 }; int32_t maxHp{ 100 }; };
+
+// --- navigation (§13.12) — server-authoritative; not replicated at M3 (the
+//     fuel/cooldown HUD is area G, which extends the snapshot later) ---
+
+// Jump-drive fuel. A harvested/crafted resource (§13.4) and the economy sink for
+// long-haul travel; running dry strands a fleet/base (a real exploration hazard).
+struct Fuel { float current{ 0.0f }; float max{ 0.0f }; };
+
+// Travel state machine (§13.12): sublight → align → warp (interdictable), and the
+// jump spool-up (a vulnerability window) → cooldown cycle. Drives the Transform
+// during travel; all but plain sublight are sim-stepped so they can be interdicted.
+enum class NavPhase : uint8_t { Idle = 0, Align = 1, Warp = 2, Spool = 3, Cooldown = 4 };
+
+struct NavState
+{
+    NavPhase                      phase{ NavPhase::Idle };
+    bool                          interdicted{ false }; // tackle/disruptor interrupts warp/spool
+    uint16_t                      jumpTarget{ 0xFFFF };  // beacon index for the active jump
+    Neuron::Universe::UniversePos target{};              // warp destination / jump arrival
+    float                         timer{ 0.0f };         // seconds left in align/spool/cooldown
+    float                         warpSpeed{ 0.0f };     // m/s for the active warp
+};
+
+// Marks a jump-beacon entity; indexes into the cooked UniverseDataset for its
+// links/kind/region (BeaconDef). Kept index-only so Components.h has no data dep.
+struct BeaconTag { uint16_t beaconIndex{ 0xFFFF }; };
 
 } // namespace Neuron::Sim

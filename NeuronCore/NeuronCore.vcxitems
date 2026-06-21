@@ -38,6 +38,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)LoopbackNetwork.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)MathCommon.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Movement.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Navigation.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)NeuronCore.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)PacketCodec.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)pch.h" />

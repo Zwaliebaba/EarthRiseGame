@@ -13,3 +13,6 @@ NEURON_DEFINE_COMPONENT(Neuron::Sim::ShipTag,   Neuron::Sim::Slot_ShipTag);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::NetId,     Neuron::Sim::Slot_NetId);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::Health,    Neuron::Sim::Slot_Health);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::ShapeId,   Neuron::Sim::Slot_ShapeId);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::Fuel,      Neuron::Sim::Slot_Fuel);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::NavState,  Neuron::Sim::Slot_NavState);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::BeaconTag, Neuron::Sim::Slot_BeaconTag);

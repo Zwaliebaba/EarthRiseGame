@@ -74,3 +74,18 @@ field VERGE_DEEP {
   yield   = 6000 11000
   respawn = 900
 }
+
+# --- navigation balance (§13.12) — first-pass, tuned with bots -------------
+tuning {
+  warp_speed_ship = 6000
+  warp_speed_base = 2000
+  warp_align      = 3
+  jump_fuel_ship  = 20
+  jump_fuel_base  = 60
+  jump_spool_ship = 5
+  jump_spool_base = 12
+  jump_cooldown   = 10
+  beacon_range    = 2000
+  ship_fuel_max   = 100
+  base_fuel_max   = 300
+}
