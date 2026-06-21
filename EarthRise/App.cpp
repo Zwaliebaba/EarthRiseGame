@@ -33,6 +33,9 @@
 #include "ParticleRenderer.h"
 #include "PostProcess.h"
 #include "UiLayout.h"
+
+// NeuronAudio
+#include "AudioEngine.h"
 #include "CmoLoader.h"
 #include "DdsLoader.h"
 
@@ -98,6 +101,12 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   Neuron::Render::TextureGpu m_uiGrey; // InterfaceGrey — title bars, highlight beam
   Neuron::Render::TextureGpu m_uiRed;  // InterfaceRed  — buttons, window body
   bool m_uiReady{false};
+
+  // ---- audio (NeuronAudio) ----
+  Neuron::Audio::AudioEngine m_audio;
+  Neuron::Audio::ClipId      m_clipAmbient, m_clipClick, m_clipSelect;
+  Neuron::Audio::VoiceId     m_ambientVoice{};
+  bool                       m_audioReady{false};
 
   // Pointer snapshot (physical pixels). *_pressed/_released are one-frame edges.
   float m_ptrX{0.f}, m_ptrY{0.f};
@@ -210,6 +219,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_particles.SetTexture(Neuron::Render::DdsLoader::Load(m_dr.Device(), dds));
     check_bool(m_canvas.Initialize(&m_dr));
     LoadUiAssets(); // bitmap font + menu chrome (fail-safe: HUD falls back to blocks)
+    LoadAudio();    // XAudio2 engine + clips + ambient bed (fail-safe: silent)
     {
       const long long initMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                    std::chrono::steady_clock::now() - initStart)
@@ -311,6 +321,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
   void Uninitialize()
   {
+    m_audio.shutdown();
     m_canvas.Uninitialize();
     m_particles.Uninitialize();
     m_post.Uninitialize();
@@ -318,6 +329,52 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_session->Disconnect(); // best-effort graceful notice while the socket is alive
     m_session.reset();
     m_socket.reset();
+  }
+
+  // Bring up XAudio2, load the PCM-16 clips, and start the looping ambient bed.
+  // Fail-safe: any failure leaves the game silent (m_audioReady stays false).
+  void LoadAudio()
+  {
+    if (FAILED(m_audio.initialize()))
+    {
+      OutputDebugStringA("[EarthRise] audio: XAudio2 init failed (silent)\n");
+      return;
+    }
+    auto load = [&](const wchar_t* path, Neuron::Audio::ClipId& out) {
+      if (auto w = LoadPackagedAsset(path); !w.empty())
+        m_audio.loadClip(w, out);
+    };
+    load(L"Assets\\Audio\\ambient_space.wav", m_clipAmbient);
+    load(L"Assets\\Audio\\ui_click.wav", m_clipClick);
+    load(L"Assets\\Audio\\ui_select.wav", m_clipSelect);
+
+    Neuron::Audio::MixSnapshot mix{}; // defaults to 1.0 across master + buses
+    m_audio.setMix(mix);
+
+    if (m_clipAmbient.valid())
+    {
+      Neuron::Audio::PlayParams pp;
+      pp.bus = Neuron::Audio::Bus::Ambient;
+      pp.loop = true;
+      pp.volume = 0.7f;
+      m_ambientVoice = m_audio.play(m_clipAmbient, pp);
+    }
+    m_audioReady = m_audio.initialized();
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "[EarthRise] audio: ready=%d amb=%d click=%d select=%d\n",
+                  static_cast<int>(m_audioReady), static_cast<int>(m_clipAmbient.valid()),
+                  static_cast<int>(m_clipClick.valid()), static_cast<int>(m_clipSelect.valid()));
+    OutputDebugStringA(buf);
+  }
+
+  // Fire a one-shot UI sound on the Ui bus (no-op if audio is off).
+  void PlayUi(Neuron::Audio::ClipId clip)
+  {
+    if (!m_audioReady || !clip.valid()) return;
+    Neuron::Audio::PlayParams pp;
+    pp.bus = Neuron::Audio::Bus::Ui;
+    pp.volume = 0.8f;
+    m_audio.play(clip, pp);
   }
 
   // Load the UI font atlas + menu chrome textures (uncompressed BGRA DDS). The
@@ -481,7 +538,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         if (Neuron::Render::Ui::PopupRow(vb, i).Contains(m_ptrX, m_ptrY)) { m_ddHover = i; break; }
       if (m_ptrPressed)
       {
-        if (m_ddHover >= 0) m_sel[m_ddWin][m_ddRow] = m_ddHover;
+        if (m_ddHover >= 0) { m_sel[m_ddWin][m_ddRow] = m_ddHover; PlayUi(m_clipSelect); }
         m_ddWin = m_ddRow = -1; // any click closes the popup
       }
       m_ptrPressed = m_ptrReleased = false;
@@ -510,10 +567,10 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         }
         if (m_ptrPressed)
         {
-          if (L.closeBox.Contains(m_ptrX, m_ptrY)) m_winOpen[win] = false;
-          else if (L.footerClose.Contains(m_ptrX, m_ptrY)) m_winOpen[win] = false;
-          else if (L.footerApply.Contains(m_ptrX, m_ptrY)) OutputDebugStringA("[EarthRise] settings applied\n");
-          else if (m_hoverItem >= 0) { m_ddWin = win; m_ddRow = m_hoverItem; }
+          if (L.closeBox.Contains(m_ptrX, m_ptrY)) { m_winOpen[win] = false; PlayUi(m_clipClick); }
+          else if (L.footerClose.Contains(m_ptrX, m_ptrY)) { m_winOpen[win] = false; PlayUi(m_clipClick); }
+          else if (L.footerApply.Contains(m_ptrX, m_ptrY)) { OutputDebugStringA("[EarthRise] settings applied\n"); PlayUi(m_clipClick); }
+          else if (m_hoverItem >= 0) { m_ddWin = win; m_ddRow = m_hoverItem; PlayUi(m_clipSelect); }
           else if (L.titleBar.Contains(m_ptrX, m_ptrY)) { m_dragWin = win; m_dragDX = m_ptrX - m_winX[win]; m_dragDY = m_ptrY - m_winY[win]; }
         }
         break;
@@ -543,6 +600,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
   void OnButtonAction(int win, int idx, int count)
   {
+    PlayUi(m_clipClick);
     if (idx == count - 1) { m_winOpen[win] = false; return; } // trailing Close
     if (win == Win_MainMenu)
     {
@@ -856,6 +914,19 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_lastFrame = nowT;
     m_particles.Update(dt, cx, cy, cz);
     if (dt > 0.f) m_fps = m_fps * 0.9f + (1.f / dt) * 0.1f; // smoothed FPS for the HUD
+
+    // Audio listener = the camera (positions are camera-relative, so the
+    // listener sits at the origin facing the view). Update the engine once/frame.
+    if (m_audioReady)
+    {
+      Neuron::Audio::Listener lis;
+      XMFLOAT3 fwd;
+      XMStoreFloat3(&fwd, XMVector3Normalize(XMVectorSubtract(at, eye)));
+      lis.forward = fwd;
+      lis.up = { 0.f, 1.f, 0.f };
+      m_audio.setListener(lis);
+      m_audio.update(dt);
+    }
 
     // Scene lighting (see Lighting.hlsli): a single WORLD-FIXED warm sun (key),
     // cool fill + ambient to lift the shadow side, and a per-frame view-based

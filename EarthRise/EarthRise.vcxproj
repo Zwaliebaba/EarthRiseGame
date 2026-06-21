@@ -73,7 +73,7 @@
       <AdditionalOptions>%(AdditionalOptions) /bigobj</AdditionalOptions>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;WINRT_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <!-- NeuronRender headers live under their project root; NeuronClient and NeuronCore likewise -->
-      <AdditionalIncludeDirectories>$(SolutionDir)NeuronRender;$(SolutionDir)NeuronClient;$(SolutionDir)NeuronCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)NeuronRender;$(SolutionDir)NeuronClient;$(SolutionDir)NeuronCore;$(SolutionDir)NeuronAudio;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
@@ -497,6 +497,15 @@
     <None Include="Assets\Shapes\Jumpgates\Jumpgate01.cmo">
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
     </None>
+    <None Include="Assets\Audio\ambient_space.wav">
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
+    </None>
+    <None Include="Assets\Audio\ui_click.wav">
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
+    </None>
+    <None Include="Assets\Audio\ui_select.wav">
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
+    </None>
     <None Include="Assets\Shapes\SpaceObjects\DebrisGenericBarrel01.cmo">
       <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
     </None>
@@ -566,6 +575,9 @@
     </ProjectReference>
     <ProjectReference Include="..\NeuronRender\NeuronRender.vcxproj">
       <Project>{8900f2e6-c6db-4890-a05e-72d47f7ed60d}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\NeuronAudio\NeuronAudio.vcxproj">
+      <Project>{b7e9a1c2-4d3f-4a8b-9c1e-2f6a7d8e9b04}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
