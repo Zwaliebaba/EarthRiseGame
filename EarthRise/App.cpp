@@ -1023,24 +1023,10 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                    ? 0.f
                    : std::chrono::duration<float>(nowT - m_lastFrame).count();
     m_lastFrame = nowT;
-
-    // Per-entity emitter glow (engine/structure auras), fed from the scene list.
-    Neuron::Render::ParticleRenderer::EmitterDesc ems[Neuron::Render::SceneRenderer::kMaxEntities];
-    int emCount = 0;
-    for (UINT i = 0; i < entCount; ++i)
-    {
-      const auto& se = entities[i];
-      float gr, gg, gb;
-      if (!EmitterGlow(se.kind, gr, gg, gb)) continue;
-      auto& e = ems[emCount++];
-      e.x = se.x; e.y = se.y; e.z = se.z;
-      e.r = gr; e.g = gg; e.b = gb;
-      e.size = TargetMetresForKind(se.kind) * 0.30f;
-      e.rate = 16.f;
-    }
-    m_particles.SetEmitters(ems, emCount);
-    m_particles.Update(dt, cx, cy, cz);
     if (dt > 0.f) m_fps = m_fps * 0.9f + (1.f / dt) * 0.1f; // smoothed FPS for the HUD
+
+    // (Particle emitters are built + Update() runs after the scene-entity list is
+    // gathered below, then drawn in the scene pass.)
 
     // Audio listener = the camera (positions are camera-relative, so the
     // listener sits at the origin facing the view). Update the engine once/frame.
@@ -1112,6 +1098,26 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       // for shapes that loaded without a texture. Negative r = "use kind default".
       se.r = -1.f;
       se.g = se.b = 0.f;
+    }
+
+    // Per-entity emitter glow (engine/structure auras) from the scene list, then
+    // advance the particle field. Drawn in the scene pass below.
+    {
+      Neuron::Render::ParticleRenderer::EmitterDesc ems[Neuron::Render::SceneRenderer::kMaxEntities];
+      int emCount = 0;
+      for (UINT i = 0; i < entCount; ++i)
+      {
+        const auto& se = entities[i];
+        float gr, gg, gb;
+        if (!EmitterGlow(se.kind, gr, gg, gb)) continue;
+        auto& e = ems[emCount++];
+        e.x = se.x; e.y = se.y; e.z = se.z;
+        e.r = gr; e.g = gg; e.b = gb;
+        e.size = TargetMetresForKind(se.kind) * 0.30f;
+        e.rate = 16.f;
+      }
+      m_particles.SetEmitters(ems, emCount);
+      m_particles.Update(dt, cx, cy, cz);
     }
 
     // Once-per-second diagnostic (VS Output / DebugView; the on-screen HUD font
