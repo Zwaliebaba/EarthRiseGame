@@ -58,9 +58,9 @@
   `replica`/`interp`/`session`/`control` (M1b) and renders via NeuronRender.
 - **M2 (complete)** provides the render/HUD foundation M3's UI builds on: monospace
   Canvas HUD + **radar/overview basics** (M2 area F) and instanced CMO ships (M2 area B) —
-  area G is now **unblocked**. **Caveat:** the **`datacook`/`datacheck`** tool *executables*
-  (M2 area A) were **carried over** — only the Linux parser `testrunner` landed in M2 — so
-  **M3 area D must stand them up** before it can cook the beacon-graph/balance data.
+  area G is now **unblocked**. The **`datacook`/`datacheck`** tool *executables* (an M2 area-A
+  carry-over) are **now built in area D** (`NeuronTools/datacook/`), with the universe-layout
+  schema, binary codec, and validation rules in `NeuronCore/UniverseData.h` — see area D.
 - **No navigation, harvesting, build queue, sensor/fog, NPC AI, or fleet-command intents
   exist yet** — all net-new in M3. `ERServer/` has no `ai/`, `interest/`, or `simloop/`
   modules yet (only `netio/`).
@@ -160,9 +160,12 @@
         fleet (hazard).
   - [ ] **Mobile-base travel:** base warps slowly / jumps via beacons (larger fuel + longer
         spool) — how the "mobile home" relocates.
-  - [ ] **Beacon graph + balance as game data** (§12.6): authored text → `datacook` →
-        NeuronCore; `datacheck` verifies every beacon links to a valid region (tooling
-        carried over from M2 — only the Linux `testrunner` exists; build the executables here).
+  - [~] **Beacon graph + balance as game data** (§12.6): **tooling done** — `datacook` cooks
+        authored text → packed binary (codec in `NeuronCore/UniverseData.h`); `datacheck`
+        verifies region refs, reciprocal jump links, public-graph connectivity, claimable-tier
+        and weight rules (`NeuronTools/datacook/`; schema = `docs/design/universe-worldgen.md`
+        §4; first dataset `Config/universe/sol-frontier.universe`). **Remaining:** load the
+        cooked blob in `ServerUniverse` and spawn beacons/fields from it.
   - [ ] **Interest prefetch (R21):** on warp/jump start, prefetch the destination sector's
         interest set so fast cross-sector travel doesn't stall replication. (Lightweight at
         M3; full interest mgmt is M4.)
@@ -172,7 +175,9 @@
         of fuel.
   - [ ] `ERServerTest`: interdiction interrupts an in-progress warp; jump validation
         (ownership, fuel, link, cooldown).
-  - [ ] `NeuronTools` `datacheck`: beacon-graph referential integrity in CI.
+  - [x] `NeuronTools` `datacheck`: beacon-graph referential integrity — parse/validate/
+        round-trip covered by `UniverseDataTests` (testrunner); `make check` gates
+        `Config/universe/*.universe`.
 - **Depends on:** A, B; M2 area A (`datacook`/`datacheck`). **Blocks:** Done "warp/jump
   across beacons"; area G starmap.
 
@@ -274,16 +279,16 @@
 1. **A (entities & rules)** first — foundation for everything server-side.
 2. Then **B (intents)** — needed by C, D, F, G.
 3. **C (harvest loop)**, **D (navigation)**, **E (fog)**, **F (NPC site)** can largely run in
-   **parallel** once A+B exist (D also needs M2's `datacook`/`datacheck`; E feeds D's scan
-   targets and F's detection, so sequence E slightly ahead of the D-target/F-detect wiring).
+   **parallel** once A+B exist (D's `datacook`/`datacheck` tooling is now built; E feeds D's
+   scan targets and F's detection, so sequence E slightly ahead of the D-target/F-detect wiring).
 4. **G (client UI)** follows the server features it surfaces (B, D, E, F) and M2's HUD.
 5. **H (bots/determinism)** continuously, and is the final end-to-end gate.
 
 Server track (A→B→{C,D,E,F}) is independent of the M2 render track. **G** hard-depended on
-M2, which is **now complete**, so it's unblocked. **Cross-milestone:** D needs the
-`datacook`/`datacheck` tooling nominally from M2 area A, but that was **carried over** (only
-the Linux parser `testrunner` exists) — so **build the cook/check executables in D**. G
-builds on M2 areas B/F (instanced ships + HUD/overview basics), both done.
+M2, which is **now complete**, so it's unblocked. **Cross-milestone:** the `datacook`/
+`datacheck` tooling D needs (nominally an M2 area-A carry-over) is **now built in D**
+(`NeuronTools/datacook/` + `NeuronCore/UniverseData.h`). G builds on M2 areas B/F (instanced
+ships + HUD/overview basics), both done.
 
 ## Done gate (mirrors §17 "Done")
 

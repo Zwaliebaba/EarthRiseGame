@@ -51,6 +51,7 @@
 #include "FixedStepAccumulator.h"
 #include "Movement.h"
 #include "Snapshot.h"
+#include "UniverseData.h"
 
 namespace Neuron
 {

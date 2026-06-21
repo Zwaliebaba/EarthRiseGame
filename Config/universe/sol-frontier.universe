@@ -1,0 +1,76 @@
+# sol-frontier.universe — first-pass authored universe layout (M3 area D slice).
+# Schema: docs/design/universe-worldgen.md §4.1–4.3. Cook with NeuronTools/datacook;
+# gated by datacheck in CI. Numbers are first-pass and tuned with bots (§12.6/§19).
+#
+# Topology: a high-sec home (SOL_GATE) → low-sec frontier (THE_VERGE) → null-sec
+# endgame (THE_MAW). Public beacons chain SOL_HUB ↔ SOL_RIM ↔ VERGE_GATE; the
+# null beacon MAW_HOLD is a claimable territory structure (M7) hung off VERGE_GATE.
+
+# --- regions (§4.1) --------------------------------------------------------
+region SOL_GATE {
+  security   = high
+  bounds     = -64 64 -64 64 -8 8        # inclusive SectorId ranges (sx0 sx1 sy0 sy1 sz0 sz1)
+  yield_mult = 0.6                       # protected onboarding → lower yields
+}
+
+region THE_VERGE {
+  security   = low
+  bounds     = 65 160 -64 64 -8 8
+  yield_mult = 1.0
+}
+
+region THE_MAW {
+  security   = null
+  bounds     = 161 512 -64 64 -8 8
+  yield_mult = 1.5                       # best yields, highest risk
+}
+
+# --- jump-beacon graph (§4.2) ----------------------------------------------
+beacon SOL_HUB {
+  region = SOL_GATE
+  pos    = 0 0 0
+  links  = SOL_RIM
+  kind   = public
+}
+
+beacon SOL_RIM {
+  region = SOL_GATE
+  pos    = 327680 0 0                     # sector x = 20
+  links  = SOL_HUB VERGE_GATE
+  kind   = public
+}
+
+beacon VERGE_GATE {
+  region = THE_VERGE
+  pos    = 1310720 0 0                    # sector x = 80
+  links  = SOL_RIM MAW_HOLD
+  kind   = public
+}
+
+beacon MAW_HOLD {
+  region = THE_MAW
+  pos    = 3276800 0 0                    # sector x = 200
+  links  = VERGE_GATE
+  kind   = claimable                      # null-sec territory structure (M7)
+}
+
+# --- resource fields (§4.3) ------------------------------------------------
+field SOL_BELT {
+  region  = SOL_GATE
+  center  = 32768 0 16384
+  radius  = 2000
+  nodes   = Ore:0.7 Ice:0.3
+  count   = 6 12
+  yield   = 4000 7000
+  respawn = 600
+}
+
+field VERGE_DEEP {
+  region  = THE_VERGE
+  center  = 1310720 0 65536
+  radius  = 2500
+  nodes   = Ore:0.5 Ice:0.2 Gas:0.3
+  count   = 8 16
+  yield   = 6000 11000
+  respawn = 900
+}

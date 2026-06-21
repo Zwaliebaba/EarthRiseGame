@@ -87,8 +87,9 @@ is no celestial-mechanics sim; the universe is sectors + placed content.
 
 Static layout is authored as **text source** and cooked by **`datacook`** to the versioned
 binary serde loaded by NeuronCore (one dataset → server sim + client display + bots, no
-drift). **`datacheck`** runs referential integrity in CI. *(Both tool executables are an M2
-carry-over — they get stood up in **M3 area D**, which needs the beacon-graph cook.)*
+drift). **`datacheck`** runs referential integrity in CI. *(Both tools are **now built** —
+`NeuronTools/datacook/`; the runtime model, binary codec, and validation rules live in
+`NeuronCore/UniverseData.h`; the first authored dataset is `Config/universe/sol-frontier.universe`.)*
 
 Four dataset families (schemas are sketches, not final syntax):
 
@@ -187,10 +188,12 @@ transferring the universe as a bulk artifact.
 
 ## 8. Milestone mapping
 
-- **M3 (now):** the **static-data slice** + the first dynamic loop. Stand up `datacook`/
-  `datacheck`; author a **small region set + a handful of public beacons** (graph integrity in
-  CI); spawn **resource fields** (the harvest loop, area C); one **hand-placed NPC site** (area
-  F). Non-procedural, non-claimable. *This doc's §4.1–4.3 schemas are area D's cook target.*
+- **M3 (now):** the **static-data slice** + the first dynamic loop. `datacook`/`datacheck`
+  are **built** — the §4.1–4.3 schema is realized in `NeuronCore/UniverseData.h`, the first
+  **region set + public beacon graph** is authored in `Config/universe/sol-frontier.universe`,
+  and integrity is gated by `make check`. **Remaining:** load the cooked blob in
+  `ServerUniverse` and spawn **resource fields** (the harvest loop, area C) + one **hand-placed
+  NPC site** (area F). Non-procedural, non-claimable.
 - **M4:** sector-subscription interest + warp/jump prefetch — universe content becomes
   interest-scoped instead of full-snapshot.
 - **M5:** persistence — ResourceNode depletion, cleared sites, and player/territory beacons

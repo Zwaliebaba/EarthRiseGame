@@ -53,6 +53,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Snapshot.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)TimerCore.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)WinsockSocket.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)UniverseData.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)UniversePos.h" />
   </ItemGroup>
 </Project>
