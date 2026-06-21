@@ -22,8 +22,9 @@ namespace Neuron::Client
 {
 
 // Stub factory kept for ERHeadless compatibility.
-// EarthRise.Client constructs SessionImpl directly, injecting CngCrypto +
-// WinsockSocket; tests inject FakeCrypto + LoopbackSocket.
+// EarthRise.Client constructs SessionImpl directly, injecting CngCrypto + the WinRT
+// DatagramSocketAdapter (§8.1); ERHeadless injects WinsockSocket; tests inject
+// FakeCrypto + LoopbackSocket.
 Session* CreateSession()  { return nullptr; }
 void     DestroySession(Session* s) { delete s; }
 

@@ -34,8 +34,9 @@
 ## Highlights
 
 - **Custom engine, Microsoft-platform only.** No third-party game libraries — just C++23
-  and Microsoft platform components (C++/WinRT, DirectXMath, DirectX 12, Winsock, ODBC/SQL
-  Server, Windows CNG, XAudio2/X3DAudio).
+  and Microsoft platform components (C++/WinRT, DirectXMath, DirectX 12, Winsock on the
+  server / WinRT `DatagramSocket` on the client, ODBC/SQL Server, Windows CNG,
+  XAudio2/X3DAudio).
 - **Server-authoritative.** A dedicated Windows server (`ERServer`) owns a fixed-step
   **30 Hz** simulation; clients send **intents**, never authoritative state.
 - **Encrypted reliable-UDP** transport: CNG **ECDH** handshake with a **pinned server key**,
