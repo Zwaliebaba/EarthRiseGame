@@ -10,6 +10,10 @@
 // This loop is also the cold-start path: there is no bulk world sync (§8.4). A
 // freshly connected client starts from an empty baseline and converges as these
 // interest-scoped snapshots arrive, so no transfer ever exceeds the safe MTU.
+// Records are keyed by netId and applied last-writer-wins by snapshot `tick`, so
+// reordered/duplicate snapshots are idempotent and need no inter-packet sequencing
+// (snapshots ride the Unreliable channel). Per-tick MTU budgeting, baseline delta
+// and interest eviction land with sector subscriptions at M4.
 //
 // Record: netId u32 · kind u8 · pos(x,y,z) i64 · localOffset(x,y,z) f32 · hp i32
 
