@@ -285,25 +285,34 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     OutputDebugStringA(buf);
   }
 
-  // Draw one Darwinia-style skinned button. selected = the light blue highlight
-  // (same blue gradient as the title bar); otherwise the interface_red strip.
+  // Draw one Darwinia-style skinned button, faithful to the source:
+  //   normal      = flat translucent dark-red panel + bevel, plain WHITE caption
+  //   highlighted = blue vertex gradient (title colours) + dark caption
   void DrawButton(float x, float y, float w, float h, const char* caption, float s, bool selected)
   {
-    if (selected)
-      m_canvas.DrawVGradient(x, y, w, h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
-    else
-      m_canvas.DrawTexturedQuad(x, y, w, h, 0, 0, 1, 1, m_uiRed, 1.0f, 1.0f, 1.0f, 1.f);
-
-    const float ts = s * 0.85f;
+    const float ts = s * 0.9f;
     const float tw = m_canvas.TextWidth(caption, ts);
     const float th = m_canvas.TextHeight(ts);
     const float cx = x + (w - tw) * 0.5f, cy = y + (h - th) * 0.5f;
-    // Drop shadow then caption: dark text on the blue highlight, cream otherwise.
-    m_canvas.DrawText(cx + 1.5f * s, cy + 1.5f * s, caption, 0.f, 0.f, 0.f, ts);
+
     if (selected)
-      m_canvas.DrawText(cx, cy, caption, 0.10f, 0.12f, 0.16f, ts);
-    else
-      m_canvas.DrawText(cx, cy, caption, 0.92f, 0.88f, 0.80f, ts);
+    {
+      m_canvas.DrawVGradient(x, y, w, h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
+      m_canvas.DrawText(cx + 1.f * s, cy + 1.f * s, caption, 0.f, 0.f, 0.f, ts); // shadow
+      m_canvas.DrawText(cx, cy, caption, 0.12f, 0.14f, 0.18f, ts);               // dark caption
+      return;
+    }
+
+    // Flat translucent dark-red panel (107,37,39, a64) over the body gradient.
+    m_canvas.DrawRect(x, y, w, h, 0.420f, 0.145f, 0.153f, 0.25f);
+    // Bevel: top/left dark red (100,34,34), right/bottom near-black.
+    const float px = (s > 1.f ? s : 1.f);
+    m_canvas.DrawRect(x, y, w, px, 0.392f, 0.133f, 0.133f, 0.78f);   // top
+    m_canvas.DrawRect(x, y, px, h, 0.392f, 0.133f, 0.133f, 0.78f);   // left
+    m_canvas.DrawRect(x + w - px, y, px, h, 0.10f, 0.f, 0.f, 1.f);   // right
+    m_canvas.DrawRect(x, y + h - px, w, px, 0.10f, 0.f, 0.f, 1.f);   // bottom
+    // Plain opaque white caption — crisp and readable (the source's look).
+    m_canvas.DrawText(cx, cy, caption, 1.f, 1.f, 1.f, ts);
   }
 
   // Draw the Main Menu window, faithful to Darwinia's Window render: a full-height
