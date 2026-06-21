@@ -103,15 +103,19 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   float m_ptrX{0.f}, m_ptrY{0.f};
   bool  m_ptrDown{false}, m_ptrPressed{false}, m_ptrReleased{false};
 
-  // Main Menu window state.
-  static constexpr int kMenuItems = 6; // list items (Profile..Quit); Close is extra
-  bool  m_menuOpen{true};
-  bool  m_menuPlaced{false};
-  float m_menuX{0.f}, m_menuY{0.f};
-  bool  m_dragging{false};
+  // ---- windowed UI (docs/design/darwinia-menu-ui.md) ----
+  enum Win { Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other, Win_Count };
+  bool  m_winOpen[Win_Count]{ true, false, false, false, false };
+  float m_winX[Win_Count]{}, m_winY[Win_Count]{};
+  bool  m_uiPlaced{false};
+  int   m_dragWin{-1};
   float m_dragDX{0.f}, m_dragDY{0.f};
-  int   m_hoverBtn{-1}; // index into the layout's buttons (incl. Close)
-  int   m_pressBtn{-1};
+  int   m_hoverWin{-1}, m_hoverItem{-1}; // item = button index or panel row
+  int   m_pressWin{-1}, m_pressItem{-1};
+  int   m_ddWin{-1}, m_ddRow{-1};        // open dropdown (window, row); -1 none
+  int   m_ddHover{-1};                    // hovered popup row
+  int   m_sel[Win_Count][16]{};           // dropdown selection per panel row
+  float m_fps{0.f};
 
   // ---- network ----
   Neuron::Net::CngCrypto m_crypto;
@@ -340,149 +344,230 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     OutputDebugStringA(buf);
   }
 
+  using Rect = Neuron::Render::Ui::Rect;
+  struct UiRow { const char* label; const char* const* opts; int optCount; };
+
   static float MenuScale(UINT screenH) noexcept
   {
     return (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
   }
-  static const char* MenuCaption(int i)
+  static bool WinIsPanel(int win) { return win == Win_Screen || win == Win_Graphics || win == Win_Other; }
+  static float PanelWidth(float s) { return 460.f * s; }
+
+  static const char* WinTitle(int win)
   {
-    static const char* kItems[] = { "Profile", "Mods", "Options", "Visit Website",
-                                    "Play Tutorial", "Quit EarthRise" };
-    return (i >= 0 && i < kMenuItems) ? kItems[i] : "Close";
+    switch (win)
+    {
+      case Win_MainMenu: return "MAIN MENU";
+      case Win_Options:  return "OPTIONS";
+      case Win_Screen:   return "SCREEN OPTIONS";
+      case Win_Graphics: return "GRAPHICS OPTIONS";
+      case Win_Other:    return "OTHER OPTIONS";
+    }
+    return "";
   }
 
-  // Per-frame Main Menu interaction: hover, press/click on buttons, close box,
-  // and title-bar drag. Consumes the pointer edges. Run before DrawMainMenu.
-  void UpdateMenu(UINT screenW, UINT screenH)
+  // Button-list windows (Main Menu, Options). 'Close' is appended by the layout.
+  static int WinButtons(int win, const char* const*& out)
+  {
+    static const char* mm[] = { "Profile", "Mods", "Options", "Visit Website",
+                                "Play Tutorial", "Quit EarthRise" };
+    static const char* op[] = { "Screen Options", "Graphics Options", "Sound Options",
+                                "Control Options", "Other Options" };
+    if (win == Win_Options) { out = op; return 5; }
+    out = mm; return 6;
+  }
+  // Caption for button index i (i == listCount → the trailing Close).
+  static const char* WinButtonCaption(int win, int i)
+  {
+    const char* const* items; const int n = WinButtons(win, items);
+    return (i >= 0 && i < n) ? items[i] : "Close";
+  }
+
+  // Panel dropdown rows. Returns the dropdown-row count (excludes the label row).
+  static int WinRows(int win, const UiRow*& out)
+  {
+    static const char* onoff[]   = { "Off", "On" };
+    static const char* q3[]      = { "Low", "Medium", "High" };
+    static const char* q4[]      = { "Off", "Low", "Medium", "High" };
+    static const char* res[]     = { "1280x720", "1920x1080", "2560x1440", "3840x2160" };
+    static const char* wmode[]   = { "Windowed", "Borderless", "Fullscreen" };
+    static const char* fpscap[]  = { "Off", "30", "60", "120", "144" };
+    static const char* aniso[]   = { "Off", "2x", "4x", "8x", "16x" };
+    static const char* fov[]     = { "60", "75", "90", "110" };
+    static const char* scale[]   = { "50%", "75%", "100%", "125%" };
+    static const char* lang[]    = { "English", "Francais", "Italiano", "Russian" };
+    static const char* diff[]    = { "Easy", "Normal", "Hard" };
+
+    static const UiRow screen[] = {
+      { "Resolution", res, 4 }, { "Window Mode", wmode, 3 }, { "VSync", onoff, 2 },
+      { "Limit FPS", fpscap, 5 }, { "Anisotropy", aniso, 5 }, { "FXAA", onoff, 2 },
+      { "Texture Detail", q3, 3 }, { "Brightness", q3, 3 },
+    };
+    static const UiRow graphics[] = {
+      { "Field of View", fov, 4 }, { "Bloom", q4, 4 }, { "Particles", q4, 4 },
+      { "Render Scale", scale, 4 }, { "Shadow Detail", q3, 3 }, { "Entity Detail", q3, 3 },
+      { "Pixel Effect", onoff, 2 },
+    };
+    static const UiRow other[] = {
+      { "Help System", onoff, 2 }, { "Controller Help", onoff, 2 }, { "Intro Movies", onoff, 2 },
+      { "Language", lang, 4 }, { "Difficulty", diff, 3 }, { "Large Menus", onoff, 2 },
+      { "Automatic Camera", onoff, 2 },
+    };
+    switch (win)
+    {
+      case Win_Screen:   out = screen;   return 8;
+      case Win_Graphics: out = graphics; return 7;
+      case Win_Other:    out = other;    return 7;
+    }
+    out = nullptr; return 0;
+  }
+  // Trailing read-only label for a panel (FPS / build version), or nullptr.
+  static const char* WinLabel(int win)
+  {
+    if (win == Win_Graphics) return "FPS";
+    if (win == Win_Other)    return "Build";
+    return nullptr;
+  }
+
+  void PlaceWindows(UINT screenW, UINT screenH)
   {
     const float s = MenuScale(screenH);
-    if (!m_menuPlaced)
-    {
-      Neuron::Render::Ui::CenterMainMenu(static_cast<float>(screenW), static_cast<float>(screenH),
-                                         s, kMenuItems, m_menuX, m_menuY);
-      m_menuPlaced = true;
-    }
-    if (!m_uiReady || !m_menuOpen)
-    {
-      m_ptrPressed = m_ptrReleased = false;
-      m_hoverBtn = m_pressBtn = -1;
-      return;
-    }
+    float mmX = 0, mmY = 0;
+    Neuron::Render::Ui::CenterMainMenu(static_cast<float>(screenW), static_cast<float>(screenH), s, 6, mmX, mmY);
+    const float pw = PanelWidth(s);
+    auto clampX = [&](float x) { const float m = screenW - 320.f * s; return x < 10.f * s ? 10.f * s : (x > m ? m : x); };
+    m_winX[Win_MainMenu] = mmX;                       m_winY[Win_MainMenu] = mmY;
+    m_winX[Win_Options]  = clampX(mmX - 330.f * s);    m_winY[Win_Options]  = mmY;
+    m_winX[Win_Graphics] = clampX(mmX + 330.f * s);    m_winY[Win_Graphics] = 70.f * s;
+    m_winX[Win_Screen]   = m_winX[Win_Graphics];       m_winY[Win_Screen]   = 70.f * s;
+    m_winX[Win_Other]    = m_winX[Win_Options];        m_winY[Win_Other]    = 70.f * s;
+    (void)pw;
+  }
 
-    const auto L = Neuron::Render::Ui::BuildMainMenu(m_menuX, m_menuY, s, kMenuItems);
+  // Front-to-back window order for input picking (topmost first).
+  static constexpr int kFront[Win_Count] = { Win_Other, Win_Graphics, Win_Screen, Win_Options, Win_MainMenu };
 
-    m_hoverBtn = -1;
-    for (int i = 0; i < L.count; ++i)
-      if (L.buttons[i].Contains(m_ptrX, m_ptrY)) { m_hoverBtn = i; break; }
+  // Per-frame UI interaction. Run before DrawUi; consumes pointer edges.
+  void UpdateUi(UINT screenW, UINT screenH)
+  {
+    if (!m_uiPlaced) { PlaceWindows(screenW, screenH); m_uiPlaced = true; }
+    if (!m_uiReady) { m_ptrPressed = m_ptrReleased = false; return; }
+    const float s = MenuScale(screenH);
+    m_hoverWin = m_hoverItem = -1; m_ddHover = -1;
 
-    if (m_ptrPressed)
-    {
-      if (L.closeBox.Contains(m_ptrX, m_ptrY))
-        m_menuOpen = false;
-      else if (m_hoverBtn >= 0)
-        m_pressBtn = m_hoverBtn;
-      else if (L.titleBar.Contains(m_ptrX, m_ptrY))
-      {
-        m_dragging = true;
-        m_dragDX = m_ptrX - m_menuX;
-        m_dragDY = m_ptrY - m_menuY;
-      }
-    }
-
-    if (m_dragging)
+    // Drag continuation.
+    if (m_dragWin >= 0)
     {
       if (m_ptrDown)
       {
-        m_menuX = m_ptrX - m_dragDX;
-        m_menuY = m_ptrY - m_dragDY;
-        const float maxX = static_cast<float>(screenW) - L.window.w;
-        const float maxY = static_cast<float>(screenH) - L.window.h;
-        m_menuX = m_menuX < 0 ? 0 : (m_menuX > maxX ? maxX : m_menuX);
-        m_menuY = m_menuY < 0 ? 0 : (m_menuY > maxY ? maxY : m_menuY);
+        m_winX[m_dragWin] = m_ptrX - m_dragDX;
+        m_winY[m_dragWin] = m_ptrY - m_dragDY;
+        if (m_winX[m_dragWin] < 0) m_winX[m_dragWin] = 0;
+        if (m_winY[m_dragWin] < 0) m_winY[m_dragWin] = 0;
       }
-      else
+      else m_dragWin = -1;
+    }
+
+    // Open dropdown popup takes all input until closed.
+    if (m_ddWin >= 0)
+    {
+      const UiRow* rows; WinRows(m_ddWin, rows);
+      const auto L = Neuron::Render::Ui::BuildPanel(m_winX[m_ddWin], m_winY[m_ddWin], s, PanelWidth(s),
+                                                    WinRows(m_ddWin, rows) + (WinLabel(m_ddWin) ? 1 : 0), true);
+      const Rect vb = Neuron::Render::Ui::ValueBox(L.rows[m_ddRow]);
+      const int n = rows[m_ddRow].optCount;
+      for (int i = 0; i < n; ++i)
+        if (Neuron::Render::Ui::PopupRow(vb, i).Contains(m_ptrX, m_ptrY)) { m_ddHover = i; break; }
+      if (m_ptrPressed)
       {
-        m_dragging = false;
+        if (m_ddHover >= 0) m_sel[m_ddWin][m_ddRow] = m_ddHover;
+        m_ddWin = m_ddRow = -1; // any click closes the popup
       }
-    }
-
-    if (m_ptrReleased)
-    {
-      if (m_pressBtn >= 0 && L.buttons[m_pressBtn].Contains(m_ptrX, m_ptrY))
-        OnMenuAction(m_pressBtn, L.count);
-      m_pressBtn = -1;
-      m_dragging = false;
-    }
-
-    m_ptrPressed = m_ptrReleased = false;
-  }
-
-  void OnMenuAction(int idx, int count)
-  {
-    if (idx == count - 1) { m_menuOpen = false; return; }    // Close
-    if (idx == 5) { m_running = false; return; }             // Quit EarthRise
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "[EarthRise] menu: %s\n", MenuCaption(idx));
-    OutputDebugStringA(buf);
-  }
-
-  // Draw one Darwinia-style skinned button. highlighted (hover/selected) = blue
-  // vertex gradient + dark caption (brighter when pressed); else a flat
-  // translucent dark-red panel + bevel + plain white caption.
-  void DrawButton(const Neuron::Render::Ui::Rect& b, const char* caption, float s,
-                  bool highlighted, bool pressed)
-  {
-    const float ts = s * 1.0f;
-    const float tw = m_canvas.TextWidth(caption, ts);
-    const float th = m_canvas.TextHeight(ts);
-    const float cx = b.x + (b.w - tw) * 0.5f, cy = b.y + (b.h - th) * 0.5f;
-
-    if (highlighted)
-    {
-      if (pressed) // clicked: brighter (white → light blue)
-        m_canvas.DrawVGradient(b.x, b.y, b.w, b.h, 1.0f, 1.0f, 1.0f, 1.f, 0.635f, 0.749f, 0.816f, 1.f);
-      else
-        m_canvas.DrawVGradient(b.x, b.y, b.w, b.h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
-      m_canvas.DrawText(cx + 1.f * s, cy + 1.f * s, caption, 0.f, 0.f, 0.f, ts); // shadow
-      m_canvas.DrawText(cx, cy, caption, 0.12f, 0.14f, 0.18f, ts);               // dark caption
+      m_ptrPressed = m_ptrReleased = false;
       return;
     }
 
-    m_canvas.DrawRect(b.x, b.y, b.w, b.h, 0.420f, 0.145f, 0.153f, 0.25f); // dark-red panel
-    const float px = (s > 1.f ? s : 1.f);
-    m_canvas.DrawRect(b.x, b.y, b.w, px, 0.392f, 0.133f, 0.133f, 0.78f);   // top
-    m_canvas.DrawRect(b.x, b.y, px, b.h, 0.392f, 0.133f, 0.133f, 0.78f);   // left
-    m_canvas.DrawRect(b.x + b.w - px, b.y, px, b.h, 0.10f, 0.f, 0.f, 1.f); // right
-    m_canvas.DrawRect(b.x, b.y + b.h - px, b.w, px, 0.10f, 0.f, 0.f, 1.f); // bottom
-    m_canvas.DrawText(cx, cy, caption, 1.f, 1.f, 1.f, ts);                 // white caption
-  }
-
-  // Draw the Main Menu window (faithful to Darwinia's Window render), using the
-  // shared layout + current hover/press interaction state.
-  void DrawMainMenu(UINT screenW, UINT screenH)
-  {
-    (void)screenW;
-    if (!m_uiReady || !m_menuOpen) return;
-    const float s = MenuScale(screenH);
-    const auto L = Neuron::Render::Ui::BuildMainMenu(m_menuX, m_menuY, s, kMenuItems);
-    const auto& W = L.window;
-
-    // 1) Body fill: interface_red, full bright, V across the whole window.
-    m_canvas.DrawTexturedQuad(W.x, W.y, W.w, W.h, 0.f, 0.f, 1.f, 1.f, m_uiRed, 1.f, 1.f, 1.f, 0.96f);
-
-    // 2) Title bar: blue vertex gradient (199,214,220 → 112,141,168).
-    m_canvas.DrawVGradient(L.titleBar.x, L.titleBar.y, L.titleBar.w, L.titleBar.h,
-                           0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
-
-    // 3) Buttons.
-    for (int i = 0; i < L.count; ++i)
+    // Topmost window under the pointer consumes the interaction.
+    for (int oi = 0; oi < Win_Count; ++oi)
     {
-      const bool hover = (i == m_hoverBtn);
-      const bool pressed = hover && (i == m_pressBtn) && m_ptrDown;
-      DrawButton(L.buttons[i], MenuCaption(i), s, hover, pressed);
+      const int win = kFront[oi];
+      if (!m_winOpen[win]) continue;
+
+      if (WinIsPanel(win))
+      {
+        const UiRow* rows; const int dd = WinRows(win, rows);
+        const bool hasLabel = WinLabel(win) != nullptr;
+        const auto L = Neuron::Render::Ui::BuildPanel(m_winX[win], m_winY[win], s, PanelWidth(s),
+                                                      dd + (hasLabel ? 1 : 0), true);
+        if (!L.window.Contains(m_ptrX, m_ptrY)) continue;
+        for (int i = 0; i < dd; ++i)
+          if (Neuron::Render::Ui::ValueBox(L.rows[i]).Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = i; break; }
+        if (m_hoverItem < 0)
+        {
+          if (L.footerClose.Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = -2; }
+          else if (L.footerApply.Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = -3; }
+        }
+        if (m_ptrPressed)
+        {
+          if (L.closeBox.Contains(m_ptrX, m_ptrY)) m_winOpen[win] = false;
+          else if (L.footerClose.Contains(m_ptrX, m_ptrY)) m_winOpen[win] = false;
+          else if (L.footerApply.Contains(m_ptrX, m_ptrY)) OutputDebugStringA("[EarthRise] settings applied\n");
+          else if (m_hoverItem >= 0) { m_ddWin = win; m_ddRow = m_hoverItem; }
+          else if (L.titleBar.Contains(m_ptrX, m_ptrY)) { m_dragWin = win; m_dragDX = m_ptrX - m_winX[win]; m_dragDY = m_ptrY - m_winY[win]; }
+        }
+        break;
+      }
+      else
+      {
+        const char* const* items; const int n = WinButtons(win, items);
+        const auto L = Neuron::Render::Ui::BuildMainMenu(m_winX[win], m_winY[win], s, n);
+        if (!L.window.Contains(m_ptrX, m_ptrY)) continue;
+        for (int i = 0; i < L.count; ++i)
+          if (L.buttons[i].Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = i; break; }
+        if (m_ptrPressed)
+        {
+          if (L.closeBox.Contains(m_ptrX, m_ptrY)) m_winOpen[win] = false;
+          else if (m_hoverItem >= 0) { m_pressWin = win; m_pressItem = m_hoverItem; }
+          else if (L.titleBar.Contains(m_ptrX, m_ptrY)) { m_dragWin = win; m_dragDX = m_ptrX - m_winX[win]; m_dragDY = m_ptrY - m_winY[win]; }
+        }
+        if (m_ptrReleased && m_pressWin == win && m_pressItem >= 0 && L.buttons[m_pressItem].Contains(m_ptrX, m_ptrY))
+          OnButtonAction(win, m_pressItem, L.count);
+        break;
+      }
     }
 
-    // 4) Border frame: 2px light-blue edges + 1px dark-blue outer loop.
+    if (m_ptrReleased) { m_pressWin = m_pressItem = -1; }
+    m_ptrPressed = m_ptrReleased = false;
+  }
+
+  void OnButtonAction(int win, int idx, int count)
+  {
+    if (idx == count - 1) { m_winOpen[win] = false; return; } // trailing Close
+    if (win == Win_MainMenu)
+    {
+      if (idx == 2) m_winOpen[Win_Options] = true;   // Options
+      else if (idx == 5) m_running = false;          // Quit EarthRise
+      else OutputDebugStringA("[EarthRise] menu item\n");
+    }
+    else if (win == Win_Options)
+    {
+      if (idx == 0) m_winOpen[Win_Screen] = true;
+      else if (idx == 1) m_winOpen[Win_Graphics] = true;
+      else if (idx == 4) m_winOpen[Win_Other] = true;
+      else OutputDebugStringA("[EarthRise] options item\n");
+    }
+  }
+
+  // ── Drawing ───────────────────────────────────────────────────────────────
+  void DrawChromeBody(const Rect& W, const Rect& titleBar)
+  {
+    m_canvas.DrawTexturedQuad(W.x, W.y, W.w, W.h, 0.f, 0.f, 1.f, 1.f, m_uiRed, 1.f, 1.f, 1.f, 0.96f);
+    m_canvas.DrawVGradient(titleBar.x, titleBar.y, titleBar.w, titleBar.h,
+                           0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
+  }
+  void DrawChromeFrame(const Rect& W, const Rect& titleBar, const Rect& closeBox, const char* title, float s)
+  {
     const float bw = 2.f * s;
     constexpr float lbR = 0.780f, lbG = 0.839f, lbB = 0.863f;
     m_canvas.DrawRect(W.x, W.y, W.w, bw, lbR, lbG, lbB, 1.f);
@@ -496,20 +581,145 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_canvas.DrawRect(W.x - o, W.y - o, s, W.h + 2 * o, dbR, dbG, dbB, 1.f);
     m_canvas.DrawRect(W.x + W.w + o - s, W.y - o, s, W.h + 2 * o, dbR, dbG, dbB, 1.f);
 
-    // 5) Title: centred, with a dark drop shadow.
     const float tts = s * 0.9f;
-    const char* title = "MAIN MENU";
-    const float tx = L.titleBar.x + (L.titleBar.w - m_canvas.TextWidth(title, tts)) * 0.5f;
-    const float ty = L.titleBar.y + (L.titleBar.h - m_canvas.TextHeight(tts)) * 0.5f;
+    const float tx = titleBar.x + (titleBar.w - m_canvas.TextWidth(title, tts)) * 0.5f;
+    const float ty = titleBar.y + (titleBar.h - m_canvas.TextHeight(tts)) * 0.5f;
     m_canvas.DrawText(tx + 1.5f * s, ty + 1.5f * s, title, 0.f, 0.f, 0.f, tts);
     m_canvas.DrawText(tx, ty, title, 0.13f, 0.16f, 0.22f, tts);
 
-    // 6) Close box (top-right) — brighter when hovered.
-    const auto& C = L.closeBox;
-    const bool closeHover = C.Contains(m_ptrX, m_ptrY);
-    m_canvas.DrawVGradient(C.x, C.y, C.w, C.h,
-                           closeHover ? 1.0f : 0.780f, closeHover ? 1.0f : 0.839f, closeHover ? 1.0f : 0.863f, 1.f,
+    const bool ch = closeBox.Contains(m_ptrX, m_ptrY);
+    m_canvas.DrawVGradient(closeBox.x, closeBox.y, closeBox.w, closeBox.h,
+                           ch ? 1.f : 0.780f, ch ? 1.f : 0.839f, ch ? 1.f : 0.863f, 1.f,
                            0.439f, 0.553f, 0.659f, 1.f);
+  }
+
+  void DrawButton(const Rect& b, const char* caption, float s, bool highlighted, bool pressed)
+  {
+    const float ts = s * 1.0f;
+    const float tw = m_canvas.TextWidth(caption, ts);
+    const float th = m_canvas.TextHeight(ts);
+    const float cx = b.x + (b.w - tw) * 0.5f, cy = b.y + (b.h - th) * 0.5f;
+    if (highlighted)
+    {
+      if (pressed)
+        m_canvas.DrawVGradient(b.x, b.y, b.w, b.h, 1.f, 1.f, 1.f, 1.f, 0.635f, 0.749f, 0.816f, 1.f);
+      else
+        m_canvas.DrawVGradient(b.x, b.y, b.w, b.h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
+      m_canvas.DrawText(cx + 1.f * s, cy + 1.f * s, caption, 0.f, 0.f, 0.f, ts);
+      m_canvas.DrawText(cx, cy, caption, 0.12f, 0.14f, 0.18f, ts);
+      return;
+    }
+    m_canvas.DrawRect(b.x, b.y, b.w, b.h, 0.420f, 0.145f, 0.153f, 0.25f);
+    const float px = (s > 1.f ? s : 1.f);
+    m_canvas.DrawRect(b.x, b.y, b.w, px, 0.392f, 0.133f, 0.133f, 0.78f);
+    m_canvas.DrawRect(b.x, b.y, px, b.h, 0.392f, 0.133f, 0.133f, 0.78f);
+    m_canvas.DrawRect(b.x + b.w - px, b.y, px, b.h, 0.10f, 0.f, 0.f, 1.f);
+    m_canvas.DrawRect(b.x, b.y + b.h - px, b.w, px, 0.10f, 0.f, 0.f, 1.f);
+    m_canvas.DrawText(cx, cy, caption, 1.f, 1.f, 1.f, ts);
+  }
+
+  // Dropdown row: label (left) + recessed value box (right) showing the current
+  // option + a down-arrow. Hovered value boxes brighten.
+  void DrawDropDown(const Rect& row, const UiRow& r, int sel, bool hover, float s)
+  {
+    const float ts = s * 0.9f;
+    const float th = m_canvas.TextHeight(ts);
+    m_canvas.DrawText(row.x, row.y + (row.h - th) * 0.5f, r.label, 0.92f, 0.88f, 0.80f, ts);
+
+    const Rect vb = Neuron::Render::Ui::ValueBox(row);
+    const float a = hover ? 0.5f : 0.32f; // recessed dark-red, brighter on hover
+    m_canvas.DrawRect(vb.x, vb.y, vb.w, vb.h, 0.42f, 0.16f, 0.16f, a);
+    const float px = (s > 1.f ? s : 1.f);
+    m_canvas.DrawRect(vb.x, vb.y, vb.w, px, 0.10f, 0.f, 0.f, 1.f);            // top (recessed)
+    m_canvas.DrawRect(vb.x, vb.y, px, vb.h, 0.10f, 0.f, 0.f, 1.f);            // left
+    m_canvas.DrawRect(vb.x + vb.w - px, vb.y, px, vb.h, 0.55f, 0.28f, 0.28f, 1.f);
+    m_canvas.DrawRect(vb.x, vb.y + vb.h - px, vb.w, px, 0.55f, 0.28f, 0.28f, 1.f);
+
+    const char* val = (sel >= 0 && sel < r.optCount) ? r.opts[sel] : "";
+    m_canvas.DrawText(vb.x + 6.f * s, vb.y + (vb.h - th) * 0.5f, val, 1.f, 1.f, 1.f, ts);
+
+    const Rect ar = Neuron::Render::Ui::ArrowBox(vb);
+    m_canvas.DrawTriangle(ar.x + ar.w * 0.30f, ar.y + ar.h * 0.40f,
+                          ar.x + ar.w * 0.70f, ar.y + ar.h * 0.40f,
+                          ar.x + ar.w * 0.50f, ar.y + ar.h * 0.64f,
+                          0.92f, 0.88f, 0.80f, 1.f);
+  }
+
+  void DrawPanelWindow(int win, float s)
+  {
+    const UiRow* rows; const int dd = WinRows(win, rows);
+    const char* label = WinLabel(win);
+    const int total = dd + (label ? 1 : 0);
+    const auto L = Neuron::Render::Ui::BuildPanel(m_winX[win], m_winY[win], s, PanelWidth(s), total, true);
+
+    DrawChromeBody(L.window, L.titleBar);
+    for (int i = 0; i < dd; ++i)
+      DrawDropDown(L.rows[i], rows[i], m_sel[win][i], (m_hoverWin == win && m_hoverItem == i), s);
+    if (label)
+    {
+      const Rect& lr = L.rows[dd];
+      const float ts = s * 0.9f;
+      char buf[64];
+      if (win == Win_Graphics) std::snprintf(buf, sizeof(buf), "%s   %d", label, static_cast<int>(m_fps + 0.5f));
+      else                     std::snprintf(buf, sizeof(buf), "%s   v0.17-dev", label);
+      m_canvas.DrawText(lr.x, lr.y + (lr.h - m_canvas.TextHeight(ts)) * 0.5f, buf, 0.85f, 0.85f, 0.55f, ts);
+    }
+    DrawButton(L.footerClose, "Close", s, m_hoverWin == win && m_hoverItem == -2, false);
+    DrawButton(L.footerApply, "Apply", s, m_hoverWin == win && m_hoverItem == -3, false);
+    DrawChromeFrame(L.window, L.titleBar, L.closeBox, WinTitle(win), s);
+  }
+
+  void DrawButtonListWindow(int win, float s)
+  {
+    const char* const* items; const int n = WinButtons(win, items);
+    const auto L = Neuron::Render::Ui::BuildMainMenu(m_winX[win], m_winY[win], s, n);
+    DrawChromeBody(L.window, L.titleBar);
+    for (int i = 0; i < L.count; ++i)
+    {
+      const bool hover = (m_hoverWin == win && m_hoverItem == i);
+      const bool pressed = hover && (m_pressWin == win && m_pressItem == i) && m_ptrDown;
+      DrawButton(L.buttons[i], WinButtonCaption(win, i), s, hover, pressed);
+    }
+    DrawChromeFrame(L.window, L.titleBar, L.closeBox, WinTitle(win), s);
+  }
+
+  void DrawDropdownPopup(float s)
+  {
+    if (m_ddWin < 0) return;
+    const UiRow* rows; const int dd = WinRows(m_ddWin, rows);
+    const auto L = Neuron::Render::Ui::BuildPanel(m_winX[m_ddWin], m_winY[m_ddWin], s, PanelWidth(s),
+                                                  dd + (WinLabel(m_ddWin) ? 1 : 0), true);
+    const Rect vb = Neuron::Render::Ui::ValueBox(L.rows[m_ddRow]);
+    const UiRow& r = rows[m_ddRow];
+    const Rect panel = Neuron::Render::Ui::PopupPanel(vb, r.optCount);
+    m_canvas.DrawRect(panel.x - s, panel.y, panel.w + 2 * s, panel.h + s, 0.06f, 0.02f, 0.03f, 0.97f);
+    const float ts = s * 0.9f, th = m_canvas.TextHeight(ts);
+    for (int i = 0; i < r.optCount; ++i)
+    {
+      const Rect pr = Neuron::Render::Ui::PopupRow(vb, i);
+      if (i == m_ddHover)
+        m_canvas.DrawVGradient(pr.x, pr.y, pr.w, pr.h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
+      const bool dark = (i == m_ddHover);
+      m_canvas.DrawText(pr.x + 6.f * s, pr.y + (pr.h - th) * 0.5f, r.opts[i],
+                        dark ? 0.10f : 1.f, dark ? 0.12f : 1.f, dark ? 0.16f : 1.f, ts);
+    }
+  }
+
+  void DrawUi(UINT screenW, UINT screenH)
+  {
+    (void)screenW;
+    if (!m_uiReady) return;
+    const float s = MenuScale(screenH);
+    // Back-to-front (Main Menu lowest, panels on top); popup last.
+    static constexpr int kBack[Win_Count] = { Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other };
+    for (int oi = 0; oi < Win_Count; ++oi)
+    {
+      const int win = kBack[oi];
+      if (!m_winOpen[win]) continue;
+      if (WinIsPanel(win)) DrawPanelWindow(win, s);
+      else                 DrawButtonListWindow(win, s);
+    }
+    DrawDropdownPopup(s);
   }
 
   // Load every ShapeCatalog entry into the renderer: the CMO mesh plus its
@@ -645,6 +855,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                    : std::chrono::duration<float>(nowT - m_lastFrame).count();
     m_lastFrame = nowT;
     m_particles.Update(dt, cx, cy, cz);
+    if (dt > 0.f) m_fps = m_fps * 0.9f + (1.f / dt) * 0.1f; // smoothed FPS for the HUD
 
     // Scene lighting (see Lighting.hlsli): a single WORLD-FIXED warm sun (key),
     // cool fill + ambient to lift the shadow side, and a per-frame view-based
@@ -740,8 +951,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_particles.Render(cl, vpf, camRight[0], camRight[1], camRight[2], camUp[0], camUp[1], camUp[2]);
     }
 
-    // HUD + menu. Menu interaction (hover/press/drag) runs before drawing.
-    UpdateMenu(w, h);
+    // HUD + windowed UI. Interaction (hover/press/drag/dropdowns) runs first.
+    UpdateUi(w, h);
     m_canvas.Reset();
     const Neuron::Client::SessionState st = m_session->GetState();
     const char* stateStr = (st == Neuron::Client::SessionState::Connected)
@@ -755,8 +966,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_canvas.DrawText(12.f * hudS, 10.f * hudS, "EarthRise", 0.35f, 0.85f, 1.0f, hudS);
     m_canvas.DrawText(12.f * hudS, 30.f * hudS, stateStr, 0.95f, 0.80f, 0.35f, hudS);
 
-    // Darwinia Main Menu window (MU-1 visual; interactivity lands in MU-2/3).
-    DrawMainMenu(w, h);
+    // Darwinia windowed UI (Main Menu / Options / settings panels + dropdowns).
+    DrawUi(w, h);
 
     m_canvas.Render(cl, w, h);
 
@@ -768,7 +979,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   {
     // Esc toggles the Main Menu; Quit EarthRise (or the window Close) exits.
     if (args.VirtualKey() == Windows::System::VirtualKey::Escape)
-      m_menuOpen = !m_menuOpen;
+      m_winOpen[Win_MainMenu] = !m_winOpen[Win_MainMenu];
   }
 
   void OnClosed(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::CoreWindowEventArgs&)

@@ -76,4 +76,84 @@ namespace Neuron::Render::Ui
     gx = (screenW - m.w) * 0.5f;
     gy = screenH * 0.5f - MainMenuHeight(m, listCount) * 0.5f - 40.f * s;
   }
+
+  // ── Settings panel (rows of dropdowns + optional Close/Apply footer) ───────
+  struct PanelMetrics
+  {
+    float titleH, pad, rowH, gap, footerH;
+    static constexpr PanelMetrics At(float s) noexcept
+    {
+      return { 28.f * s, 14.f * s, 30.f * s, 8.f * s, 34.f * s };
+    }
+  };
+
+  struct PanelLayout
+  {
+    Rect window, titleBar, closeBox;
+    static constexpr int kMaxRows = 16;
+    Rect rows[kMaxRows]{}; // dropdown/label row rects (full width inside padding)
+    int  rowCount{ 0 };
+    bool hasFooter{ false };
+    Rect footerClose{}, footerApply{};
+  };
+
+  constexpr float PanelHeight(const PanelMetrics& m, int rowCount, bool footer) noexcept
+  {
+    return m.titleH + m.pad + rowCount * (m.rowH + m.gap)
+         + (footer ? m.footerH + m.gap : 0.f) + m.pad;
+  }
+
+  constexpr PanelLayout BuildPanel(float gx, float gy, float s, float width,
+                                   int rowCount, bool footer) noexcept
+  {
+    const PanelMetrics m = PanelMetrics::At(s);
+    PanelLayout L;
+    const float h = PanelHeight(m, rowCount, footer);
+    L.window = { gx, gy, width, h };
+    L.titleBar = { gx, gy, width, m.titleH };
+    const float cb = 14.f * s;
+    L.closeBox = { gx + width - cb - 7.f * s, gy + (m.titleH - cb) * 0.5f, cb, cb };
+
+    float ry = gy + m.titleH + m.pad;
+    int n = 0;
+    for (int i = 0; i < rowCount && n < PanelLayout::kMaxRows; ++i)
+    {
+      L.rows[n++] = { gx + m.pad, ry, width - 2 * m.pad, m.rowH };
+      ry += m.rowH + m.gap;
+    }
+    L.rowCount = n;
+    L.hasFooter = footer;
+    if (footer)
+    {
+      const float fw = (width - 2 * m.pad - m.gap) * 0.5f;
+      const float fy = gy + h - m.pad - m.footerH;
+      L.footerClose = { gx + m.pad, fy, fw, m.footerH };
+      L.footerApply = { gx + m.pad + fw + m.gap, fy, fw, m.footerH };
+    }
+    return L;
+  }
+
+  // Dropdown value box = the right portion of a row (label sits to its left).
+  constexpr Rect ValueBox(const Rect& row) noexcept
+  {
+    const float vx = row.x + row.w * 0.45f;
+    return { vx, row.y, row.x + row.w - vx, row.h };
+  }
+
+  // The down-arrow triangle's bounding square at the right of the value box.
+  constexpr Rect ArrowBox(const Rect& valueBox) noexcept
+  {
+    const float a = valueBox.h;
+    return { valueBox.x + valueBox.w - a, valueBox.y, a, a };
+  }
+
+  // One row of the open dropdown popup (drawn below the value box).
+  constexpr Rect PopupRow(const Rect& valueBox, int i) noexcept
+  {
+    return { valueBox.x, valueBox.y + valueBox.h + i * valueBox.h, valueBox.w, valueBox.h };
+  }
+  constexpr Rect PopupPanel(const Rect& valueBox, int total) noexcept
+  {
+    return { valueBox.x, valueBox.y + valueBox.h, valueBox.w, total * valueBox.h };
+  }
 } // namespace Neuron::Render::Ui

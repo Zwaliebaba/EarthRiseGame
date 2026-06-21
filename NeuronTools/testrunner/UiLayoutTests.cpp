@@ -76,3 +76,46 @@ ER_TEST(UiLayout, CenterPlacesWindowOnScreen)
   ER_CHECK(L.window.y > 0.f);
   ER_CHECK(L.window.y + L.window.h < 1080.f);
 }
+
+ER_TEST(UiLayout, PanelRowsAndFooterInsideWindow)
+{
+  const float s = 1.f;
+  const auto L = BuildPanel(200.f, 100.f, s, 460.f, 7, /*footer*/ true);
+  ER_CHECK_EQ(L.rowCount, 7);
+  ER_CHECK(L.hasFooter);
+
+  float prevBottom = L.titleBar.y + L.titleBar.h;
+  for (int i = 0; i < L.rowCount; ++i)
+  {
+    const Rect& r = L.rows[i];
+    ER_CHECK(r.y >= prevBottom - 1e-3f);
+    ER_CHECK(r.x >= L.window.x && r.x + r.w <= L.window.x + L.window.w + 1e-3f);
+    prevBottom = r.y + r.h;
+  }
+  // Footer buttons are side-by-side, inside the window, below the last row.
+  ER_CHECK(L.footerClose.y >= prevBottom - 1e-3f);
+  ER_CHECK(L.footerApply.x > L.footerClose.x);
+  ER_CHECK(L.footerApply.x + L.footerApply.w <= L.window.x + L.window.w + 1e-3f);
+  ER_CHECK(L.footerClose.y + L.footerClose.h <= L.window.y + L.window.h + 1e-3f);
+}
+
+ER_TEST(UiLayout, ValueBoxAndPopupGeometry)
+{
+  const auto L = BuildPanel(0.f, 0.f, 1.f, 460.f, 3, false);
+  const Rect row = L.rows[0];
+  const Rect vb = ValueBox(row);
+  // Value box is the right side of the row, fully inside it.
+  ER_CHECK(vb.x > row.x);
+  ER_CHECK(nearly(vb.x + vb.w, row.x + row.w));
+  // Arrow square is at the right end of the value box.
+  const Rect ar = ArrowBox(vb);
+  ER_CHECK(nearly(ar.x + ar.w, vb.x + vb.w));
+  ER_CHECK(nearly(ar.w, vb.h));
+  // Popup rows stack directly under the value box.
+  const Rect p0 = PopupRow(vb, 0);
+  const Rect p1 = PopupRow(vb, 1);
+  ER_CHECK(nearly(p0.y, vb.y + vb.h));
+  ER_CHECK(nearly(p1.y, vb.y + 2 * vb.h));
+  const Rect panel = PopupPanel(vb, 4);
+  ER_CHECK(nearly(panel.h, 4 * vb.h));
+}
