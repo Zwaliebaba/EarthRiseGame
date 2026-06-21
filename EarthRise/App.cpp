@@ -351,8 +351,10 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         }
       }
     }
-    const XMVECTOR eye = XMVectorSet(cx, cy + 50.f, cz - 120.f, 0.f);
-    const XMVECTOR at = XMVectorSet(cx, cy, cz, 0.f);
+    // Command view: pulled back and raised so the base sits among the surrounding
+    // scenery cluster (which is placed ahead on +Z), looking slightly forward.
+    const XMVECTOR eye = XMVectorSet(cx, cy + 140.f, cz - 340.f, 0.f);
+    const XMVECTOR at = XMVectorSet(cx, cy + 20.f, cz + 120.f, 0.f);
     const XMVECTOR up = XMVectorSet(0.f, 1.f, 0.f, 0.f);
     constexpr float fov = XM_PIDIV4;
     const float asp = (h > 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.f;

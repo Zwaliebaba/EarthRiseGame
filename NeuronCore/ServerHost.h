@@ -85,13 +85,14 @@ public:
             const uint64_t token = NextToken();
             auto conn = std::make_unique<ServerConnection>(m_crypto, m_staticPriv, token, m_serverTime);
 
-            // Each base starts just inside sector 0 (separated on Y) and drifts
-            // east at 40 m/s, crossing the sector-0→1 boundary within a few
-            // seconds — the M1a "base crosses a sector boundary" criterion.
+            // Each base starts just inside sector 0 (separated on Y) at the
+            // centre of the catalog scenery cluster (ServerWorld::SpawnScenery).
+            // Stationary at spawn so the props stay in frame; movement comes from
+            // client intents (SetBaseVelocity).
             const int64_t startX = Neuron::World::kSectorSize - 200;
             const int64_t startY = static_cast<int64_t>(m_conns.size()) * 2000;
             const uint32_t netId = m_world->SpawnBase(
-                { startX, startY, 0 }, { 40.0f, 0.0f, 0.0f });
+                { startX, startY, 0 }, { 0.0f, 0.0f, 0.0f });
             conn->SetPlayerNetId(netId);
 
             std::vector<std::vector<uint8_t>> sendOut;

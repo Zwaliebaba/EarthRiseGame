@@ -142,34 +142,36 @@ public:
     static constexpr float kMaxBaseSpeed = 50.0f; // m/s cap (server validates intents)
 
 private:
-    // Populate the world with a spread of static catalog props near the sector-0
-    // origin so the client exercises the whole shape catalog (a jumpgate, a few
-    // stations, asteroids, debris and a sampling of ship hulls). Runs once at
-    // construction, before any player connects.
+    // Populate the world with a spread of static catalog props clustered around
+    // the player spawn point so the client exercises the whole shape catalog (a
+    // jumpgate, a few stations, asteroids, debris and a sampling of ship hulls).
+    // Runs once at construction, before any player connects. Offsets are kept
+    // mostly in front of (+Z) and beside the spawn — the follow camera sits
+    // behind the base on -Z, so props there stay in frame. Names fall back
+    // silently if an asset was renamed.
     void SpawnScenery()
     {
-        struct Placement { const char* name; int64_t x, y, z; };
-        // Ring of landmarks around the origin (metres). Names fall back to the
-        // first shape in the matching category if an asset was renamed.
+        // Match ServerHost's first-player spawn (sector-0 edge, on the X axis).
+        const int64_t bx = Neuron::World::kSectorSize - 200;
+        struct Placement { const char* name; int64_t dx, dy, dz; };
         static constexpr Placement kProps[] = {
-            { "Jumpgate01",   0,   0,  600 },
-            { "Outpost01",  500,   0,    0 },
-            { "Science01", -500,   0,    0 },
-            { "Mining01",     0,   0, -500 },
-            { "Asteroid01Rock",  300, 100,  300 },
-            { "Asteroid04Ice",  -300, -80,  300 },
-            { "Asteroid06Lava",  300, -60, -300 },
-            { "Satellite01",   -300, 120, -300 },
-            { "Crate01",        120,  0,  120 },
-            { "DebrisGenericWreck01", -150, 0, 150 },
-            { "HullFreighter",  250,  0,   80 },
-            { "HullShuttle",   -250,  0,   80 },
-            { "HullAurora",       0, 50,  250 },
+            { "Jumpgate01",            0,   0,  380 }, // big landmark dead ahead
+            { "Science01",          -260,   0,  120 },
+            { "Mining01",            260,   0,  120 },
+            { "Asteroid01Rock",     -180,  70,  250 },
+            { "Asteroid04Ice",       180, -50,  280 },
+            { "Asteroid06Lava",        0,  90,  320 },
+            { "Satellite01",        -300,  60,  200 },
+            { "Crate01",             120,   0,   60 },
+            { "DebrisGenericWreck01", -120,  0,   80 },
+            { "HullFreighter",       220,   0,  150 },
+            { "HullShuttle",        -220,   0,  150 },
+            { "HullAurora",           60,  40,  220 },
         };
         for (const auto& p : kProps) {
             const uint16_t id = ShapeIdByName(p.name);
             if (id != kInvalidShapeId)
-                SpawnProp(id, { p.x, p.y, p.z });
+                SpawnProp(id, { bx + p.dx, p.dy, p.dz });
         }
     }
 
