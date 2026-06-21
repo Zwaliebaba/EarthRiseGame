@@ -371,32 +371,29 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     float vpf[16];
     XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(vpf), viewProj);
 
-    // Camera-relative three-point lighting (see Lighting.hlsli). Derive a camera
-    // basis and place the key over the upper-right shoulder, the fill on the
-    // opposite (left) side near camera level, and the rim from the view dir — so
-    // every object is lit the same flattering way regardless of where it sits.
+    // Scene lighting (see Lighting.hlsli): a single WORLD-FIXED warm sun (key),
+    // cool fill + ambient to lift the shadow side, and a per-frame view-based
+    // Fresnel rim. World-fixed key/fill give consistent lit/shadow sides across
+    // the whole scene (natural depth); only the rim's view direction tracks the
+    // camera. The warm-key / cool-fill split is the core Darwinia colour cue.
     {
-      const XMVECTOR fwd = XMVector3Normalize(XMVectorSubtract(at, eye));
-      const XMVECTOR right = XMVector3Normalize(XMVector3Cross(up, fwd));
-      const XMVECTOR cup = XMVector3Cross(fwd, right);
-
-      // Directions point FROM the surface TOWARD each light (world space).
-      const XMVECTOR keyDir = XMVector3Normalize(
-          XMVectorAdd(XMVectorSubtract(right, fwd), cup));       // up-right, behind cam
-      const XMVECTOR fillDir = XMVector3Normalize(
-          XMVectorSubtract(XMVectorScale(right, -1.f), XMVectorScale(fwd, 0.3f))); // left, slight back
-      const XMVECTOR viewDir = XMVectorScale(fwd, -1.f);          // surface -> camera
+      const XMVECTOR viewDir = XMVector3Normalize(XMVectorSubtract(eye, at)); // surface->camera
 
       Neuron::Render::SceneRenderer::Lighting lit{};
+      // World-fixed sun: up / right / toward the camera side (-Z) so camera-facing
+      // surfaces catch the key. Fill comes from the opposite side, cooler.
+      const XMVECTOR keyDir = XMVector3Normalize(XMVectorSet(0.45f, 0.55f, -0.70f, 0.f));
+      const XMVECTOR fillDir = XMVector3Normalize(XMVectorSet(-0.55f, 0.20f, -0.45f, 0.f));
       XMFLOAT3 v;
       XMStoreFloat3(&v, keyDir);  lit.keyDir[0] = v.x;  lit.keyDir[1] = v.y;  lit.keyDir[2] = v.z;
       XMStoreFloat3(&v, fillDir); lit.fillDir[0] = v.x; lit.fillDir[1] = v.y; lit.fillDir[2] = v.z;
       XMStoreFloat3(&v, viewDir); lit.viewDir[0] = v.x; lit.viewDir[1] = v.y; lit.viewDir[2] = v.z;
-      lit.keyIntensity = 0.9f;
-      lit.fillIntensity = 0.35f;
-      lit.ambient = 0.16f;
-      lit.rimColor[0] = 0.35f; lit.rimColor[1] = 0.45f; lit.rimColor[2] = 0.65f;
-      lit.rimPower = 3.0f;
+      // Warm key radiance (colour * intensity); cool fill + ambient.
+      lit.keyColor[0] = 1.20f; lit.keyColor[1] = 1.08f; lit.keyColor[2] = 0.92f;
+      lit.fillColor[0] = 0.22f; lit.fillColor[1] = 0.28f; lit.fillColor[2] = 0.40f;
+      lit.ambient[0] = 0.11f; lit.ambient[1] = 0.13f; lit.ambient[2] = 0.19f;
+      lit.rimColor[0] = 0.30f; lit.rimColor[1] = 0.42f; lit.rimColor[2] = 0.65f;
+      lit.rimPower = 2.5f;
       m_scene.SetLighting(lit);
     }
 

@@ -1,34 +1,37 @@
-// Lighting.hlsli — camera-relative three-point shading shared by the scene
-// pixel shaders. The CPU computes the key/fill directions from the camera basis
-// each frame (so every object gets the same flattering rig regardless of view)
-// and uploads them as root constants in b1; see SceneRenderer::SetLighting.
+// Lighting.hlsli — scene shading shared by the scene pixel shaders.
 //
-//   Key  — brightest, hard Lambert (over the camera's upper-right shoulder).
-//   Fill — dim, soft half-Lambert from the opposite side; lifts the shadow side.
-//   Rim  — Fresnel silhouette highlight (the real-time stand-in for a back light),
-//          which also feeds the bloom pass for a glowing edge.
+// Natural space lighting = ONE dominant world-fixed "sun" (the key), the shadow
+// side lifted by a cool ambient/bounce (the fill), and a view-based Fresnel rim
+// for silhouette separation. The key/fill directions are WORLD-FIXED (not
+// camera-relative) so every object is lit consistently from the same star — that
+// consistent lit-side/shadow-side across the scene is what reads as natural and
+// gives depth. The warm-key / cool-fill split is the core Darwinia colour cue.
+// Only the rim's view direction tracks the camera (the CPU updates b1 each frame;
+// see SceneRenderer::SetLighting).
 //
-// Cast shadows (the other half of a film key light) are a separate future feature
-// (shadow maps); this is the shading half of three-point lighting.
+// Cast shadows (shadow maps) and IBL/ambient probes remain future upgrades.
 
 #ifndef NEURON_LIGHTING_HLSLI
 #define NEURON_LIGHTING_HLSLI
 
 cbuffer Lighting : register(b1)
 {
-    float3 g_keyDir;   float g_keyIntensity;  // dir surface->key (world), intensity
-    float3 g_fillDir;  float g_fillIntensity; // dir surface->fill (world), intensity
-    float3 g_viewDir;  float g_ambient;       // dir surface->camera (rim), ambient floor
-    float3 g_rimColor; float g_rimPower;      // rim tint, Fresnel exponent
+    float3 g_keyDir;    float _pad0;     // dir surface->sun (world)
+    float3 g_keyColor;  float _pad1;     // warm key radiance (colour * intensity)
+    float3 g_fillDir;   float _pad2;     // dir surface->fill (world, opposite side)
+    float3 g_fillColor; float _pad3;     // cool fill radiance (half-Lambert)
+    float3 g_ambient;   float _pad4;     // cool ambient floor (never pitch black)
+    float3 g_rimColor;  float g_rimPower; // rim tint + Fresnel exponent
+    float3 g_viewDir;   float _pad5;     // dir surface->camera (rim, per-frame)
 };
 
 float3 ApplyThreePoint(float3 normal, float3 albedo)
 {
     float3 N = normalize(normal);
 
-    float  key  = saturate(dot(N, g_keyDir)) * g_keyIntensity;       // hard key
-    float  fill = (dot(N, g_fillDir) * 0.5 + 0.5) * g_fillIntensity; // soft fill
-    float3 lit  = albedo * (g_ambient + key + fill);
+    float  key  = saturate(dot(N, g_keyDir));            // hard sun key
+    float  fill = dot(N, g_fillDir) * 0.5 + 0.5;         // soft fill (half-Lambert)
+    float3 lit  = albedo * (g_ambient + g_keyColor * key + g_fillColor * fill);
 
     // Fresnel rim — brightest where the surface turns away from the camera.
     float rim = pow(1.0 - saturate(dot(N, g_viewDir)), g_rimPower);

@@ -133,7 +133,7 @@ namespace Neuron::Render
     param[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     param[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     param[1].Constants.ShaderRegister = 1; // b1 (Lighting.hlsli)
-    param[1].Constants.Num32BitValues = 16;
+    param[1].Constants.Num32BitValues = 28;
 
     D3D12_ROOT_SIGNATURE_DESC rsDesc{};
     rsDesc.NumParameters = 2;
@@ -208,7 +208,7 @@ namespace Neuron::Render
       params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
       params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
       params[2].Constants.ShaderRegister = 1; // b1 lighting (Lighting.hlsli)
-      params[2].Constants.Num32BitValues = 16;
+      params[2].Constants.Num32BitValues = 28;
 
       D3D12_STATIC_SAMPLER_DESC samp{};
       samp.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -478,14 +478,14 @@ namespace Neuron::Render
       D3D12_GPU_DESCRIPTOR_HANDLE srv = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
       srv.ptr += static_cast<UINT64>(shape->srvIndex) * m_srvDescSize;
       cl->SetGraphicsRootDescriptorTable(1, srv);
-      cl->SetGraphicsRoot32BitConstants(2, 16, &m_light, 0); // b1 lighting
+      cl->SetGraphicsRoot32BitConstants(2, 28, &m_light, 0); // b1 lighting
     }
     else
     {
       cl->SetGraphicsRootSignature(m_rootSig.get());
       cl->SetPipelineState(m_pso.get());
       cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
-      cl->SetGraphicsRoot32BitConstants(1, 16, &m_light, 0); // b1 lighting
+      cl->SetGraphicsRoot32BitConstants(1, 28, &m_light, 0); // b1 lighting
     }
 
     const D3D12_VERTEX_BUFFER_VIEW geomVb = shape ? shape->mesh.vbView : m_vbView;

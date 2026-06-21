@@ -57,17 +57,20 @@ public:
                 const float viewProjT[16],
                 const SceneEntity* entities, uint32_t count);
 
-    // Camera-relative three-point lighting, uploaded to the pixel shaders as
-    // root constants b1 (matches Lighting.hlsli's cbuffer layout). The caller
-    // (App) recomputes this each frame from the camera basis.
+    // Scene lighting, uploaded to the pixel shaders as root constants b1 (matches
+    // Lighting.hlsli's cbuffer). World-fixed warm key + cool fill/ambient (a single
+    // "sun") plus a per-frame view-based rim. The caller (App) sets this each frame.
     struct Lighting
     {
-        float keyDir[3];   float keyIntensity;   // dir surface->key (world)
-        float fillDir[3];  float fillIntensity;  // dir surface->fill (world)
-        float viewDir[3];  float ambient;        // dir surface->camera (rim)
-        float rimColor[3]; float rimPower;       // rim tint + Fresnel exponent
+        float keyDir[3];    float _pad0;     // dir surface->sun (world)
+        float keyColor[3];  float _pad1;     // warm key radiance (colour * intensity)
+        float fillDir[3];   float _pad2;     // dir surface->fill (world)
+        float fillColor[3]; float _pad3;     // cool fill radiance (half-Lambert)
+        float ambient[3];   float _pad4;     // cool ambient floor
+        float rimColor[3];  float rimPower;  // rim tint + Fresnel exponent
+        float viewDir[3];   float _pad5;     // dir surface->camera (per-frame)
     };
-    static_assert(sizeof(Lighting) == 16 * sizeof(float), "Lighting cbuffer layout");
+    static_assert(sizeof(Lighting) == 28 * sizeof(float), "Lighting cbuffer layout");
     void SetLighting(const Lighting& l) { m_light = l; }
 
     // Register a catalog shape: the mesh drawn for entities whose SceneEntity::
@@ -135,13 +138,16 @@ private:
     UINT m_srvDescSize{ 0 };
     UINT m_nextSrv{ 0 };
 
-    // Current frame's lighting (b1). Default is a sane forward-key rig so the
-    // scene is lit even if SetLighting is never called.
+    // Current frame's lighting (b1). Default is a sane warm-sun rig so the scene
+    // is lit even if SetLighting is never called.
     Lighting m_light{
-        { 0.4f, 0.6f, -0.7f }, 0.9f,   // key:  up-right, toward camera
-        { -0.5f, 0.1f, -0.3f }, 0.35f, // fill: opposite side, near level
-        { 0.0f, 0.0f, -1.0f }, 0.16f,  // view dir (rim), ambient floor
-        { 0.35f, 0.45f, 0.65f }, 3.0f, // cool rim tint, Fresnel power
+        { 0.45f, 0.55f, -0.70f }, 0.f,   // key dir (world: right/up/toward camera)
+        { 1.15f, 1.09f, 0.98f }, 0.f,    // warm key radiance
+        { -0.76f, 0.23f, -0.61f }, 0.f,  // fill dir (world: opposite side)
+        { 0.20f, 0.25f, 0.34f }, 0.f,    // cool fill radiance
+        { 0.10f, 0.12f, 0.18f }, 0.f,    // cool ambient floor
+        { 0.32f, 0.42f, 0.62f }, 3.0f,   // cool rim tint, Fresnel power
+        { 0.0f, 0.0f, -1.0f }, 0.f,      // view dir (rim), updated per frame
     };
 };
 
