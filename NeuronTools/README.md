@@ -26,11 +26,11 @@ rather than crashing.
 
 ## testrunner/
 
-A minimal, dependency-free test harness (`TestRunner.h`) plus parser test
-suites that mirror the cases in the Windows MSTest projects
-(`NeuronRenderTest` / `NeuronAudioTest`). It `#include`s the parser headers from
-their owning libraries (e.g. `../../NeuronAudio/WavParse.h`) and builds on any
-platform:
+A minimal, dependency-free test harness (`TestRunner.h`) plus test suites that
+mirror, case-for-case, the Windows MSTest projects under `Testing/`
+(`NeuronAudioTest`, `NeuronRenderTest`, `NeuronCoreTest`, `EarthRiseTest`). It
+`#include`s the headers under test from their owning libraries (e.g.
+`../../NeuronAudio/WavParse.h`) and builds on any platform:
 
 ```sh
 cd NeuronTools/testrunner
@@ -67,7 +67,7 @@ holds:** these tools depend *on* `NeuronCore`, never the reverse.
 ## Status
 
 - **Done:** parser cores (WAV in NeuronAudio; DDS/CMO/font in NeuronRender) +
-  Linux `testrunner` (65 cases passing, `-Werror` clean). `WavParse.h` is
+  Linux `testrunner` (93 cases passing, `-Werror` clean). `WavParse.h` is
   consumed by NeuronAudio's `WavReader`. **`datacook`/`datacheck`** (universe
   data) build and run on Linux; their parse/validate/round-trip logic is covered
   by `UniverseDataTests`.
