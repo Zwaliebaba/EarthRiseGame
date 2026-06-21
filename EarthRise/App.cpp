@@ -30,6 +30,7 @@
 #include "DeviceResources.h"
 #include "SceneRenderer.h"
 #include "CanvasRenderer.h"
+#include "ParticleRenderer.h"
 #include "PostProcess.h"
 #include "UiLayout.h"
 #include "CmoLoader.h"
@@ -89,7 +90,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   Neuron::Render::SceneRenderer m_scene;
   Neuron::Render::CanvasRenderer m_canvas;
   Neuron::Render::PostProcess m_post;
+  Neuron::Render::ParticleRenderer m_particles;
   bool m_bloom{false}; // true once PostProcess initialized (HDR path active)
+  std::chrono::steady_clock::time_point m_lastFrame{}; // for particle dt
 
   // UI chrome textures (Darwinia menu skins, docs/design/darwinia-menu-ui.md).
   Neuron::Render::TextureGpu m_uiGrey; // InterfaceGrey — title bars, highlight beam
@@ -198,6 +201,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                                : "[EarthRise] PostProcess: init failed (LDR direct path)\n");
 
     check_bool(m_scene.Initialize(&m_dr, sceneFmt));
+    check_bool(m_particles.Initialize(&m_dr, sceneFmt));
+    if (auto dds = LoadPackagedAsset(L"Assets\\Textures\\Particle.dds"); !dds.empty())
+      m_particles.SetTexture(Neuron::Render::DdsLoader::Load(m_dr.Device(), dds));
     check_bool(m_canvas.Initialize(&m_dr));
     LoadUiAssets(); // bitmap font + menu chrome (fail-safe: HUD falls back to blocks)
     {
@@ -302,6 +308,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   void Uninitialize()
   {
     m_canvas.Uninitialize();
+    m_particles.Uninitialize();
     m_post.Uninitialize();
     if (m_session)
       m_session->Disconnect(); // best-effort graceful notice while the socket is alive
@@ -621,6 +628,24 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     float vpf[16];
     XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(vpf), viewProj);
 
+    // Camera basis for billboard particles (world space).
+    float camRight[3], camUp[3];
+    {
+      const XMVECTOR fwd = XMVector3Normalize(XMVectorSubtract(at, eye));
+      const XMVECTOR rgt = XMVector3Normalize(XMVector3Cross(up, fwd));
+      const XMVECTOR cup = XMVector3Cross(fwd, rgt);
+      XMFLOAT3 v;
+      XMStoreFloat3(&v, rgt); camRight[0] = v.x; camRight[1] = v.y; camRight[2] = v.z;
+      XMStoreFloat3(&v, cup); camUp[0] = v.x; camUp[1] = v.y; camUp[2] = v.z;
+    }
+    // Per-frame delta time for the particle drift.
+    const auto nowT = std::chrono::steady_clock::now();
+    float dt = (m_lastFrame.time_since_epoch().count() == 0)
+                   ? 0.f
+                   : std::chrono::duration<float>(nowT - m_lastFrame).count();
+    m_lastFrame = nowT;
+    m_particles.Update(dt, cx, cy, cz);
+
     // Scene lighting (see Lighting.hlsli): a single WORLD-FIXED warm sun (key),
     // cool fill + ambient to lift the shadow side, and a per-frame view-based
     // Fresnel rim. World-fixed key/fill give consistent lit/shadow sides across
@@ -706,11 +731,13 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     {
       m_post.BeginScene(cl);
       m_scene.Render(cl, vpf, entities, entCount);
+      m_particles.Render(cl, vpf, camRight[0], camRight[1], camRight[2], camUp[0], camUp[1], camUp[2]);
       m_post.Resolve(cl);
     }
     else
     {
       m_scene.Render(cl, vpf, entities, entCount);
+      m_particles.Render(cl, vpf, camRight[0], camRight[1], camRight[2], camUp[0], camUp[1], camUp[2]);
     }
 
     // HUD + menu. Menu interaction (hover/press/drag) runs before drawing.

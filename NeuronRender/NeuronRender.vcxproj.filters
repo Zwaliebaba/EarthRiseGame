@@ -9,6 +9,7 @@
     <ClCompile Include="DdsLoader.cpp" />
     <ClCompile Include="CmoLoader.cpp" />
     <ClCompile Include="PostProcess.cpp" />
+    <ClCompile Include="ParticleRenderer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CanvasRenderer.h" />
@@ -25,6 +26,7 @@
     <ClInclude Include="MeshGpu.h" />
     <ClInclude Include="PixMarkers.h" />
     <ClInclude Include="PostProcess.h" />
+    <ClInclude Include="ParticleRenderer.h" />
     <ClInclude Include="UiLayout.h" />
   </ItemGroup>
   <ItemGroup>
