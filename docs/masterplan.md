@@ -524,6 +524,29 @@ rather than blocking on a full download — invisible under the ~100 ms interpol
 delay. The only hard requirement is **seed-reproducible deterministic generation** on
 both ends — already committed by the deterministic ECS simulation.
 
+**Why this is order-free, MTU-bounded and loss-tolerant by construction.** The
+"delta vs last acked baseline" above is *not* a sequenced byte stream — it is a set of
+independently-applicable, idempotent facts, which is what lets the bulk/fragmentation
+machinery disappear:
+- **Per-entity last-writer-wins.** Each snapshot record is keyed by `netId` and tagged
+  with its source `tick`; the client keeps the newest tick per key and drops stale or
+  duplicate records. Snapshots therefore need **no inter-packet sequencing** — a
+  reordered or duplicated snapshot converges to the same state, with no head-of-line
+  blocking. (This is why snapshots ride the `Unreliable` channel: the per-channel
+  16-bit sequences of §8.3 are for the reliable channels only.)
+- **Ack-advanced baselines (no retransmit).** The server delta-encodes against the
+  client's last **acked** baseline, never the last *sent* one. A lost snapshot is not
+  retransmitted — the next one simply re-deltas from the still-current acked baseline.
+  Loss costs *time-to-converge*, never correctness.
+- **Per-tick MTU cap + spillover.** A tick's snapshot is filled to the **safe-MTU byte
+  budget** in descending relevance order; entities that don't fit spill into later ticks
+  (the same scheduler as cold-start, just from a non-empty baseline). This holds the
+  "never larger than MTU, never fragmented" invariant even in dense interest sets (e.g.
+  large fights), at the cost of **bounded staleness** on the least-relevant entities.
+- **Eviction.** When an entity leaves a player's interest set it is sent once as a
+  **leave/despawn** record so the client drops it; thereafter it is absent from that
+  client's baselines.
+
 ### 8.5 Connection sequence
 1. **Stateless cookie:** client → server hello; server replies with a token derived
    from client addr + secret (no per-connection state, no crypto yet) — a
