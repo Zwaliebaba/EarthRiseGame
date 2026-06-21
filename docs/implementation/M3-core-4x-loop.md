@@ -1,7 +1,8 @@
 # M3 — Core 4X Loop, Fleet Command & Navigation (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M3**).
-> **Status:** 🔨 Active — **now the hot milestone** (M0/M1a/M1b/M2 complete).
+> **Status:** 🔨 Active (M0/M1a/M1b/M2 complete). **Server track underway — areas A + D done,
+> C in progress;** B/E/F/G/H not started.
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 
 ## Milestone goal (verbatim from §17)
@@ -12,6 +13,27 @@
 > interdiction) + **starmap UI**; tactical **overview list**.
 > **Done:** harvest → return → build a ship, **warp/jump across beacons**, and **command a
 > multi-ship fleet** to clear a basic NPC site, server-authoritative.
+
+## Status summary (this branch)
+
+| Area | Status | Notes |
+| --- | --- | --- |
+| **A** Sim entities & shared rules | ✅ done | components (`OwnerId`/`ResourceNodeTag`/`Cargo`/`Storage`/`BuildQueue`/`FleetMember`/`Sensor`), pure rules (`Economy.h`), fleet spawning + data-driven cap, the build-queue system; balance = cooked `EconomyTuning`. |
+| **B** Fleet command — intents | ⏳ not started | `Command.h` still carries only `MoveCommand`. |
+| **C** eXploit loop (harvest→return→build) | 🔨 in progress | build works (A); the harvest/deposit systems + spawning resource nodes from the dataset's fields land here. |
+| **D** Navigation — warp + jump | ✅ done | `Navigation.h` (warp/jump/interdiction), beacon graph loaded into `ServerUniverse`, fuel + spool/cooldown; balance = cooked `NavTuning`. |
+| **E** eXplore — sensor/fog | ⏳ not started | `Sensor` component + `SensorDetect` rule exist (A); the per-player detected-set (fog) filter is pending. |
+| **F** Basic PvE NPC site | ⏳ not started | no `ERServer/ai/` yet. |
+| **G** Client UI — overview/command/starmap | ⏳ not started | depends on B/D/E/F + M2's HUD. |
+| **H** ERHeadless bots & determinism | ⏳ not started | extend the bots to drive the full loop. |
+
+> **Tooling/data:** `datacook`/`datacheck` (`NeuronTools/datacook/`) + `Config/universe/sol-frontier.universe`
+> cook the universe layout (regions, beacon graph, resource fields) + nav/economy tuning.
+> **Visibility:** `ServerUniverse::SpawnDemoSeed` places working beacons + a resource node + a
+> starter fleet near spawn so the M3 entities render in the live client (a dev seed; the real
+> path is ERServer loading the cooked universe + areas B/C/G).
+> **Verification:** all of the above is checked headless on the Linux `testrunner`; the
+> Windows/MSVC client+server build is **not** exercised in this environment.
 
 ## Scope at a glance
 
