@@ -759,6 +759,9 @@
     <Filter Include="Assets\Shapes\Hulls\Other">
       <UniqueIdentifier>{50df1fbe-90e3-4c83-9947-a4777ba12657}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Assets\Audio">
+      <UniqueIdentifier>{b42cfbb7-9b19-41d5-88b4-b5ecc9224ce6}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config">
@@ -985,5 +988,16 @@
     <AppxManifest Include="Package.appxmanifest">
       <Filter>Project Files</Filter>
     </AppxManifest>
+  </ItemGroup>
+  <ItemGroup>
+    <Media Include="Assets\Audio\ambient_space.wav">
+      <Filter>Assets\Audio</Filter>
+    </Media>
+    <Media Include="Assets\Audio\ui_select.wav">
+      <Filter>Assets\Audio</Filter>
+    </Media>
+    <Media Include="Assets\Audio\ui_click.wav">
+      <Filter>Assets\Audio</Filter>
+    </Media>
   </ItemGroup>
 </Project>
