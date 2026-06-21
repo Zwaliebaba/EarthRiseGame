@@ -34,20 +34,28 @@
 #endif
 #include <pix3.h>
 
-// Per-pass colors (PIX_COLOR(r,g,b)) — consistent hues make passes easy to pick out
-// on the PIX timeline.
+// Per-pass colors (constexpr equivalent of PIX_COLOR(r,g,b)) — consistent hues
+// make passes easy to pick out on the PIX timeline.
 namespace Neuron::Render::PixColors
 {
-    inline constexpr UINT Frame   = PIX_COLOR(0x20, 0x20, 0x40);
-    inline constexpr UINT Clear   = PIX_COLOR(0x40, 0x40, 0x60);
-    inline constexpr UINT Scene   = PIX_COLOR(0x00, 0x80, 0xFF);
-    inline constexpr UINT Canvas  = PIX_COLOR(0xFF, 0x80, 0x00);
-    inline constexpr UINT Upload  = PIX_COLOR(0x80, 0xC0, 0x40);
-    inline constexpr UINT Present = PIX_COLOR(0x80, 0x40, 0x80);
+    constexpr UINT Color(UINT8 r, UINT8 g, UINT8 b) noexcept
+    {
+        return 0xff000000u | (static_cast<UINT>(r) << 16) |
+               (static_cast<UINT>(g) << 8) | static_cast<UINT>(b);
+    }
+
+    inline constexpr UINT Frame   = Color(0x20, 0x20, 0x40);
+    inline constexpr UINT Clear   = Color(0x40, 0x40, 0x60);
+    inline constexpr UINT Scene   = Color(0x00, 0x80, 0xFF);
+    inline constexpr UINT Canvas  = Color(0xFF, 0x80, 0x00);
+    inline constexpr UINT Upload  = Color(0x80, 0xC0, 0x40);
+    inline constexpr UINT Present = Color(0x80, 0x40, 0x80);
 }
 
 // Scoped (RAII) event — closes automatically at the end of the enclosing C++ scope.
-#define NEURON_PIX_SCOPED(cl, color, ...)  PIXScopedEvent((cl), (color), __VA_ARGS__)
+// Note: PIXScopedEvent inspects decltype(context), so the command-list argument
+// must not be parenthesized here (decltype((cl)) becomes a reference type).
+#define NEURON_PIX_SCOPED(cl, color, ...)  PIXScopedEvent(cl, (color), __VA_ARGS__)
 // Explicit begin/end pair — for a range that spans more than one C++ scope (a frame).
 #define NEURON_PIX_BEGIN(cl, color, ...)   PIXBeginEvent((cl), (color), __VA_ARGS__)
 #define NEURON_PIX_END(cl)                 PIXEndEvent((cl))
