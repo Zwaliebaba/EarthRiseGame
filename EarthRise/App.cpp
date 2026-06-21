@@ -171,6 +171,20 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     }
   }
 
+  // Per-kind emitter glow colour; returns false for kinds that don't emit.
+  static bool EmitterGlow(uint8_t kind, float& r, float& g, float& b) noexcept
+  {
+    using K = Neuron::Sim::EntityKind;
+    switch (static_cast<K>(kind))
+    {
+      case K::Base:      r = 0.30f; g = 0.55f; b = 1.00f; return true; // blue
+      case K::Ship:      r = 1.00f; g = 0.50f; b = 0.15f; return true; // orange
+      case K::Station:   r = 0.40f; g = 0.80f; b = 0.90f; return true; // cyan
+      case K::Structure: r = 0.60f; g = 0.40f; b = 1.00f; return true; // violet (jumpgate)
+      default:           return false; // asteroids / debris / crates don't glow
+    }
+  }
+
   // ── IFrameworkViewSource ─────────────────────────────────────────────────
   Windows::ApplicationModel::Core::IFrameworkView CreateView() { return *this; }
 
@@ -912,6 +926,22 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                    ? 0.f
                    : std::chrono::duration<float>(nowT - m_lastFrame).count();
     m_lastFrame = nowT;
+
+    // Per-entity emitter glow (engine/structure auras), fed from the scene list.
+    Neuron::Render::ParticleRenderer::EmitterDesc ems[Neuron::Render::SceneRenderer::kMaxEntities];
+    int emCount = 0;
+    for (UINT i = 0; i < entCount; ++i)
+    {
+      const auto& se = entities[i];
+      float gr, gg, gb;
+      if (!EmitterGlow(se.kind, gr, gg, gb)) continue;
+      auto& e = ems[emCount++];
+      e.x = se.x; e.y = se.y; e.z = se.z;
+      e.r = gr; e.g = gg; e.b = gb;
+      e.size = TargetMetresForKind(se.kind) * 0.30f;
+      e.rate = 16.f;
+    }
+    m_particles.SetEmitters(ems, emCount);
     m_particles.Update(dt, cx, cy, cz);
     if (dt > 0.f) m_fps = m_fps * 0.9f + (1.f / dt) * 0.1f; // smoothed FPS for the HUD
 

@@ -14,10 +14,12 @@ namespace Neuron::Render
 {
   namespace
   {
-    // Bloom tunables — conservative so the approved scene tone is preserved and
-    // only over-bright pixels (lit hull, emissive trim) gain a halo.
+    // Bloom + tone-map tunables.
     constexpr float kThreshold = 0.60f; // luminance above which bloom is extracted
     constexpr float kIntensity = 1.10f; // bloom add strength in the composite
+    constexpr float kExposure  = 1.30f; // scene exposure before the ACES tone-map
+    constexpr float kVignette  = 0.32f; // corner darkening (Darwinia framing)
+    constexpr float kScanline  = 0.05f; // faint CRT scanlines (0 = off)
   } // namespace
 
   bool PostProcess::Initialize(DeviceResources* dr)
@@ -312,7 +314,7 @@ namespace Neuron::Render
     cl->RSSetViewports(1, &vp);
     cl->RSSetScissorRects(1, &sr);
 
-    const float pComp[4] = {0.f, kIntensity, 0.f, 0.f};
+    const float pComp[4] = {kExposure, kIntensity, kVignette, kScanline};
     cl->SetPipelineState(m_psoComposite.get());
     cl->SetGraphicsRoot32BitConstants(0, 4, pComp, 0);
     cl->SetGraphicsRootDescriptorTable(1, SrvGpu(m_hdr.srvIndex));

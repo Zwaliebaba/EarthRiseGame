@@ -114,8 +114,8 @@ namespace Neuron::Render
     if (FAILED(m_device->CreateDescriptorHeap(&hd, IID_PPV_ARGS(m_srvHeap.put()))))
       return false;
 
-    // Per-frame CPU-mapped vertex buffers (6 verts/particle).
-    constexpr UINT64 vbSize = static_cast<UINT64>(kMaxParticles) * 6 * sizeof(Vertex);
+    // Per-frame CPU-mapped vertex buffers (6 verts/particle; ambient + emitter).
+    constexpr UINT64 vbSize = static_cast<UINT64>(kMaxVerts) * sizeof(Vertex);
     D3D12_HEAP_PROPERTIES hp{};
     hp.Type = D3D12_HEAP_TYPE_UPLOAD;
     D3D12_RESOURCE_DESC rd{};
@@ -153,6 +153,7 @@ namespace Neuron::Render
       p.b = bright * 0.45f;
       p.a = rng.range(0.3f, 0.7f);
     }
+    m_emit.assign(kMaxEmitParticles, EmitP{}); // all dead (age==life==0 → not alive)
     return true;
   }
 
@@ -197,43 +198,96 @@ namespace Neuron::Render
       p.oy = wrap(p.oy, kFieldHalf);
       p.oz = wrap(p.oz, kFieldHalf);
     }
+
+    // Emitter particles: age + integrate the live ones.
+    for (auto& e : m_emit)
+    {
+      if (!e.alive()) continue;
+      e.age += dt;
+      e.px += e.vx * dt;
+      e.py += e.vy * dt;
+      e.pz += e.vz * dt;
+    }
+
+    // Spawn from each emitter (probabilistic, rate · dt per frame) into dead slots.
+    Rng rng{ m_rng };
+    for (const auto& em : m_emitters)
+    {
+      float expected = em.rate * dt;
+      while (expected > 0.f)
+      {
+        if (expected < 1.f && rng.next() >= expected) break;
+        expected -= 1.f;
+        // Find the next dead slot via a rolling cursor.
+        EmitP* slot = nullptr;
+        for (uint32_t scan = 0; scan < kMaxEmitParticles; ++scan)
+        {
+          EmitP& cand = m_emit[m_spawnCursor];
+          m_spawnCursor = (m_spawnCursor + 1) % kMaxEmitParticles;
+          if (!cand.alive()) { slot = &cand; break; }
+        }
+        if (!slot) break; // pool full
+        slot->px = em.x; slot->py = em.y; slot->pz = em.z;
+        slot->vx = rng.range(-1.f, 1.f);
+        slot->vy = rng.range(0.2f, 1.4f);   // gentle upward/outward drift
+        slot->vz = rng.range(-1.f, 1.f);
+        slot->age = 0.f;
+        slot->life = rng.range(0.9f, 1.8f);
+        slot->size = em.size * rng.range(0.6f, 1.1f);
+        slot->r = em.r; slot->g = em.g; slot->b = em.b;
+      }
+    }
+    m_rng = rng.s;
+  }
+
+  void ParticleRenderer::SetEmitters(const EmitterDesc* emitters, int count)
+  {
+    m_emitters.assign(emitters, emitters + (count > 0 ? count : 0));
   }
 
   void ParticleRenderer::Render(ID3D12GraphicsCommandList* cl, const float viewProjT[16],
                                 float rightX, float rightY, float rightZ,
                                 float upX, float upY, float upZ)
   {
-    if (!m_tex.valid() || m_particles.empty()) return;
+    if (!m_tex.valid()) return;
     const UINT fi = m_dr->FrameIndex();
     if (!m_vbPtr[fi]) return;
 
-    NEURON_PIX_SCOPED(cl, PixColors::Scene, "Particles (%zu)", m_particles.size());
+    NEURON_PIX_SCOPED(cl, PixColors::Scene, "Particles");
 
-    // Particles are stored as offsets in a box around the camera focus; draw each
-    // at focus + offset so the field always surrounds the view.
     Vertex* v = m_vbPtr[fi];
     UINT n = 0;
-    for (const auto& p : m_particles)
-    {
-      const float hs = p.size;
-      // Camera-facing quad corners = centre ± right*hs ± up*hs.
-      const float cxp = m_fx + p.ox, cyp = m_fy + p.oy, czp = m_fz + p.oz;
+    // Append one camera-facing additive quad (6 verts) at a world centre.
+    auto billboard = [&](float cxp, float cyp, float czp, float hs,
+                         float r, float g, float b, float a) {
+      if (n + 6 > kMaxVerts) return;
       const float rX = rightX * hs, rY = rightY * hs, rZ = rightZ * hs;
       const float uX = upX * hs, uY = upY * hs, uZ = upZ * hs;
-
       const float blX = cxp - rX - uX, blY = cyp - rY - uY, blZ = czp - rZ - uZ;
       const float brX = cxp + rX - uX, brY = cyp + rY - uY, brZ = czp + rZ - uZ;
       const float trX = cxp + rX + uX, trY = cyp + rY + uY, trZ = czp + rZ + uZ;
       const float tlX = cxp - rX + uX, tlY = cyp - rY + uY, tlZ = czp - rZ + uZ;
-
-      const float r = p.r, g = p.g, b = p.b, a = p.a;
       v[n++] = { blX, blY, blZ, 0.f, 1.f, r, g, b, a };
       v[n++] = { tlX, tlY, tlZ, 0.f, 0.f, r, g, b, a };
       v[n++] = { trX, trY, trZ, 1.f, 0.f, r, g, b, a };
       v[n++] = { blX, blY, blZ, 0.f, 1.f, r, g, b, a };
       v[n++] = { trX, trY, trZ, 1.f, 0.f, r, g, b, a };
       v[n++] = { brX, brY, brZ, 1.f, 1.f, r, g, b, a };
+    };
+
+    // Ambient dust (offsets around the camera focus).
+    for (const auto& p : m_particles)
+      billboard(m_fx + p.ox, m_fy + p.oy, m_fz + p.oz, p.size, p.r, p.g, p.b, p.a);
+
+    // Emitter glow (absolute render-space; alpha fades over the particle's life).
+    for (const auto& e : m_emit)
+    {
+      if (!e.alive()) continue;
+      const float fade = 1.f - e.age / e.life;
+      billboard(e.px, e.py, e.pz, e.size, e.r, e.g, e.b, fade * 0.7f);
     }
+
+    if (n == 0) return;
 
     cl->SetGraphicsRootSignature(m_rootSig.get());
     cl->SetPipelineState(m_pso.get());
