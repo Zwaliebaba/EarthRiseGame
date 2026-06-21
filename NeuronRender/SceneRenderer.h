@@ -22,6 +22,7 @@
 
 #include "DeviceResources.h"
 #include "MeshGpu.h"
+#include "TextureGpu.h"
 
 namespace Neuron::Render
 {
@@ -53,6 +54,10 @@ public:
     // placeholder cube. Ignored if the mesh is invalid (keeps the cube), so the
     // caller can fail-safe when an asset is missing.
     void SetMesh(MeshGpu mesh) { if (mesh.valid()) m_mesh = std::move(mesh); }
+
+    // Bind a diffuse texture for the mesh; creates its SRV. When both a mesh and
+    // a diffuse are set, Render uses the textured pipeline. Ignored if invalid.
+    void SetDiffuseTexture(TextureGpu tex);
 
     static constexpr UINT kMaxEntities = 512;
 
@@ -90,6 +95,13 @@ private:
 
     // Optional real CMO mesh; when valid() it replaces the cube for all draws.
     MeshGpu m_mesh;
+
+    // Textured pipeline (separate root sig/PSO so the untextured geometry path
+    // is untouched). Used only when both a mesh and a diffuse texture are set.
+    winrt::com_ptr<ID3D12RootSignature> m_rootSigTex;
+    winrt::com_ptr<ID3D12PipelineState> m_psoTex;
+    winrt::com_ptr<ID3D12DescriptorHeap> m_srvHeap; // shader-visible, 1 SRV (diffuse)
+    TextureGpu m_diffuse;
 };
 
 } // namespace Neuron::Render

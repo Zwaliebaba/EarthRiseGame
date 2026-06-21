@@ -20,7 +20,7 @@
 | Area | Status | Notes |
 | --- | --- | --- |
 | **A** Asset pipeline & tooling | 🟢 mostly done | DDS/CMO/font/WAV parser cores + `NeuronTools/testrunner` (35 cases, Linux CI); MSTest parser mirrors. Loaders done (see B/E). Remaining: the `*check`/cook tool executables, `datacook`/`datacheck` cue catalog. |
-| **B** Instanced CMO ships | 🟡 in progress | `DdsLoader`/`CmoLoader`→GPU done; `SceneRenderer` renders the real `Jumpgate.cmo` instanced (size-normalized, cube fallback), validated vs the real file. **Next: material/texture binding;** then per-kind mesh mapping. |
+| **B** Instanced CMO ships | 🟡 in progress | `DdsLoader`/`CmoLoader`→GPU done; `SceneRenderer` renders the real `Jumpgate.cmo` instanced (size-normalized, cube fallback), validated vs the real file. **Diffuse texturing done** — separate textured root sig/PSO (root constants b0 + SRV table t0 + static linear-wrap sampler s0), `SceneTexVS/PS`, binds `dif_512.dds` via `SetDiffuseTexture`; untextured emissive path kept as fail-safe. **Next: per-kind mesh mapping;** then GPU skinned-render path. |
 | **C** HDR + bloom + tone-map | ⚪ not started | scene still renders straight to the LDR backbuffer. |
 | **D** GPU-compute particles | ⚪ not started | — |
 | **E** NeuronAudio | 🟡 in progress | library scaffolded — voice graph / 4 buses / `WavReader` / X3DAudio `Spatializer` / `VoicePool` / `AudioEngine` + `NeuronAudioTest` (14 projects). Device-free math Linux-verified. Remaining: buffer-queue streaming, cue catalog, `wavcheck`, Windows device smoke test. |
@@ -148,8 +148,12 @@
         Jumpgate.cmo` from the package at startup (fail-safe → cube if missing). On-screen size
         normalized by the CMO bounding radius (Jumpgate native radius ≈ 333). Cull mode → NONE
         (authored winding varies). *Rendered blind — pending Windows visual confirmation.*
-  - [ ] **Material/texture binding:** SRV descriptor heap + static sampler + a textured pixel
-        shader; bind `dif_512.dds` (then `nrm`/`spec`) via `DdsLoader` (§11.1). **(next)**
+  - [x] **Material/texture binding (diffuse):** separate textured root sig/PSO — root constants
+        b0 + SRV table t0 + static linear-wrap sampler s0 — with `SceneTexVS`/`SceneTexPS`
+        (per-vertex UV at CMO offset 44 → diffuse sample + directional/ambient). `SetDiffuseTexture`
+        creates the SRV in a shader-visible heap; the client loads `dif_512.dds` via `DdsLoader`
+        and binds it. Untextured emissive path kept untouched as a fail-safe. *Rendered blind —
+        pending Windows visual confirmation.* **Remaining:** `nrm`/`spec` maps (normal/specular).
   - [ ] **Per-kind mesh mapping** — a small mesh catalog (Base/Ship/structure → `.cmo`);
         currently every entity uses the one loaded mesh. Needs a base/ship mesh.
   - [~] **Skeletal animation** — `CmoParse` fully extracts the skeleton (bones + parents +
@@ -172,8 +176,9 @@
 > enumeration, vertex/index/material extraction, and bounding-radius — all Linux-tested and
 > validated against the real `Jumpgate.cmo`). `SceneRenderer` now renders the loaded mesh
 > instanced (size-normalized, cull-none, cube fallback); the client loads the packaged `.cmo`
-> at startup. **Geometry only** — diffuse/normal/spec **texturing is the next step** (SRV heap +
-> sampler + textured PS), then per-kind mesh mapping.
+> at startup. **Diffuse texturing now landed** — a separate textured root sig/PSO (SRV heap +
+> static sampler + `SceneTexVS`/`SceneTexPS`) binds `dif_512.dds`, with the untextured emissive
+> path kept as a fail-safe. **Next:** `nrm`/`spec` maps and per-kind mesh mapping.
 
 ### C. HDR forward + bloom + tone-map
 

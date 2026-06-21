@@ -9,6 +9,8 @@
 // These headers are build artifacts; not checked into source control.
 #include "CompiledShaders/SceneVS.h"
 #include "CompiledShaders/ScenePS.h"
+#include "CompiledShaders/SceneTexVS.h"
+#include "CompiledShaders/SceneTexPS.h"
 
 #include <algorithm>
 #include <DirectXMath.h>
@@ -184,6 +186,69 @@ namespace Neuron::Render
 
     winrt::check_hresult(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(m_pso.put())));
 
+    // --- Textured pipeline (root constants + diffuse SRV table + static sampler) ---
+    {
+      D3D12_DESCRIPTOR_RANGE srvRange{};
+      srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+      srvRange.NumDescriptors = 1;
+      srvRange.BaseShaderRegister = 0; // t0
+
+      D3D12_ROOT_PARAMETER params[2]{};
+      params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+      params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+      params[0].Constants.ShaderRegister = 0; // b0
+      params[0].Constants.Num32BitValues = 16;
+      params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+      params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+      params[1].DescriptorTable.NumDescriptorRanges = 1;
+      params[1].DescriptorTable.pDescriptorRanges = &srvRange;
+
+      D3D12_STATIC_SAMPLER_DESC samp{};
+      samp.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+      samp.AddressU = samp.AddressV = samp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+      samp.MaxLOD = D3D12_FLOAT32_MAX;
+      samp.ShaderRegister = 0; // s0
+      samp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+      D3D12_ROOT_SIGNATURE_DESC rsTex{};
+      rsTex.NumParameters = 2;
+      rsTex.pParameters = params;
+      rsTex.NumStaticSamplers = 1;
+      rsTex.pStaticSamplers = &samp;
+      rsTex.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+      winrt::com_ptr<ID3DBlob> texSig, texErr;
+      winrt::check_hresult(
+          D3D12SerializeRootSignature(&rsTex, D3D_ROOT_SIGNATURE_VERSION_1, texSig.put(), texErr.put()));
+      winrt::check_hresult(m_device->CreateRootSignature(0, texSig->GetBufferPointer(),
+                                                         texSig->GetBufferSize(),
+                                                         IID_PPV_ARGS(m_rootSigTex.put())));
+
+      // Textured input layout: stream-0 adds the per-vertex UV (CMO offset 44).
+      static constexpr D3D12_INPUT_ELEMENT_DESC kLayoutTex[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 4, DXGI_FORMAT_R32G32_FLOAT, 0, 44, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+        {"TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+        {"TEXCOORD", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+        {"TEXCOORD", 3, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 64, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+      };
+      D3D12_GRAPHICS_PIPELINE_STATE_DESC texPso = psoDesc; // inherit RT/DS/raster/blend
+      texPso.pRootSignature = m_rootSigTex.get();
+      texPso.VS = {g_pSceneTexVS, sizeof(g_pSceneTexVS)};
+      texPso.PS = {g_pSceneTexPS, sizeof(g_pSceneTexPS)};
+      texPso.InputLayout = {kLayoutTex, static_cast<UINT>(std::size(kLayoutTex))};
+      winrt::check_hresult(m_device->CreateGraphicsPipelineState(&texPso, IID_PPV_ARGS(m_psoTex.put())));
+
+      D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
+      srvHeapDesc.NumDescriptors = 1;
+      srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+      srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+      winrt::check_hresult(m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(m_srvHeap.put())));
+    }
+
     // --- Upload geometry via a temporary command list ---
     // (Caller runs us inside the frame's command list which is open at Initialize time;
     //  we re-open and execute a separate one to keep the geometry upload atomic.)
@@ -264,6 +329,25 @@ namespace Neuron::Render
   }
 
   // ---------------------------------------------------------------------------
+  // SetDiffuseTexture — store the texture and create its SRV in m_srvHeap so the
+  // textured pipeline can sample it. Ignored if invalid (keeps the untextured
+  // path), so a missing asset never breaks rendering.
+  // ---------------------------------------------------------------------------
+  void SceneRenderer::SetDiffuseTexture(TextureGpu tex)
+  {
+    if (!tex.valid() || !m_srvHeap || !m_device) return;
+    m_diffuse = std::move(tex);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Format = m_diffuse.format;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2D.MipLevels = m_diffuse.mipCount ? m_diffuse.mipCount : 1u;
+    m_device->CreateShaderResourceView(m_diffuse.resource.get(), &srv,
+                                       m_srvHeap->GetCPUDescriptorHandleForHeapStart());
+  }
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
   void SceneRenderer::Render(ID3D12GraphicsCommandList* cl, const float viewProjT[16], const SceneEntity* entities,
@@ -329,15 +413,37 @@ namespace Neuron::Render
       }
     }
 
-    // Record draw commands.
+    // Textured path: requires a real CMO mesh (carries UVs at offset 44), a bound
+    // diffuse texture, and the textured PSO/heap. Otherwise fall back to the
+    // emissive untextured path (placeholder cube or untextured mesh) so a missing
+    // asset never blanks the scene.
+    const bool textured = m_mesh.valid() && m_diffuse.valid() && m_psoTex && m_srvHeap;
+
+    cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    if (textured)
+    {
+      cl->SetGraphicsRootSignature(m_rootSigTex.get());
+      cl->SetPipelineState(m_psoTex.get());
+      cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
+      ID3D12DescriptorHeap* heaps[] = {m_srvHeap.get()};
+      cl->SetDescriptorHeaps(1, heaps);
+      cl->SetGraphicsRootDescriptorTable(1, m_srvHeap->GetGPUDescriptorHandleForHeapStart());
+
+      D3D12_VERTEX_BUFFER_VIEW vbViews[] = {m_mesh.vbView, m_instView[fi]};
+      cl->IASetVertexBuffers(0, 2, vbViews);
+      cl->IASetIndexBuffer(&m_mesh.ibView);
+      cl->DrawIndexedInstanced(m_mesh.indexCount, count, 0, 0, 0);
+      return;
+    }
+
+    // Untextured path. Use the loaded CMO mesh if present, else the placeholder
+    // cube. Both expose POSITION@0 / NORMAL@12; the differing stride comes from
+    // the vertex-buffer view, so the same PSO/input layout works for either.
     cl->SetGraphicsRootSignature(m_rootSig.get());
     cl->SetPipelineState(m_pso.get());
     cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
-    cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    // Use the loaded CMO mesh if present, else the placeholder cube. Both expose
-    // POSITION@0 / NORMAL@12; the differing stride comes from the vertex-buffer
-    // view, so the same PSO/input layout works for either.
     const bool useMesh = m_mesh.valid();
     const D3D12_VERTEX_BUFFER_VIEW geomVb = useMesh ? m_mesh.vbView : m_vbView;
     const D3D12_INDEX_BUFFER_VIEW geomIb = useMesh ? m_mesh.ibView : m_ibView;

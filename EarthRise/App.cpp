@@ -28,6 +28,7 @@
 #include "SceneRenderer.h"
 #include "CanvasRenderer.h"
 #include "CmoLoader.h"
+#include "DdsLoader.h"
 
 // NeuronClient
 #include "SessionImpl.h"
@@ -159,6 +160,24 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       if (mesh.valid())
         m_meshRadius = mesh.boundingRadius;
       m_scene.SetMesh(std::move(mesh));
+
+      // Bind the mesh's diffuse texture (fail-safe: SceneRenderer keeps the
+      // untextured emissive path if the DDS is missing or unparseable).
+      if (auto dds = LoadPackagedAsset(L"Assets\\Shapes\\Jumpgates\\dif_512.dds"); !dds.empty())
+      {
+        auto tex = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
+        char tbuf[128];
+        std::snprintf(tbuf, sizeof(tbuf),
+                      "[EarthRise] DDS load: %zu bytes, valid=%d %ux%u mips=%u fmt=%d\n",
+                      dds.size(), static_cast<int>(tex.valid()), tex.width, tex.height,
+                      tex.mipCount, static_cast<int>(tex.format));
+        OutputDebugStringA(tbuf);
+        m_scene.SetDiffuseTexture(std::move(tex));
+      }
+      else
+      {
+        OutputDebugStringA("[EarthRise] DDS load: diffuse not found (untextured mesh)\n");
+      }
     }
     else
     {
