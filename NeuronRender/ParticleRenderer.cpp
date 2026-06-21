@@ -245,7 +245,7 @@ namespace Neuron::Render
     m_emitters.assign(emitters, emitters + (count > 0 ? count : 0));
   }
 
-  void ParticleRenderer::Render(ID3D12GraphicsCommandList* cl, const float viewProjT[16],
+  void ParticleRenderer::Render(ID3D12GraphicsCommandList* cl, const DirectX::XMFLOAT4X4& viewProj,
                                 float rightX, float rightY, float rightZ,
                                 float upX, float upY, float upZ)
   {
@@ -291,7 +291,7 @@ namespace Neuron::Render
 
     cl->SetGraphicsRootSignature(m_rootSig.get());
     cl->SetPipelineState(m_pso.get());
-    cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
+    cl->SetGraphicsRoot32BitConstants(0, 16, &viewProj.m[0][0], 0);
     ID3D12DescriptorHeap* heaps[] = { m_srvHeap.get() };
     cl->SetDescriptorHeaps(1, heaps);
     cl->SetGraphicsRootDescriptorTable(1, m_srvHeap->GetGPUDescriptorHandleForHeapStart());

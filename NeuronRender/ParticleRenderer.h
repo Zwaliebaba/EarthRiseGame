@@ -9,7 +9,7 @@
 //
 // Per frame, inside the HDR scene pass (after SceneRenderer, before Resolve):
 //   particles.Update(dt, focusX, focusY, focusZ);
-//   particles.Render(cl, viewProjT, right, up);
+//   particles.Render(cl, viewProj, right, up);
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -18,6 +18,7 @@
 #include <d3d12.h>
 #include <winrt/base.h>
 
+#include <DirectXMath.h>
 #include <array>
 #include <cstdint>
 #include <vector>
@@ -54,9 +55,9 @@ namespace Neuron::Render
     // dust field; emitters spawn at their own render-space positions.
     void Update(float dt, float focusX, float focusY, float focusZ);
 
-    // Record the additive billboard draw. viewProjT: 16 floats (un-transposed
-    // view*proj, as SceneVS expects). right/up: camera basis (world space).
-    void Render(ID3D12GraphicsCommandList* cl, const float viewProjT[16],
+    // Record the additive billboard draw. viewProj: view*proj stored row-major
+    // (as SceneVS expects). right/up: camera basis (world space).
+    void Render(ID3D12GraphicsCommandList* cl, const DirectX::XMFLOAT4X4& viewProj,
                 float rightX, float rightY, float rightZ,
                 float upX, float upY, float upZ);
 

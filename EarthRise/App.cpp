@@ -1006,8 +1006,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // well cancels out and corrupts the transform — the old "thin box" bug.)
     XMMATRIX viewProj = view * proj;
 
-    float vpf[16];
-    XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(vpf), viewProj);
+    XMFLOAT4X4 vpf;
+    XMStoreFloat4x4(&vpf, viewProj);
 
     // Camera basis for billboard particles (world space).
     float camRight[3], camUp[3];
