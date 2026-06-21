@@ -324,6 +324,7 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | **XAudio2 (2.9)** (`xaudio2.h`) | NeuronAudio (client) | Low-level audio playback / voice graph (SDK; UWP-supported) |
 | **X3DAudio** (`x3daudio.h`) | NeuronAudio (client) | 3D positional audio (DSP settings for XAudio2 voices) |
 | MSBuild HLSL Compiler (`dxc`) | build-time | HLSL → embedded **SM6/DXIL** bytecode headers |
+| **WinPixEventRuntime** (`pix3.h`) | NeuronRender (client) | PIX3 GPU event/markers (§11.1, `PixMarkers.h`); MS component via NuGet. **Opt-in, Debug\|x64 only** — gated on the package being restored, so no PIX runtime ships in Release/Store builds. |
 | STL | all | 🔒 allowed |
 
 ---
