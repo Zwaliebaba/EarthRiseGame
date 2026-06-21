@@ -642,10 +642,11 @@ mesh shaders / ray tracing.
   "sun"** (the key, hard Lambert) lights the whole scene from one direction, so every object
   shows a consistent lit side and shadow side — the cue that reads as *natural* and gives
   depth (a camera-relative rig was tried first but looked flat/gamey: every object lit the
-  same relative to view). The shadow side is lifted by a **cool ambient + soft half-Lambert
-  fill** (never pitch black); the **warm-key / cool-fill colour split** is the core Darwinia
-  cue. A per-frame view-based **Fresnel rim** separates ships from the dark void and feeds the
-  bloom pass for a glowing edge. Shared HLSL (`Lighting.hlsli`, cbuffer `b1`); colours/
+  same relative to view). The shadow side is lifted by a **warm-neutral ambient + soft
+  half-Lambert fill** (never pitch black) — Darwinia's world is **warm against a near-black
+  void**, so the palette leans warm throughout rather than cool. A per-frame view-based **warm
+  Fresnel rim** separates ships from the void and feeds the bloom pass for a glowing edge.
+  Shared HLSL (`Lighting.hlsli`, cbuffer `b1`); colours/
   intensities are tunable. **Cast shadows** (shadow maps) and **IBL/ambient probes** (the
   modern fill replacement) are **deferred** future upgrades; ambient + fill suffices at launch.
 - **VFX — GPU-compute particles:** particle pools in structured buffers (UAV);

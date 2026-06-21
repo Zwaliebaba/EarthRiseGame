@@ -201,7 +201,7 @@ void DeviceResources::BeginFrame()
     // Clear render target and depth.
     const D3D12_CPU_DESCRIPTOR_HANDLE rtv = CurrentRtv();
     const D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
-    constexpr float kSkyColor[] = { 0.02f, 0.02f, 0.08f, 1.0f }; // dark space void
+    constexpr float kSkyColor[] = { 0.018f, 0.014f, 0.013f, 1.0f }; // near-black warm void
     m_cmdList->ClearRenderTargetView(rtv, kSkyColor, 0, nullptr);
     m_cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 

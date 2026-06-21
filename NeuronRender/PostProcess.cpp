@@ -169,9 +169,9 @@ namespace Neuron::Render
 
       D3D12_CLEAR_VALUE cv{};
       cv.Format = kHdrFormat;
-      cv.Color[0] = 0.02f;
-      cv.Color[1] = 0.02f;
-      cv.Color[2] = 0.08f;
+      cv.Color[0] = 0.018f;
+      cv.Color[1] = 0.014f;
+      cv.Color[2] = 0.013f;
       cv.Color[3] = 1.0f;
 
       if (FAILED(m_device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd,
@@ -243,7 +243,7 @@ namespace Neuron::Render
     const D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_dr->DsvHandle();
     cl->OMSetRenderTargets(1, &m_hdr.rtv, FALSE, &dsv);
 
-    constexpr float kSky[] = {0.02f, 0.02f, 0.08f, 1.0f};
+    constexpr float kSky[] = {0.018f, 0.014f, 0.013f, 1.0f}; // near-black warm void
     cl->ClearRenderTargetView(m_hdr.rtv, kSky, 0, nullptr);
     // Depth was already cleared by DeviceResources::BeginFrame; the scene draws
     // into the HDR target using the shared depth buffer.

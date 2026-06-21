@@ -388,11 +388,13 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       XMStoreFloat3(&v, keyDir);  lit.keyDir[0] = v.x;  lit.keyDir[1] = v.y;  lit.keyDir[2] = v.z;
       XMStoreFloat3(&v, fillDir); lit.fillDir[0] = v.x; lit.fillDir[1] = v.y; lit.fillDir[2] = v.z;
       XMStoreFloat3(&v, viewDir); lit.viewDir[0] = v.x; lit.viewDir[1] = v.y; lit.viewDir[2] = v.z;
-      // Warm key radiance (colour * intensity); cool fill + ambient.
-      lit.keyColor[0] = 1.20f; lit.keyColor[1] = 1.08f; lit.keyColor[2] = 0.92f;
-      lit.fillColor[0] = 0.22f; lit.fillColor[1] = 0.28f; lit.fillColor[2] = 0.40f;
-      lit.ambient[0] = 0.11f; lit.ambient[1] = 0.13f; lit.ambient[2] = 0.19f;
-      lit.rimColor[0] = 0.30f; lit.rimColor[1] = 0.42f; lit.rimColor[2] = 0.65f;
+      // Warm orange "sun" key; warm-neutral fill + ambient (no blue cast); warm
+      // rim. Darwinia's world is warm against a near-black void, so the fill and
+      // ambient lean warm-neutral rather than cool.
+      lit.keyColor[0] = 1.40f; lit.keyColor[1] = 1.08f; lit.keyColor[2] = 0.74f;
+      lit.fillColor[0] = 0.30f; lit.fillColor[1] = 0.26f; lit.fillColor[2] = 0.22f;
+      lit.ambient[0] = 0.13f; lit.ambient[1] = 0.105f; lit.ambient[2] = 0.085f;
+      lit.rimColor[0] = 0.60f; lit.rimColor[1] = 0.40f; lit.rimColor[2] = 0.20f;
       lit.rimPower = 2.5f;
       m_scene.SetLighting(lit);
     }

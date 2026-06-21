@@ -142,11 +142,11 @@ private:
     // is lit even if SetLighting is never called.
     Lighting m_light{
         { 0.45f, 0.55f, -0.70f }, 0.f,   // key dir (world: right/up/toward camera)
-        { 1.15f, 1.09f, 0.98f }, 0.f,    // warm key radiance
+        { 1.40f, 1.08f, 0.74f }, 0.f,    // warm sun radiance
         { -0.76f, 0.23f, -0.61f }, 0.f,  // fill dir (world: opposite side)
-        { 0.20f, 0.25f, 0.34f }, 0.f,    // cool fill radiance
-        { 0.10f, 0.12f, 0.18f }, 0.f,    // cool ambient floor
-        { 0.32f, 0.42f, 0.62f }, 3.0f,   // cool rim tint, Fresnel power
+        { 0.30f, 0.26f, 0.22f }, 0.f,    // warm-neutral fill radiance
+        { 0.13f, 0.105f, 0.085f }, 0.f,  // warm-dark ambient floor
+        { 0.60f, 0.40f, 0.20f }, 2.5f,   // warm rim tint, Fresnel power
         { 0.0f, 0.0f, -1.0f }, 0.f,      // view dir (rim), updated per frame
     };
 };
