@@ -17,10 +17,15 @@ struct PSIn
 
 float4 main(PSIn p) : SV_TARGET
 {
-    float3 L     = normalize(float3(0.3f, 1.0f, 0.5f));
-    float  ndotl = saturate(dot(normalize(p.normal), L));
+    float3 N      = normalize(p.normal);
+    float3 L      = normalize(float3(0.3f, 1.0f, 0.5f));
     float3 albedo = g_diffuse.Sample(g_samp, p.uv).rgb;
-    // Darwinia look: dark ambient + bright diffuse highlight.
-    float3 lit = albedo * (0.12f + 0.88f * ndotl);
+
+    // Half-Lambert wrap: a hard N.L leaves every camera-facing surface (most of
+    // what we see) at the ambient floor, so the textured hull reads near-black.
+    // Wrapping maps N.L from [-1,1] to [0,1] so angled surfaces still catch the
+    // key light, and a generous ambient keeps the dark side readable.
+    float wrap = dot(N, L) * 0.5f + 0.5f;
+    float3 lit = albedo * (0.35f + 0.9f * wrap);
     return float4(lit, 1.0f);
 }
