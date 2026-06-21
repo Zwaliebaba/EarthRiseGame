@@ -2,6 +2,7 @@
 
 #include "pch.h"
 #include "CmoLoader.h"
+#include "PixMarkers.h"
 
 #include "CmoParse.h"
 
@@ -85,11 +86,13 @@ namespace Neuron::Render
                                                    nullptr, IID_PPV_ARGS(cl.put())));
 
     MeshGpu out;
+    NEURON_PIX_BEGIN(cl.get(), PixColors::Upload, "CMO mesh upload");
     winrt::com_ptr<ID3D12Resource> vbUpload, ibUpload;
     out.vertexBuffer = createBuffer(device, cl.get(), vb.data(), vb.size(),
                                     D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, vbUpload);
     out.indexBuffer = createBuffer(device, cl.get(), ib.data(), ib.size(),
                                    D3D12_RESOURCE_STATE_INDEX_BUFFER, ibUpload);
+    NEURON_PIX_END(cl.get());
 
     winrt::check_hresult(cl->Close());
     ID3D12CommandList* lists[] = {cl.get()};

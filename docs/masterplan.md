@@ -817,9 +817,15 @@ integrated, ample for the cheap low-poly Darwinia look. No mesh shaders / ray tr
   handle DPI/orientation via `DisplayInformation`; on UWP **suspend**, call
   `IDXGIDevice3::Trim()` to release memory, rebuild on resume; on
   `DXGI_ERROR_DEVICE_REMOVED`, recreate the device (DRED logs the cause).
-- **Profiling:** **PIX markers** + a **timestamp query heap** feed the render
+- **Profiling:** **PIX3 markers** + a **timestamp query heap** feed the render
   frame-time perf gate (§16.3, App. B). Render runs on its own thread, decoupled from
-  the sim/snapshot cadence.
+  the sim/snapshot cadence. PIX events are implemented in `NeuronRender/PixMarkers.h`
+  (thin `NEURON_PIX_*` wrappers over `PIXScopedEvent`/`PIXBeginEvent`/`PIXEndEvent`/
+  `PIXSetMarker`); the command stream is annotated with a `Frame → Clear/Scene/Canvas/
+  Present` hierarchy plus resource-upload ranges, so captures read as a labelled pass
+  timeline. Markers are **opt-in and zero-cost when off** — `NEURON_USE_PIX` is gated on
+  the **WinPixEventRuntime** NuGet being restored and is enabled only in **Debug|x64**,
+  so Release/Store builds carry no PIX runtime dependency.
 
 ### 11.2 Camera & VFX / particles 🔒
 - **Camera (space-RTS):** right-handed perspective; **orbit / pan / zoom / follow**,
