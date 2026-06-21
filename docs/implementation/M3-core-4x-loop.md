@@ -69,6 +69,10 @@
 
 ## Current state (what M1a/M1b/M2 left us)
 
+> **Historical baseline** — what the sim looked like at the *start* of M3. For where things
+> stand **now**, see the [Status summary](#status-summary-this-branch) above: areas **A**, **C**,
+> and **D** have since landed (entities + economy rules, the harvest→build loop, and navigation).
+
 - **Sim is M1a-level.** `NeuronCore/sim/ServerUniverse.h` spawns **one mobile `Base` per
   player**, applies a single validated `MoveCommand` (`SetBaseVelocity`→`ClampSpeed`), and
   steps `MovementSystem` at the fixed 30 Hz. `Components.h` defines `Transform`/`Velocity`/
@@ -307,6 +311,11 @@
 ---
 
 ## Suggested order / dependency notes
+
+> **Progress (this branch):** ✅ **A** (entities & economy rules), **C** (harvest → return →
+> build loop), and **D** (warp + jump-beacon navigation) are done, server-authoritative and
+> testrunner-covered. **Remaining:** B (command intents), E (sensor/fog), F (NPC site),
+> G (client UI), H (bots/determinism).
 
 1. **A (entities & rules)** first — foundation for everything server-side.
 2. Then **B (intents)** — needed by C, D, F, G.

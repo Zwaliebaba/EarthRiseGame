@@ -32,7 +32,7 @@ All projects keep their source and header files **flat** in the project director
 - Universe/math: `UniversePos.h`, `GameMath.h`, `MathCommon.h`
 - Serialization: `BitStream.h`, `Serde.h`
 - Networking: protocol, sequencing, replay, reliability, packet codec, crypto/socket abstractions, secure channel, handshake, connection
-- Simulation/server: components, fixed-step accumulation, movement, snapshot, command, server universe/host
+- Simulation/server: components, fixed-step accumulation, movement, navigation (warp/jump), economy (harvest/build), universe-data (cooked regions/beacons/fields + nav/economy tuning), snapshot, command, server universe/host
 
 ### Client
 `NeuronClient/` (static library) holds the client library. Files are flat, grouped by VS Filters:
