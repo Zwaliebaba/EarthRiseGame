@@ -845,12 +845,14 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const float cyr = static_cast<float>(screenH) - 20.f * s - R;
     constexpr float kRange = 1800.f; // world metres mapped to the disc edge
 
-    DrawDisc(cxr, cyr, R, 40, 0.03f, 0.06f, 0.05f, 0.72f);          // dark disc
-    DrawRing(cxr, cyr, R, 48, 1.6f * s, 0.25f, 0.55f, 0.45f, 0.7f); // outer ring
-    DrawRing(cxr, cyr, R * 0.5f, 40, 1.f * s, 0.20f, 0.45f, 0.38f, 0.6f); // mid ring
-    // Cross-hairs.
-    m_canvas.DrawLine(cxr - R, cyr, cxr + R, cyr, 1.f * s, 0.18f, 0.38f, 0.32f, 0.5f);
-    m_canvas.DrawLine(cxr, cyr - R, cxr, cyr + R, 1.f * s, 0.18f, 0.38f, 0.32f, 0.5f);
+    DrawDisc(cxr, cyr, R, 44, 0.30f, 0.11f, 0.12f, 0.85f);           // dark-red disc (menu body tone)
+    // Rings + cross-hairs in the window's light grey-blue border colour.
+    constexpr float lr = 0.780f, lg = 0.839f, lb = 0.863f;
+    DrawRing(cxr, cyr, R, 48, 2.0f * s, lr, lg, lb, 0.90f);           // outer frame (bright)
+    DrawRing(cxr, cyr, R * 0.66f, 44, 1.0f * s, lr, lg, lb, 0.40f);   // mid range ring
+    DrawRing(cxr, cyr, R * 0.33f, 40, 1.0f * s, lr, lg, lb, 0.32f);   // inner range ring
+    m_canvas.DrawLine(cxr - R, cyr, cxr + R, cyr, 1.f * s, lr, lg, lb, 0.30f);
+    m_canvas.DrawLine(cxr, cyr - R, cxr, cyr + R, 1.f * s, lr, lg, lb, 0.30f);
 
     for (UINT i = 0; i < count; ++i)
     {
@@ -872,7 +874,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                           0.9f, 0.95f, 1.f, 1.f);
     const float ts = s * 0.8f;
     const char* lbl = er::ui::str("ui.radar");
-    m_canvas.DrawText(cxr - m_canvas.TextWidth(lbl, ts) * 0.5f, cyr - R - 16.f * s, lbl, 0.5f, 0.7f, 0.6f, ts);
+    m_canvas.DrawText(cxr - m_canvas.TextWidth(lbl, ts) * 0.5f, cyr - R - 16.f * s, lbl, 0.780f, 0.839f, 0.863f, ts);
   }
 
   void DrawUi(UINT screenW, UINT screenH)
