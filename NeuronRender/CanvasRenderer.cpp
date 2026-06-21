@@ -11,6 +11,7 @@
 
 #include <cstring>
 #include <algorithm>
+#include <cmath>
 
 namespace Neuron::Render
 {
@@ -219,6 +220,23 @@ void CanvasRenderer::DrawTriangle(float x0, float y0, float x1, float y1, float 
     Vtx(x0, y0, 0, 0, r, g, b, a);
     Vtx(x1, y1, 0, 0, r, g, b, a);
     Vtx(x2, y2, 0, 0, r, g, b, a);
+}
+
+void CanvasRenderer::DrawLine(float x0, float y0, float x1, float y1, float width,
+                              float r, float g, float b, float a)
+{
+    float dx = x1 - x0, dy = y1 - y0;
+    const float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 1e-4f) return;
+    const float hw = width * 0.5f;
+    const float nx = -dy / len * hw, ny = dx / len * hw; // perpendicular offset
+    Prim(Mode::Solid, 0);
+    Vtx(x0 + nx, y0 + ny, 0, 0, r, g, b, a);
+    Vtx(x1 + nx, y1 + ny, 0, 0, r, g, b, a);
+    Vtx(x1 - nx, y1 - ny, 0, 0, r, g, b, a);
+    Vtx(x0 + nx, y0 + ny, 0, 0, r, g, b, a);
+    Vtx(x1 - nx, y1 - ny, 0, 0, r, g, b, a);
+    Vtx(x0 - nx, y0 - ny, 0, 0, r, g, b, a);
 }
 
 void CanvasRenderer::DrawTexturedQuad(float x, float y, float w, float h,

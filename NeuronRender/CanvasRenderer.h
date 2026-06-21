@@ -54,6 +54,9 @@ public:
                        float br, float bg, float bb, float ba);
     void DrawTriangle(float x0, float y0, float x1, float y1, float x2, float y2,
                       float r, float g, float b, float a = 1.0f);
+    // Thick line as a quad (radar rings, brackets). 'width' is the full thickness.
+    void DrawLine(float x0, float y0, float x1, float y1, float width,
+                  float r, float g, float b, float a = 1.0f);
     // Textured quad: 'uv' is the source sub-rect in [0,1]; tint multiplies the texel.
     void DrawTexturedQuad(float x, float y, float w, float h,
                           float u0, float v0, float u1, float v1,

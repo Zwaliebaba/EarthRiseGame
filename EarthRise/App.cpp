@@ -15,6 +15,7 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -36,6 +37,9 @@
 
 // NeuronAudio
 #include "AudioEngine.h"
+
+// EarthRise client
+#include "StringTable.h"
 #include "CmoLoader.h"
 #include "DdsLoader.h"
 
@@ -124,6 +128,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   int   m_ddWin{-1}, m_ddRow{-1};        // open dropdown (window, row); -1 none
   int   m_ddHover{-1};                    // hovered popup row
   int   m_sel[Win_Count][16]{};           // dropdown selection per panel row
+  int   m_zorder[Win_Count]{ Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other }; // back→front
   float m_fps{0.f};
 
   // ---- network ----
@@ -429,13 +434,24 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   {
     switch (win)
     {
-      case Win_MainMenu: return "MAIN MENU";
-      case Win_Options:  return "OPTIONS";
-      case Win_Screen:   return "SCREEN OPTIONS";
-      case Win_Graphics: return "GRAPHICS OPTIONS";
-      case Win_Other:    return "OTHER OPTIONS";
+      case Win_MainMenu: return er::ui::str("ui.mainmenu.title");
+      case Win_Options:  return er::ui::str("ui.options.title");
+      case Win_Screen:   return er::ui::str("ui.screen.title");
+      case Win_Graphics: return er::ui::str("ui.graphics.title");
+      case Win_Other:    return er::ui::str("ui.other.title");
     }
     return "";
+  }
+
+  // Move a window to the front of the draw/pick order.
+  void RaiseWindow(int win)
+  {
+    int idx = -1;
+    for (int i = 0; i < Win_Count; ++i)
+      if (m_zorder[i] == win) { idx = i; break; }
+    if (idx < 0) return;
+    for (int i = idx; i < Win_Count - 1; ++i) m_zorder[i] = m_zorder[i + 1];
+    m_zorder[Win_Count - 1] = win;
   }
 
   // Button-list windows (Main Menu, Options). 'Close' is appended by the layout.
@@ -516,9 +532,6 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     (void)pw;
   }
 
-  // Front-to-back window order for input picking (topmost first).
-  static constexpr int kFront[Win_Count] = { Win_Other, Win_Graphics, Win_Screen, Win_Options, Win_MainMenu };
-
   // Per-frame UI interaction. Run before DrawUi; consumes pointer edges.
   void UpdateUi(UINT screenW, UINT screenH)
   {
@@ -559,10 +572,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       return;
     }
 
-    // Topmost window under the pointer consumes the interaction.
-    for (int oi = 0; oi < Win_Count; ++oi)
+    // Topmost window under the pointer consumes the interaction (front = last in
+    // z-order, so iterate it backwards).
+    for (int oi = Win_Count - 1; oi >= 0; --oi)
     {
-      const int win = kFront[oi];
+      const int win = m_zorder[oi];
       if (!m_winOpen[win]) continue;
 
       if (WinIsPanel(win))
@@ -572,6 +586,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         const auto L = Neuron::Render::Ui::BuildPanel(m_winX[win], m_winY[win], s, PanelWidth(s),
                                                       dd + (hasLabel ? 1 : 0), true);
         if (!L.window.Contains(m_ptrX, m_ptrY)) continue;
+        if (m_ptrPressed) RaiseWindow(win);
         for (int i = 0; i < dd; ++i)
           if (Neuron::Render::Ui::ValueBox(L.rows[i]).Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = i; break; }
         if (m_hoverItem < 0)
@@ -594,6 +609,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         const char* const* items; const int n = WinButtons(win, items);
         const auto L = Neuron::Render::Ui::BuildMainMenu(m_winX[win], m_winY[win], s, n);
         if (!L.window.Contains(m_ptrX, m_ptrY)) continue;
+        if (m_ptrPressed) RaiseWindow(win);
         for (int i = 0; i < L.count; ++i)
           if (L.buttons[i].Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = i; break; }
         if (m_ptrPressed)
@@ -616,17 +632,18 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   {
     PlayUi(m_clipClick);
     if (idx == count - 1) { m_winOpen[win] = false; return; } // trailing Close
+    auto open = [&](int w) { m_winOpen[w] = true; RaiseWindow(w); };
     if (win == Win_MainMenu)
     {
-      if (idx == 2) m_winOpen[Win_Options] = true;   // Options
-      else if (idx == 5) m_running = false;          // Quit EarthRise
+      if (idx == 2) open(Win_Options);              // Options
+      else if (idx == 5) m_running = false;         // Quit EarthRise
       else OutputDebugStringA("[EarthRise] menu item\n");
     }
     else if (win == Win_Options)
     {
-      if (idx == 0) m_winOpen[Win_Screen] = true;
-      else if (idx == 1) m_winOpen[Win_Graphics] = true;
-      else if (idx == 4) m_winOpen[Win_Other] = true;
+      if (idx == 0) open(Win_Screen);
+      else if (idx == 1) open(Win_Graphics);
+      else if (idx == 4) open(Win_Other);
       else OutputDebugStringA("[EarthRise] options item\n");
     }
   }
@@ -736,8 +753,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       else                     std::snprintf(buf, sizeof(buf), "%s   v0.17-dev", label);
       m_canvas.DrawText(lr.x, lr.y + (lr.h - m_canvas.TextHeight(ts)) * 0.5f, buf, 0.85f, 0.85f, 0.55f, ts);
     }
-    DrawButton(L.footerClose, "Close", s, m_hoverWin == win && m_hoverItem == -2, false);
-    DrawButton(L.footerApply, "Apply", s, m_hoverWin == win && m_hoverItem == -3, false);
+    DrawButton(L.footerClose, er::ui::str("ui.close"), s, m_hoverWin == win && m_hoverItem == -2, false);
+    DrawButton(L.footerApply, er::ui::str("ui.apply"), s, m_hoverWin == win && m_hoverItem == -3, false);
     DrawChromeFrame(L.window, L.titleBar, L.closeBox, WinTitle(win), s);
   }
 
@@ -777,16 +794,96 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     }
   }
 
+  // Radar IFF colour per entity kind.
+  static void RadarColor(uint8_t kind, float& r, float& g, float& b) noexcept
+  {
+    using K = Neuron::Sim::EntityKind;
+    switch (static_cast<K>(kind))
+    {
+      case K::Base:      r = 0.35f; g = 0.65f; b = 1.00f; break; // blue (self/allied)
+      case K::Ship:      r = 1.00f; g = 0.55f; b = 0.15f; break; // orange
+      case K::Station:   r = 0.40f; g = 0.85f; b = 0.90f; break; // cyan
+      case K::Structure: r = 0.65f; g = 0.45f; b = 1.00f; break; // violet
+      case K::Asteroid:  r = 0.55f; g = 0.50f; b = 0.42f; break; // rock
+      default:           r = 0.70f; g = 0.70f; b = 0.70f; break; // grey
+    }
+  }
+
+  void DrawDisc(float cx, float cy, float rad, int seg, float r, float g, float b, float a)
+  {
+    float px = cx + rad, py = cy;
+    for (int i = 1; i <= seg; ++i)
+    {
+      const float ang = 6.2831853f * static_cast<float>(i) / static_cast<float>(seg);
+      const float x = cx + rad * std::cos(ang), y = cy + rad * std::sin(ang);
+      m_canvas.DrawTriangle(cx, cy, px, py, x, y, r, g, b, a);
+      px = x; py = y;
+    }
+  }
+  void DrawRing(float cx, float cy, float rad, int seg, float width, float r, float g, float b, float a)
+  {
+    float px = cx + rad, py = cy;
+    for (int i = 1; i <= seg; ++i)
+    {
+      const float ang = 6.2831853f * static_cast<float>(i) / static_cast<float>(seg);
+      const float x = cx + rad * std::cos(ang), y = cy + rad * std::sin(ang);
+      m_canvas.DrawLine(px, py, x, y, width, r, g, b, a);
+      px = x; py = y;
+    }
+  }
+
+  // 2D radar disc (bottom-left): top-down blips of nearby entities relative to
+  // the camera focus, with range rings (masterplan §22).
+  void DrawRadar(UINT screenW, UINT screenH, const Neuron::Render::SceneEntity* ents, UINT count,
+                 float fx, float fy, float fz)
+  {
+    (void)screenW; (void)fy;
+    if (!m_uiReady) return;
+    const float s = MenuScale(screenH);
+    const float R = 95.f * s;
+    const float cxr = 20.f * s + R;
+    const float cyr = static_cast<float>(screenH) - 20.f * s - R;
+    constexpr float kRange = 1800.f; // world metres mapped to the disc edge
+
+    DrawDisc(cxr, cyr, R, 40, 0.03f, 0.06f, 0.05f, 0.72f);          // dark disc
+    DrawRing(cxr, cyr, R, 48, 1.6f * s, 0.25f, 0.55f, 0.45f, 0.7f); // outer ring
+    DrawRing(cxr, cyr, R * 0.5f, 40, 1.f * s, 0.20f, 0.45f, 0.38f, 0.6f); // mid ring
+    // Cross-hairs.
+    m_canvas.DrawLine(cxr - R, cyr, cxr + R, cyr, 1.f * s, 0.18f, 0.38f, 0.32f, 0.5f);
+    m_canvas.DrawLine(cxr, cyr - R, cxr, cyr + R, 1.f * s, 0.18f, 0.38f, 0.32f, 0.5f);
+
+    for (UINT i = 0; i < count; ++i)
+    {
+      const auto& e = ents[i];
+      const float dx = e.x - fx, dz = e.z - fz;
+      const float dist = std::sqrt(dx * dx + dz * dz);
+      if (dist > kRange) continue;
+      // World +X → radar right, world +Z → radar up.
+      const float bx = cxr + (dx / kRange) * R;
+      const float by = cyr - (dz / kRange) * R;
+      float r, g, b; RadarColor(e.kind, r, g, b);
+      const float bs = 3.0f * s;
+      m_canvas.DrawRect(bx - bs * 0.5f, by - bs * 0.5f, bs, bs, r, g, b, 1.f);
+    }
+
+    // Player marker (centre, pointing up).
+    const float m = 5.f * s;
+    m_canvas.DrawTriangle(cxr, cyr - m, cxr - m * 0.7f, cyr + m * 0.6f, cxr + m * 0.7f, cyr + m * 0.6f,
+                          0.9f, 0.95f, 1.f, 1.f);
+    const float ts = s * 0.8f;
+    const char* lbl = er::ui::str("ui.radar");
+    m_canvas.DrawText(cxr - m_canvas.TextWidth(lbl, ts) * 0.5f, cyr - R - 16.f * s, lbl, 0.5f, 0.7f, 0.6f, ts);
+  }
+
   void DrawUi(UINT screenW, UINT screenH)
   {
     (void)screenW;
     if (!m_uiReady) return;
     const float s = MenuScale(screenH);
-    // Back-to-front (Main Menu lowest, panels on top); popup last.
-    static constexpr int kBack[Win_Count] = { Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other };
+    // Draw back-to-front in z-order (front = last); popup last.
     for (int oi = 0; oi < Win_Count; ++oi)
     {
-      const int win = kBack[oi];
+      const int win = m_zorder[oi];
       if (!m_winOpen[win]) continue;
       if (WinIsPanel(win)) DrawPanelWindow(win, s);
       else                 DrawButtonListWindow(win, s);
@@ -1064,8 +1161,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                              ? "AUTH"
                              : "OFFLINE";
     const float hudS = (h > 0 ? static_cast<float>(h) : 1080.f) / 1080.f;
-    m_canvas.DrawText(12.f * hudS, 10.f * hudS, "EarthRise", 0.35f, 0.85f, 1.0f, hudS);
+    m_canvas.DrawText(12.f * hudS, 10.f * hudS, er::ui::str("app.title"), 0.35f, 0.85f, 1.0f, hudS);
     m_canvas.DrawText(12.f * hudS, 30.f * hudS, stateStr, 0.95f, 0.80f, 0.35f, hudS);
+
+    // 2D radar disc (under the windowed UI).
+    DrawRadar(w, h, entities, entCount, cx, cy, cz);
 
     // Darwinia windowed UI (Main Menu / Options / settings panels + dropdowns).
     DrawUi(w, h);
