@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | **A** Asset pipeline & tooling | 🟢 mostly done | DDS/CMO/font/WAV parser cores + `NeuronTools/testrunner` (35 cases, Linux CI); MSTest parser mirrors. Loaders done (see B/E). Remaining: the `*check`/cook tool executables, `datacook`/`datacheck` cue catalog. |
 | **B** Instanced CMO ships | 🟡 in progress | `DdsLoader`/`CmoLoader`→GPU done; `SceneRenderer` renders the real `Jumpgate.cmo` instanced (size-normalized, cube fallback), validated vs the real file. **Diffuse texturing done** — separate textured root sig/PSO (root constants b0 + SRV table t0 + static linear-wrap sampler s0), `SceneTexVS/PS`, binds `dif_512.dds` via `SetDiffuseTexture`; untextured emissive path kept as fail-safe. **Next: per-kind mesh mapping;** then GPU skinned-render path. |
-| **C** HDR + bloom + tone-map | ⚪ not started | scene still renders straight to the LDR backbuffer. |
+| **C** HDR + bloom + tone-map | 🟡 in progress | `PostProcess` renders the scene into an HDR (`R16G16B16A16_FLOAT`) target, then bright-pass→half-res→separable Gaussian blur (H+V ping-pong)→additive composite into the LDR back buffer. Full-screen-triangle passes, shared root sig (root constants + two SRV tables + static sampler). Fail-safe: falls back to direct LDR render if init fails. Composite is conservative (additive glow, base tone preserved) — **remaining: HDR tone-map curve + threshold/intensity tuning once seen in Windows.** *Rendered blind.* |
 | **D** GPU-compute particles | ⚪ not started | — |
 | **E** NeuronAudio | 🟡 in progress | library scaffolded — voice graph / 4 buses / `WavReader` / X3DAudio `Spatializer` / `VoicePool` / `AudioEngine` + `NeuronAudioTest` (14 projects). Device-free math Linux-verified. Remaining: buffer-queue streaming, cue catalog, `wavcheck`, Windows device smoke test. |
 | **F** Canvas HUD + radar | ⚪ not started | `CanvasRenderer` still draws placeholder blocks for text; **no font atlas yet** (so on-screen HUD/strings are unreadable). `FontAtlasLayout` UV math done. |
@@ -64,9 +64,10 @@
   `SceneRenderer` (draws **placeholder unit cubes** — bases 100 m blue, ships 20 m orange —
   via per-instance stream; header explicitly says *"M2 replaces the cube with real CMO mesh
   assets and adds bloom"*), and `CanvasRenderer`.
-- Shaders present: `SceneVS/PS`, `CanvasVS/PS` (HLSL → embedded DXIL, §12.4). `ScenePS`
-  notes *"M2 adds bloom pre-pass and additive particles."* Scene currently renders straight
-  to the LDR backbuffer — **no HDR target / bloom chain yet**.
+- Shaders present: `SceneVS/PS`, `SceneTexVS/PS`, `CanvasVS/PS`, plus the post chain
+  `FullscreenVS` + `BrightPassPS`/`BlurPS`/`CompositePS` (HLSL → embedded DXIL, §12.4). The
+  scene now renders into an HDR target and is composited (bloom) to the LDR back buffer via
+  `PostProcess` (area C).
 - `EarthRise/` UWP client exists (App shell, manifest, one DDS texture asset:
   `Assets/Textures/starbox_1024.dds`).
 - **`NeuronAudio/` does not exist** — net-new library this milestone (sibling to
@@ -185,14 +186,23 @@
 - **Goal:** the §11.1 pass graph — render scene to an HDR `R16G16B16A16_FLOAT` target,
   bright-pass → Gaussian ping-pong bloom (additive) → tone-map to LDR backbuffer.
 - **Masterplan refs:** §11 (bloom/additive), §11.1 (pass graph steps 1–4, no MSAA, barriers).
-- **Current state:** scene renders directly to LDR backbuffer; no HDR target, no post chain.
+- **Current state:** `PostProcess` implements the full pass graph (blind — pending Windows
+  visual confirmation). Scene renders into the HDR target; bloom + composite land in the back
+  buffer; HUD draws over the composite.
 - **Work:**
-  - [ ] Add HDR scene target + `D32_FLOAT` depth; render area B into it.
-  - [ ] Bright-pass extract → downsample → separable Gaussian blur (ping-pong) PSOs +
-        shaders (`shaders/` HLSL → embedded DXIL, §12.4).
-  - [ ] Tone-map + optional scanline/vignette/grain → LDR backbuffer.
-  - [ ] Manual resource-state barriers RT↔SRV, batched (§11.1). Canvas (area F) composites
-        after tone-map, no bloom.
+  - [x] Add HDR scene target (`R16G16B16A16_FLOAT`) sharing the `D32_FLOAT` depth; render
+        area B into it. `SceneRenderer::Initialize` takes the scene-colour format so its PSOs
+        match the HDR RT; `App` picks HDR when `PostProcess` initialized, else LDR (fail-safe).
+  - [x] Bright-pass extract (soft-knee luminance threshold) → half-res downsample →
+        separable 9-tap Gaussian blur (H then V, bloomA/bloomB ping-pong). Full-screen-triangle
+        `FullscreenVS` + `BrightPassPS`/`BlurPS` (`shaders/` HLSL → embedded DXIL).
+  - [x] Composite `CompositePS` — additive glow over the scene. **Conservative for now**
+        (base tone preserved, `saturate`); proper HDR tone-map curve (Reinhard/ACES) +
+        scanline/vignette/grain still **TODO** once tuned in Windows.
+  - [x] Manual resource-state barriers RT↔SRV per pass (single queue serialises GPU work, so
+        the shared targets need no per-frame duplication). Canvas (area F) composites after,
+        no bloom — drawn straight to the LDR back buffer.
+  - [ ] Threshold/intensity tuning + tone-map curve once seen on a real display.
 - **Tests (`NeuronRenderTest`):**
   - [ ] PSO build from embedded DXIL for each new pass (hash-cache hit path).
   - [ ] Render-target/barrier state machine unit logic (transitions valid, no

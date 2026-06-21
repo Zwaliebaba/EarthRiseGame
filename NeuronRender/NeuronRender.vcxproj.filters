@@ -8,6 +8,7 @@
     <ClCompile Include="SceneRenderer.cpp" />
     <ClCompile Include="DdsLoader.cpp" />
     <ClCompile Include="CmoLoader.cpp" />
+    <ClCompile Include="PostProcess.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CanvasRenderer.h" />
@@ -23,6 +24,7 @@
     <ClInclude Include="TextureGpu.h" />
     <ClInclude Include="MeshGpu.h" />
     <ClInclude Include="PixMarkers.h" />
+    <ClInclude Include="PostProcess.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Project Files">

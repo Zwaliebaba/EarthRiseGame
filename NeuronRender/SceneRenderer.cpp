@@ -119,7 +119,7 @@ namespace Neuron::Render
   // ---------------------------------------------------------------------------
   // Initialize
   // ---------------------------------------------------------------------------
-  bool SceneRenderer::Initialize(DeviceResources* dr)
+  bool SceneRenderer::Initialize(DeviceResources* dr, DXGI_FORMAT sceneColorFormat)
   {
     m_dr = dr;
     m_device = dr->Device();
@@ -164,7 +164,7 @@ namespace Neuron::Render
     psoDesc.InputLayout = {kLayout, static_cast<UINT>(std::size(kLayout))};
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
+    psoDesc.RTVFormats[0] = sceneColorFormat;
     psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleMask = 0xFFFFFFFFu;
     psoDesc.SampleDesc.Count = 1;
