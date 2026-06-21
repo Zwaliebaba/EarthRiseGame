@@ -23,12 +23,15 @@
 #include <winrt/Windows.ApplicationModel.h> // Package (install location)
 #include <winrt/Windows.Graphics.Display.h> // DisplayInformation (DPI scale)
 #include <winrt/Windows.Storage.h>          // StorageFolder::Path
+#include <winrt/Windows.UI.Core.h>          // CoreWindow, PointerEventArgs
+#include <winrt/Windows.UI.Input.h>         // PointerPoint / button state
 
 // NeuronRender
 #include "DeviceResources.h"
 #include "SceneRenderer.h"
 #include "CanvasRenderer.h"
 #include "PostProcess.h"
+#include "UiLayout.h"
 #include "CmoLoader.h"
 #include "DdsLoader.h"
 
@@ -92,6 +95,20 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   Neuron::Render::TextureGpu m_uiGrey; // InterfaceGrey — title bars, highlight beam
   Neuron::Render::TextureGpu m_uiRed;  // InterfaceRed  — buttons, window body
   bool m_uiReady{false};
+
+  // Pointer snapshot (physical pixels). *_pressed/_released are one-frame edges.
+  float m_ptrX{0.f}, m_ptrY{0.f};
+  bool  m_ptrDown{false}, m_ptrPressed{false}, m_ptrReleased{false};
+
+  // Main Menu window state.
+  static constexpr int kMenuItems = 6; // list items (Profile..Quit); Close is extra
+  bool  m_menuOpen{true};
+  bool  m_menuPlaced{false};
+  float m_menuX{0.f}, m_menuY{0.f};
+  bool  m_dragging{false};
+  float m_dragDX{0.f}, m_dragDY{0.f};
+  int   m_hoverBtn{-1}; // index into the layout's buttons (incl. Close)
+  int   m_pressBtn{-1};
 
   // ---- network ----
   Neuron::Net::CngCrypto m_crypto;
@@ -206,6 +223,37 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                               Windows::UI::Core::WindowSizeChangedEventArgs const&) { ApplyResize(); });
     window.KeyDown({this, &App::OnKeyDown});
     window.Closed({this, &App::OnClosed});
+    window.PointerMoved({this, &App::OnPointerMoved});
+    window.PointerPressed({this, &App::OnPointerPressed});
+    window.PointerReleased({this, &App::OnPointerReleased});
+  }
+
+  // ── Pointer input (physical pixels via the DPI scale) ─────────────────────
+  void OnPointerMoved(const Windows::UI::Core::CoreWindow&,
+                      const Windows::UI::Core::PointerEventArgs& e)
+  {
+    const auto p = e.CurrentPoint().Position();
+    m_ptrX = p.X * m_dpiScale;
+    m_ptrY = p.Y * m_dpiScale;
+    m_ptrDown = e.CurrentPoint().Properties().IsLeftButtonPressed();
+  }
+  void OnPointerPressed(const Windows::UI::Core::CoreWindow&,
+                        const Windows::UI::Core::PointerEventArgs& e)
+  {
+    const auto p = e.CurrentPoint().Position();
+    m_ptrX = p.X * m_dpiScale;
+    m_ptrY = p.Y * m_dpiScale;
+    m_ptrDown = true;
+    m_ptrPressed = true;
+  }
+  void OnPointerReleased(const Windows::UI::Core::CoreWindow&,
+                         const Windows::UI::Core::PointerEventArgs& e)
+  {
+    const auto p = e.CurrentPoint().Position();
+    m_ptrX = p.X * m_dpiScale;
+    m_ptrY = p.Y * m_dpiScale;
+    m_ptrDown = false;
+    m_ptrReleased = true;
   }
 
   // Logical DIP -> physical pixels for the swap chain.
@@ -285,105 +333,176 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     OutputDebugStringA(buf);
   }
 
-  // Draw one Darwinia-style skinned button, faithful to the source:
-  //   normal      = flat translucent dark-red panel + bevel, plain WHITE caption
-  //   highlighted = blue vertex gradient (title colours) + dark caption
-  void DrawButton(float x, float y, float w, float h, const char* caption, float s, bool selected)
+  static float MenuScale(UINT screenH) noexcept
+  {
+    return (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
+  }
+  static const char* MenuCaption(int i)
+  {
+    static const char* kItems[] = { "Profile", "Mods", "Options", "Visit Website",
+                                    "Play Tutorial", "Quit EarthRise" };
+    return (i >= 0 && i < kMenuItems) ? kItems[i] : "Close";
+  }
+
+  // Per-frame Main Menu interaction: hover, press/click on buttons, close box,
+  // and title-bar drag. Consumes the pointer edges. Run before DrawMainMenu.
+  void UpdateMenu(UINT screenW, UINT screenH)
+  {
+    const float s = MenuScale(screenH);
+    if (!m_menuPlaced)
+    {
+      Neuron::Render::Ui::CenterMainMenu(static_cast<float>(screenW), static_cast<float>(screenH),
+                                         s, kMenuItems, m_menuX, m_menuY);
+      m_menuPlaced = true;
+    }
+    if (!m_uiReady || !m_menuOpen)
+    {
+      m_ptrPressed = m_ptrReleased = false;
+      m_hoverBtn = m_pressBtn = -1;
+      return;
+    }
+
+    const auto L = Neuron::Render::Ui::BuildMainMenu(m_menuX, m_menuY, s, kMenuItems);
+
+    m_hoverBtn = -1;
+    for (int i = 0; i < L.count; ++i)
+      if (L.buttons[i].Contains(m_ptrX, m_ptrY)) { m_hoverBtn = i; break; }
+
+    if (m_ptrPressed)
+    {
+      if (L.closeBox.Contains(m_ptrX, m_ptrY))
+        m_menuOpen = false;
+      else if (m_hoverBtn >= 0)
+        m_pressBtn = m_hoverBtn;
+      else if (L.titleBar.Contains(m_ptrX, m_ptrY))
+      {
+        m_dragging = true;
+        m_dragDX = m_ptrX - m_menuX;
+        m_dragDY = m_ptrY - m_menuY;
+      }
+    }
+
+    if (m_dragging)
+    {
+      if (m_ptrDown)
+      {
+        m_menuX = m_ptrX - m_dragDX;
+        m_menuY = m_ptrY - m_dragDY;
+        const float maxX = static_cast<float>(screenW) - L.window.w;
+        const float maxY = static_cast<float>(screenH) - L.window.h;
+        m_menuX = m_menuX < 0 ? 0 : (m_menuX > maxX ? maxX : m_menuX);
+        m_menuY = m_menuY < 0 ? 0 : (m_menuY > maxY ? maxY : m_menuY);
+      }
+      else
+      {
+        m_dragging = false;
+      }
+    }
+
+    if (m_ptrReleased)
+    {
+      if (m_pressBtn >= 0 && L.buttons[m_pressBtn].Contains(m_ptrX, m_ptrY))
+        OnMenuAction(m_pressBtn, L.count);
+      m_pressBtn = -1;
+      m_dragging = false;
+    }
+
+    m_ptrPressed = m_ptrReleased = false;
+  }
+
+  void OnMenuAction(int idx, int count)
+  {
+    if (idx == count - 1) { m_menuOpen = false; return; }    // Close
+    if (idx == 5) { m_running = false; return; }             // Quit EarthRise
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "[EarthRise] menu: %s\n", MenuCaption(idx));
+    OutputDebugStringA(buf);
+  }
+
+  // Draw one Darwinia-style skinned button. highlighted (hover/selected) = blue
+  // vertex gradient + dark caption (brighter when pressed); else a flat
+  // translucent dark-red panel + bevel + plain white caption.
+  void DrawButton(const Neuron::Render::Ui::Rect& b, const char* caption, float s,
+                  bool highlighted, bool pressed)
   {
     const float ts = s * 1.0f;
     const float tw = m_canvas.TextWidth(caption, ts);
     const float th = m_canvas.TextHeight(ts);
-    const float cx = x + (w - tw) * 0.5f, cy = y + (h - th) * 0.5f;
+    const float cx = b.x + (b.w - tw) * 0.5f, cy = b.y + (b.h - th) * 0.5f;
 
-    if (selected)
+    if (highlighted)
     {
-      m_canvas.DrawVGradient(x, y, w, h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
+      if (pressed) // clicked: brighter (white → light blue)
+        m_canvas.DrawVGradient(b.x, b.y, b.w, b.h, 1.0f, 1.0f, 1.0f, 1.f, 0.635f, 0.749f, 0.816f, 1.f);
+      else
+        m_canvas.DrawVGradient(b.x, b.y, b.w, b.h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
       m_canvas.DrawText(cx + 1.f * s, cy + 1.f * s, caption, 0.f, 0.f, 0.f, ts); // shadow
       m_canvas.DrawText(cx, cy, caption, 0.12f, 0.14f, 0.18f, ts);               // dark caption
       return;
     }
 
-    // Flat translucent dark-red panel (107,37,39, a64) over the body gradient.
-    m_canvas.DrawRect(x, y, w, h, 0.420f, 0.145f, 0.153f, 0.25f);
-    // Bevel: top/left dark red (100,34,34), right/bottom near-black.
+    m_canvas.DrawRect(b.x, b.y, b.w, b.h, 0.420f, 0.145f, 0.153f, 0.25f); // dark-red panel
     const float px = (s > 1.f ? s : 1.f);
-    m_canvas.DrawRect(x, y, w, px, 0.392f, 0.133f, 0.133f, 0.78f);   // top
-    m_canvas.DrawRect(x, y, px, h, 0.392f, 0.133f, 0.133f, 0.78f);   // left
-    m_canvas.DrawRect(x + w - px, y, px, h, 0.10f, 0.f, 0.f, 1.f);   // right
-    m_canvas.DrawRect(x, y + h - px, w, px, 0.10f, 0.f, 0.f, 1.f);   // bottom
-    // Plain opaque white caption — crisp and readable (the source's look).
-    m_canvas.DrawText(cx, cy, caption, 1.f, 1.f, 1.f, ts);
+    m_canvas.DrawRect(b.x, b.y, b.w, px, 0.392f, 0.133f, 0.133f, 0.78f);   // top
+    m_canvas.DrawRect(b.x, b.y, px, b.h, 0.392f, 0.133f, 0.133f, 0.78f);   // left
+    m_canvas.DrawRect(b.x + b.w - px, b.y, px, b.h, 0.10f, 0.f, 0.f, 1.f); // right
+    m_canvas.DrawRect(b.x, b.y + b.h - px, b.w, px, 0.10f, 0.f, 0.f, 1.f); // bottom
+    m_canvas.DrawText(cx, cy, caption, 1.f, 1.f, 1.f, ts);                 // white caption
   }
 
-  // Draw the Main Menu window, faithful to Darwinia's Window render: a full-height
-  // bright interface_red body (V across the whole window), a blue vertex-gradient
-  // title bar, a light-blue border frame + dark outer loop, and a shadowed centred
-  // title. Static for now (MU-1 visual); interactivity + the toolkit land in MU-2/3.
+  // Draw the Main Menu window (faithful to Darwinia's Window render), using the
+  // shared layout + current hover/press interaction state.
   void DrawMainMenu(UINT screenW, UINT screenH)
   {
-    if (!m_uiReady) return;
-    const float s = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f; // HUD scale
+    (void)screenW;
+    if (!m_uiReady || !m_menuOpen) return;
+    const float s = MenuScale(screenH);
+    const auto L = Neuron::Render::Ui::BuildMainMenu(m_menuX, m_menuY, s, kMenuItems);
+    const auto& W = L.window;
 
-    const float titleH = 28.f * s;
-    const float pad = 14.f * s;
-    const float btnH = 34.f * s;
-    const float gap = 9.f * s;
-    const float w = 300.f * s;
+    // 1) Body fill: interface_red, full bright, V across the whole window.
+    m_canvas.DrawTexturedQuad(W.x, W.y, W.w, W.h, 0.f, 0.f, 1.f, 1.f, m_uiRed, 1.f, 1.f, 1.f, 0.96f);
 
-    static const char* kItems[] = { "Profile", "Mods", "Options", "Visit Website",
-                                    "Play Tutorial", "Quit EarthRise" };
-    const int n = static_cast<int>(std::size(kItems));
-    const float bodyH = pad + n * (btnH + gap) + gap + btnH + pad; // n buttons + gap + Close
-    const float totalH = titleH + bodyH;
+    // 2) Title bar: blue vertex gradient (199,214,220 → 112,141,168).
+    m_canvas.DrawVGradient(L.titleBar.x, L.titleBar.y, L.titleBar.w, L.titleBar.h,
+                           0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
 
-    const float gx = (static_cast<float>(screenW) - w) * 0.5f;
-    const float gy = static_cast<float>(screenH) * 0.5f - totalH * 0.5f - 40.f * s;
-
-    // 1) Body fill: interface_red, full white tint, V across the whole window
-    //    height (dark top/bottom, bright middle), slightly translucent.
-    m_canvas.DrawTexturedQuad(gx, gy, w, totalH, 0.f, 0.f, 1.f, 1.f, m_uiRed, 1.f, 1.f, 1.f, 0.96f);
-
-    // 2) Title bar: smooth blue vertex gradient (199,214,220 → 112,141,168).
-    m_canvas.DrawVGradient(gx, gy, w, titleH,
-                           0.780f, 0.839f, 0.863f, 1.f,
-                           0.439f, 0.553f, 0.659f, 1.f);
-
-    // 3) Buttons (inside the body, below the title bar).
-    float by = gy + titleH + pad;
-    for (int i = 0; i < n; ++i)
+    // 3) Buttons.
+    for (int i = 0; i < L.count; ++i)
     {
-      DrawButton(gx + pad, by, w - 2 * pad, btnH, kItems[i], s, i == 2 /*Options highlighted*/);
-      by += btnH + gap;
+      const bool hover = (i == m_hoverBtn);
+      const bool pressed = hover && (i == m_pressBtn) && m_ptrDown;
+      DrawButton(L.buttons[i], MenuCaption(i), s, hover, pressed);
     }
-    by += gap;
-    DrawButton(gx + pad, by, w - 2 * pad, btnH, "Close", s, false);
 
     // 4) Border frame: 2px light-blue edges + 1px dark-blue outer loop.
     const float bw = 2.f * s;
-    constexpr float lbR = 0.780f, lbG = 0.839f, lbB = 0.863f;     // 199,214,220
-    m_canvas.DrawRect(gx, gy, w, bw, lbR, lbG, lbB, 1.f);             // top
-    m_canvas.DrawRect(gx, gy + totalH - bw, w, bw, lbR, lbG, lbB, 1.f); // bottom
-    m_canvas.DrawRect(gx, gy, bw, totalH, lbR, lbG, lbB, 1.f);        // left
-    m_canvas.DrawRect(gx + w - bw, gy, bw, totalH, lbR, lbG, lbB, 1.f); // right
-    constexpr float dbR = 0.165f, dbG = 0.220f, dbB = 0.322f;     // 42,56,82 outer
+    constexpr float lbR = 0.780f, lbG = 0.839f, lbB = 0.863f;
+    m_canvas.DrawRect(W.x, W.y, W.w, bw, lbR, lbG, lbB, 1.f);
+    m_canvas.DrawRect(W.x, W.y + W.h - bw, W.w, bw, lbR, lbG, lbB, 1.f);
+    m_canvas.DrawRect(W.x, W.y, bw, W.h, lbR, lbG, lbB, 1.f);
+    m_canvas.DrawRect(W.x + W.w - bw, W.y, bw, W.h, lbR, lbG, lbB, 1.f);
+    constexpr float dbR = 0.165f, dbG = 0.220f, dbB = 0.322f;
     const float o = 2.f * s;
-    m_canvas.DrawRect(gx - o, gy - o, w + 2 * o, s, dbR, dbG, dbB, 1.f);
-    m_canvas.DrawRect(gx - o, gy + totalH + o - s, w + 2 * o, s, dbR, dbG, dbB, 1.f);
-    m_canvas.DrawRect(gx - o, gy - o, s, totalH + 2 * o, dbR, dbG, dbB, 1.f);
-    m_canvas.DrawRect(gx + w + o - s, gy - o, s, totalH + 2 * o, dbR, dbG, dbB, 1.f);
+    m_canvas.DrawRect(W.x - o, W.y - o, W.w + 2 * o, s, dbR, dbG, dbB, 1.f);
+    m_canvas.DrawRect(W.x - o, W.y + W.h + o - s, W.w + 2 * o, s, dbR, dbG, dbB, 1.f);
+    m_canvas.DrawRect(W.x - o, W.y - o, s, W.h + 2 * o, dbR, dbG, dbB, 1.f);
+    m_canvas.DrawRect(W.x + W.w + o - s, W.y - o, s, W.h + 2 * o, dbR, dbG, dbB, 1.f);
 
-    // 5) Title: centred, with a dark drop shadow for readability (warm-pale text).
+    // 5) Title: centred, with a dark drop shadow.
     const float tts = s * 0.9f;
     const char* title = "MAIN MENU";
-    const float tx = gx + (w - m_canvas.TextWidth(title, tts)) * 0.5f;
-    const float ty = gy + (titleH - m_canvas.TextHeight(tts)) * 0.5f;
-    m_canvas.DrawText(tx + 1.5f * s, ty + 1.5f * s, title, 0.f, 0.f, 0.f, tts);   // shadow
-    m_canvas.DrawText(tx, ty, title, 0.13f, 0.16f, 0.22f, tts);                    // dark title
+    const float tx = L.titleBar.x + (L.titleBar.w - m_canvas.TextWidth(title, tts)) * 0.5f;
+    const float ty = L.titleBar.y + (L.titleBar.h - m_canvas.TextHeight(tts)) * 0.5f;
+    m_canvas.DrawText(tx + 1.5f * s, ty + 1.5f * s, title, 0.f, 0.f, 0.f, tts);
+    m_canvas.DrawText(tx, ty, title, 0.13f, 0.16f, 0.22f, tts);
 
-    // 6) Close box (top-right) — small light-blue square.
-    const float cb = 14.f * s;
-    m_canvas.DrawVGradient(gx + w - cb - 7.f * s, gy + (titleH - cb) * 0.5f, cb, cb,
-                           0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
+    // 6) Close box (top-right) — brighter when hovered.
+    const auto& C = L.closeBox;
+    const bool closeHover = C.Contains(m_ptrX, m_ptrY);
+    m_canvas.DrawVGradient(C.x, C.y, C.w, C.h,
+                           closeHover ? 1.0f : 0.780f, closeHover ? 1.0f : 0.839f, closeHover ? 1.0f : 0.863f, 1.f,
+                           0.439f, 0.553f, 0.659f, 1.f);
   }
 
   // Load every ShapeCatalog entry into the renderer: the CMO mesh plus its
@@ -594,7 +713,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_scene.Render(cl, vpf, entities, entCount);
     }
 
-    // HUD.
+    // HUD + menu. Menu interaction (hover/press/drag) runs before drawing.
+    UpdateMenu(w, h);
     m_canvas.Reset();
     const Neuron::Client::SessionState st = m_session->GetState();
     const char* stateStr = (st == Neuron::Client::SessionState::Connected)
@@ -619,8 +739,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   // ── Input handlers ───────────────────────────────────────────────────────
   void OnKeyDown(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::KeyEventArgs& args)
   {
+    // Esc toggles the Main Menu; Quit EarthRise (or the window Close) exits.
     if (args.VirtualKey() == Windows::System::VirtualKey::Escape)
-      m_running = false;
+      m_menuOpen = !m_menuOpen;
   }
 
   void OnClosed(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::CoreWindowEventArgs&)

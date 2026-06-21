@@ -25,6 +25,7 @@
     <ClInclude Include="MeshGpu.h" />
     <ClInclude Include="PixMarkers.h" />
     <ClInclude Include="PostProcess.h" />
+    <ClInclude Include="UiLayout.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Project Files">

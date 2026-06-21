@@ -13,7 +13,7 @@ CXX ?= g++
 CXXFLAGS ?= -std=c++23 -Wall -Wextra -Wpedantic -O2 -g -I../../NeuronCore -Idxmath_shim
 
 SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParseTests.cpp \
-        CmoAnimationTests.cpp ShapeCatalogTests.cpp
+        CmoAnimationTests.cpp ShapeCatalogTests.cpp UiLayoutTests.cpp
 BIN := testrunner
 
 .PHONY: all build run clean
