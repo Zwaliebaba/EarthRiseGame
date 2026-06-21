@@ -5,11 +5,12 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <Windows.h>
-#include <d3d12.h>
+#include <dxgiformat.h>
 #include <winrt/base.h>
 
 #include <cstdint>
+
+struct ID3D12Resource;
 
 namespace Neuron::Render
 {

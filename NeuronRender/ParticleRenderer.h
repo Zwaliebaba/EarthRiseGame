@@ -15,7 +15,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
-#include <d3d12.h>
+#include <dxgiformat.h>
 #include <winrt/base.h>
 
 #include <DirectXMath.h>
@@ -23,11 +23,20 @@
 #include <cstdint>
 #include <vector>
 
-#include "DeviceResources.h"
 #include "TextureGpu.h"
+
+struct ID3D12DescriptorHeap;
+struct ID3D12Device;
+struct ID3D12GraphicsCommandList;
+struct ID3D12PipelineState;
+struct ID3D12Resource;
+struct ID3D12RootSignature;
 
 namespace Neuron::Render
 {
+
+class DeviceResources;
+
   class ParticleRenderer
   {
   public:
@@ -65,6 +74,7 @@ namespace Neuron::Render
                 float rightX, float rightY, float rightZ,
                 float upX, float upY, float upZ);
 
+    static constexpr UINT kFrameCount = 2;
     static constexpr UINT kMaxParticles = 1500;      // ambient dust field
     static constexpr UINT kMaxEmitParticles = 1024;  // emitter-spawned glow
     static constexpr UINT kMaxVerts = (kMaxParticles + kMaxEmitParticles) * 6;
@@ -95,8 +105,8 @@ namespace Neuron::Render
     TextureGpu                          m_tex;
 
     // One CPU-mapped vertex buffer per in-flight frame (avoid GPU races).
-    std::array<winrt::com_ptr<ID3D12Resource>, DeviceResources::kFrameCount> m_vb;
-    std::array<Vertex*, DeviceResources::kFrameCount>                        m_vbPtr{};
+    std::array<winrt::com_ptr<ID3D12Resource>, kFrameCount> m_vb;
+    std::array<Vertex*, kFrameCount>                        m_vbPtr{};
 
     std::vector<Particle> m_particles;
     float m_fx{ 0.f }, m_fy{ 0.f }, m_fz{ 0.f }; // field centre (camera focus)
