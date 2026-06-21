@@ -43,6 +43,11 @@ public:
 
     [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE DsvHandle() const noexcept;
 
+    // RTV of the back buffer for the in-progress frame (valid between
+    // BeginFrame and EndFrame). Used by the post-process composite to write the
+    // tone-mapped result into the swap-chain buffer.
+    [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE RtvHandle() const noexcept { return CurrentRtv(); }
+
     [[nodiscard]] UINT Width()  const noexcept { return m_width; }
     [[nodiscard]] UINT Height() const noexcept { return m_height; }
 

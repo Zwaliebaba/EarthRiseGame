@@ -27,6 +27,7 @@
 #include "DeviceResources.h"
 #include "SceneRenderer.h"
 #include "CanvasRenderer.h"
+#include "PostProcess.h"
 #include "CmoLoader.h"
 #include "DdsLoader.h"
 
@@ -82,6 +83,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   Neuron::Render::DeviceResources m_dr;
   Neuron::Render::SceneRenderer m_scene;
   Neuron::Render::CanvasRenderer m_canvas;
+  Neuron::Render::PostProcess m_post;
+  bool m_bloom{false}; // true once PostProcess initialized (HDR path active)
 
   // ---- network ----
   Neuron::Net::CngCrypto m_crypto;
@@ -134,7 +137,17 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     const auto initStart = std::chrono::steady_clock::now();
     check_bool(m_dr.Initialize(winrt::get_unknown(window), w, h));
-    check_bool(m_scene.Initialize(&m_dr));
+
+    // Post-process (HDR + bloom). If it initializes, the scene renders into the
+    // HDR target and is composited to the back buffer; otherwise we fall back to
+    // rendering the scene straight to the LDR back buffer (no glow, no crash).
+    m_bloom = m_post.Initialize(&m_dr);
+    const DXGI_FORMAT sceneFmt = m_bloom ? Neuron::Render::PostProcess::kHdrFormat
+                                         : DXGI_FORMAT_B8G8R8A8_UNORM;
+    OutputDebugStringA(m_bloom ? "[EarthRise] PostProcess: HDR+bloom enabled\n"
+                               : "[EarthRise] PostProcess: init failed (LDR direct path)\n");
+
+    check_bool(m_scene.Initialize(&m_dr, sceneFmt));
     check_bool(m_canvas.Initialize(&m_dr));
     {
       const long long initMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -204,6 +217,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       return;
     const auto b = m_window.Bounds();
     m_dr.Resize(PhysPx(b.Width), PhysPx(b.Height));
+    if (m_bloom)
+      m_post.Resize(); // recreate HDR/bloom targets at the new back-buffer size
   }
 
   void Load(const hstring&) {}
@@ -239,6 +254,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   void Uninitialize()
   {
     m_canvas.Uninitialize();
+    m_post.Uninitialize();
     if (m_session)
       m_session->Disconnect(); // best-effort graceful notice while the socket is alive
     m_session.reset();
@@ -372,7 +388,18 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_dr.BeginFrame();
     auto* cl = m_dr.CmdList();
 
-    m_scene.Render(cl, vpf, entities, entCount);
+    // 3D scene. With bloom, render into the HDR target then composite to the
+    // back buffer; otherwise draw straight to the (already-bound) back buffer.
+    if (m_bloom)
+    {
+      m_post.BeginScene(cl);
+      m_scene.Render(cl, vpf, entities, entCount);
+      m_post.Resolve(cl);
+    }
+    else
+    {
+      m_scene.Render(cl, vpf, entities, entCount);
+    }
 
     // HUD.
     m_canvas.Reset();

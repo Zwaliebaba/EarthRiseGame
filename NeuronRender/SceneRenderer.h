@@ -40,7 +40,12 @@ struct SceneEntity
 class SceneRenderer
 {
 public:
-    bool Initialize(DeviceResources* dr);
+    // sceneColorFormat is the render-target format the scene draws into. With
+    // post-processing it is the HDR buffer (R16G16B16A16_FLOAT); without it, the
+    // LDR swap-chain format. Both PSOs are created against this format, so it
+    // must match the bound render target at draw time.
+    bool Initialize(DeviceResources* dr,
+                    DXGI_FORMAT sceneColorFormat = DXGI_FORMAT_R16G16B16A16_FLOAT);
     void Uninitialize();
 
     // Record draw commands for 'count' entities into 'cl'.
