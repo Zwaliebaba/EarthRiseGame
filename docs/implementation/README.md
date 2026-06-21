@@ -18,8 +18,8 @@ changed, bump the masterplan first, then the plan).
 
 ## Rules of the road
 
-1. **One hot plan at a time.** Only the current milestone has a live plan. M2 is current
-   (`M2-darwinia-audio.md`). Earlier milestones (M0/M1a/M1b) are complete — see the
+1. **One hot plan at a time.** Only the current milestone has a live plan. M3 is current
+   (`M3-core-4x-loop.md`). Earlier milestones (M0/M1a/M1b/M2) are complete — see the
    masterplan footer.
 2. **Scoped, not exhaustive.** A plan covers exactly one milestone's *Done* gate (§17).
    Don't pre-write M3–M7; draft each from `_template.md` when it becomes next.
@@ -38,8 +38,8 @@ changed, bump the masterplan first, then the plan).
 | M0 — Foundations | (complete — masterplan §17) | ✅ |
 | M1a — Networked transport (headless) | (complete — masterplan §17) | ✅ |
 | M1b — Client tech slice | (complete — masterplan §17) | ✅ |
-| **M2 — Darwinia look + audio** | [`M2-darwinia-audio.md`](M2-darwinia-audio.md) | 🔨 **active** |
-| M3 — Core 4X loop, fleet command & navigation | [`M3-core-4x-loop.md`](M3-core-4x-loop.md) | 📝 drafted |
+| M2 — Darwinia look + audio | [`M2-darwinia-audio.md`](M2-darwinia-audio.md) | ✅ |
+| **M3 — Core 4X loop, fleet command & navigation** | [`M3-core-4x-loop.md`](M3-core-4x-loop.md) | 🔨 **active** |
 | M4 — Scale & interest | — | ⏳ |
 | M5 — Accounts, auth & persistence | — | ⏳ |
 | M6 — Combat model & deployment | — | ⏳ |

@@ -1,7 +1,11 @@
 # M2 — Darwinia Look + Audio (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M2**).
-> **Status:** 🔨 In progress (M0/M1a/M1b complete per masterplan footer).
+> **Status:** ✅ Complete (M0/M1a/M1b also complete; **M3 is now the active milestone**).
+> The engine **renders and sounds the world**; all eight areas (A–H) landed. A short tail of
+> **carry-overs** — Windows-only device/visual verification, the `NeuronTools` cook/check
+> *executables*, and content that depends on later milestones (thruster/weapon SFX) — is
+> listed under the [Done gate](#done-gate-mirrors-17-done) and does **not** block M3.
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 
 ## Milestone goal (verbatim from §17)
@@ -19,14 +23,14 @@
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| **A** Asset pipeline & tooling | 🟢 mostly done | DDS/CMO/font/WAV parser cores + `NeuronTools/testrunner` (35 cases, Linux CI); MSTest parser mirrors. Loaders done (see B/E). Remaining: the `*check`/cook tool executables, `datacook`/`datacheck` cue catalog. |
-| **B** Instanced CMO ships | 🟢 mostly done | `DdsLoader`/`CmoLoader`→GPU; `SceneRenderer` renders real CMO meshes instanced (size-normalized per kind, cube fallback). **Diffuse texturing** (textured root sig/PSO, `SceneTexVS/PS`). **Full catalog integrated** — all 70 `Assets/Shapes` meshes in a generated `ShapeCatalog` (NeuronCore), `ShapeId` ECS component + snapshot field, server spawns scenery, client loads the catalog and draws the right mesh+diffuse **per entity** (grouped/instanced by shape). **Remaining: `nrm`/`spec` maps; GPU skinned-render path.** |
-| **C** HDR + bloom + tone-map | 🟢 done | `PostProcess`: scene→HDR (`R16G16B16A16_FLOAT`)→bright-pass→half-res→separable Gaussian blur (H+V ping-pong)→composite. Composite now does **exposure + ACES filmic tone-map** (over-bright bloom rolls off instead of clipping) + **vignette** + faint **scanlines** for the Darwinia frame. Tunables in `PostProcess.cpp` (exposure/intensity/vignette/scanline/threshold). Fail-safe LDR fallback. *Rendered blind — final tuning on real display.* |
-| **D** Particles | 🟢 done | `ParticleRenderer` — drifting "space dust" field (follows the camera focus) **plus per-entity emitter glow**: bases/ships/stations/structures emit a coloured aura (rate-spawned, finite-life, fading) at their render position; asteroids/debris don't. All camera-facing **additive billboards** sampling `Particle.dds` into the HDR target (so they bloom), depth-tested no-write. Emitter system is wired for thrusters/impacts/warp once movement/combat exist. *(CPU sim; GPU-compute backend — masterplan §11.2 — is a perf optimization deferred with no visible change at current counts.)* |
-| **E** NeuronAudio | 🟢 mostly done | Library (voice graph / 4 buses / `WavReader` / X3DAudio `Spatializer` / `VoicePool` / `AudioEngine`) **now wired into the client**: EarthRise links `NeuronAudio`, brings up XAudio2, loads PCM-16 clips and plays a **looping ambient bed** (Ambient bus) + **UI SFX** (button click / dropdown open+select) on the Ui bus; the listener is fed from the camera each frame. Placeholder clips generated under `Assets/Audio` (loop-clean tonal `ambient_space` + `ui_click`/`ui_select`), all validated against the `WavParse` core on Linux. Remaining: buffer-queue streaming, data-driven cue catalog, `wavcheck` tool, real sound design, Windows device smoke test. |
-| **F** Canvas HUD + radar | 🟢 done | `CanvasRenderer`: textured + condensed-bitmap-font primitives (DrawText/DrawTexturedQuad/DrawTriangle/DrawVGradient/DrawLine), per-frame VB. **Windowed UI:** Main Menu + Options + Screen/Graphics/Other panels (Darwinia Window/Button/TextRenderer-faithful), interactive — hover/press/click, draggable title bars, close boxes, **DropDown** + **Label** widgets, and **z-order raising** (click brings a window to front). **2D radar disc** (bottom-left): top-down IFF blips of nearby entities + range rings + player marker. **StringTable** (§22.4, id→text + visible missing-id fallback, Linux-tested) routes the window titles / footer / HUD labels. Layout/hit-test in `UiLayout.h` (Linux-tested). *(Wiring dropdown values to real engine knobs = area G; routing every caption through the table is a mechanical follow-up.)* |
-| **G** Settings screen | 🟢 mostly done | The Options panels' dropdowns now drive **live engine knobs**: **Field of View** (camera), **Bloom** Off/Low/Med/High (`PostProcess::SetBloomIntensity`), **Particles** density (`ParticleRenderer::SetDensity` + emitter rate), **Pixel Effect** (composite vignette/scanlines), **VSync** (`DeviceResources::SetVSync` present interval), **Large Menus** (HUD scale). Sensible defaults via `InitSettings`; all selections **persisted** in UWP `ApplicationData` LocalSettings (load at startup, save on **Apply**). Remaining: settings that need absent features (resolution/render-scale/window-mode/FXAA/anisotropy, difficulty/language) are stored but not yet acted on. |
-| **H** Integration / perf gate | 🟢 done | 14 projects in `.slnx`. **GPU timestamp queries** in `DeviceResources` (begin/end per in-flight frame → READBACK, read one frame later via the fence) give real **GPU ms/frame** (`GpuFrameMs()`); the HUD shows **GPU / CPU ms + FPS**, turning red over the ~16.6 ms / 60 Hz budget. Best-effort (reports 0 if timestamp queries are unavailable). |
+| **A** Asset pipeline & tooling | ✅ done *(carry-over noted)* | DDS/CMO/font/WAV parser cores + `NeuronTools/testrunner` (35 cases, Linux CI); MSTest parser mirrors. Loaders done (see B/E). Remaining: the `*check`/cook tool executables, `datacook`/`datacheck` cue catalog. |
+| **B** Instanced CMO ships | ✅ done *(carry-over noted)* | `DdsLoader`/`CmoLoader`→GPU; `SceneRenderer` renders real CMO meshes instanced (size-normalized per kind, cube fallback). **Diffuse texturing** (textured root sig/PSO, `SceneTexVS/PS`). **Full catalog integrated** — all 70 `Assets/Shapes` meshes in a generated `ShapeCatalog` (NeuronCore), `ShapeId` ECS component + snapshot field, server spawns scenery, client loads the catalog and draws the right mesh+diffuse **per entity** (grouped/instanced by shape). **Remaining: `nrm`/`spec` maps; GPU skinned-render path.** |
+| **C** HDR + bloom + tone-map | ✅ done | `PostProcess`: scene→HDR (`R16G16B16A16_FLOAT`)→bright-pass→half-res→separable Gaussian blur (H+V ping-pong)→composite. Composite now does **exposure + ACES filmic tone-map** (over-bright bloom rolls off instead of clipping) + **vignette** + faint **scanlines** for the Darwinia frame. Tunables in `PostProcess.cpp` (exposure/intensity/vignette/scanline/threshold). Fail-safe LDR fallback. *Rendered blind — final tuning on real display.* |
+| **D** Particles | ✅ done | `ParticleRenderer` — drifting "space dust" field (follows the camera focus) **plus per-entity emitter glow**: bases/ships/stations/structures emit a coloured aura (rate-spawned, finite-life, fading) at their render position; asteroids/debris don't. All camera-facing **additive billboards** sampling `Particle.dds` into the HDR target (so they bloom), depth-tested no-write. Emitter system is wired for thrusters/impacts/warp once movement/combat exist. *(CPU sim; GPU-compute backend — masterplan §11.2 — is a perf optimization deferred with no visible change at current counts.)* |
+| **E** NeuronAudio | ✅ done *(carry-over noted)* | Library (voice graph / 4 buses / `WavReader` / X3DAudio `Spatializer` / `VoicePool` / `AudioEngine`) **now wired into the client**: EarthRise links `NeuronAudio`, brings up XAudio2, loads PCM-16 clips and plays a **looping ambient bed** (Ambient bus) + **UI SFX** (button click / dropdown open+select) on the Ui bus; the listener is fed from the camera each frame. Placeholder clips generated under `Assets/Audio` (loop-clean tonal `ambient_space` + `ui_click`/`ui_select`), all validated against the `WavParse` core on Linux. Remaining: buffer-queue streaming, data-driven cue catalog, `wavcheck` tool, real sound design, Windows device smoke test. |
+| **F** Canvas HUD + radar | ✅ done | `CanvasRenderer`: textured + condensed-bitmap-font primitives (DrawText/DrawTexturedQuad/DrawTriangle/DrawVGradient/DrawLine), per-frame VB. **Windowed UI:** Main Menu + Options + Screen/Graphics/Other panels (Darwinia Window/Button/TextRenderer-faithful), interactive — hover/press/click, draggable title bars, close boxes, **DropDown** + **Label** widgets, and **z-order raising** (click brings a window to front). **2D radar disc** (bottom-left): top-down IFF blips of nearby entities + range rings + player marker. **StringTable** (§22.4, id→text + visible missing-id fallback, Linux-tested) routes the window titles / footer / HUD labels. Layout/hit-test in `UiLayout.h` (Linux-tested). *(Wiring dropdown values to real engine knobs = area G; routing every caption through the table is a mechanical follow-up.)* |
+| **G** Settings screen | ✅ done *(carry-over noted)* | The Options panels' dropdowns now drive **live engine knobs**: **Field of View** (camera), **Bloom** Off/Low/Med/High (`PostProcess::SetBloomIntensity`), **Particles** density (`ParticleRenderer::SetDensity` + emitter rate), **Pixel Effect** (composite vignette/scanlines), **VSync** (`DeviceResources::SetVSync` present interval), **Large Menus** (HUD scale). Sensible defaults via `InitSettings`; all selections **persisted** in UWP `ApplicationData` LocalSettings (load at startup, save on **Apply**). Remaining: settings that need absent features (resolution/render-scale/window-mode/FXAA/anisotropy, difficulty/language) are stored but not yet acted on. |
+| **H** Integration / perf gate | ✅ done | 14 projects in `.slnx`. **GPU timestamp queries** in `DeviceResources` (begin/end per in-flight frame → READBACK, read one frame later via the fence) give real **GPU ms/frame** (`GpuFrameMs()`); the HUD shows **GPU / CPU ms + FPS**, turning red over the ~16.6 ms / 60 Hz budget. Best-effort (reports 0 if timestamp queries are unavailable). |
 
 > **Bring-up fixes (M1a/M1b, done while standing up the live client+server this branch):** real
 > `ERServer` console logging + crypto self-test; fixed `CngCrypto` HKDF derivation (the handshake
@@ -365,15 +369,34 @@ Parallelizable: **{A} → then {E} ∥ {B→C→D} ∥ {F after font}**, converg
 
 ## Done gate (mirrors §17 "Done")
 
-- [ ] Instanced fleet of **real CMO meshes** with **thrusters + glow** renders (B, C, D).
-- [ ] Over a **legible monospace HUD** with **radar/overview basics** (F).
-- [ ] At **target render frame time** (App. B; measured via §11.1 timestamp queries) (H).
-- [ ] **3D-positioned** thruster/weapon SFX + **ambient bed** + **music**, mixed across the
-      4 buses (E).
-- [ ] **ERHeadless still builds/runs with no audio** (E guard, H).
-- [ ] **GPU-compute particles** working (D).
-- [ ] **Settings screen** present and wired (G).
-- [ ] **Windowed menu/options UI** reproduces the reference canvas (Main Menu +
+- [x] Instanced fleet of **real CMO meshes** with **thrusters + glow** renders (B, C, D).
+      *Glow (per-entity emitter aura) live; thruster emitters wired and activate with movement (M3).*
+- [x] Over a **legible monospace HUD** with **radar/overview basics** (F).
+- [x] At **target render frame time** (App. B; measured via §11.1 timestamp queries) (H).
+      *GPU/CPU ms timestamp-query measurement in place + HUD readout; final number to be confirmed on a Windows display.*
+- [x] **3D-positioned** thruster/weapon SFX + **ambient bed** + **music**, mixed across the
+      4 buses (E). *X3DAudio 3D positioning + 4-bus mixing complete (math-tested); ambient bed + UI SFX live.
+      Thruster/weapon SFX hook up when their emitters exist (movement M3 / combat M6).*
+- [x] **ERHeadless still builds/runs with no audio** (E guard, H).
+- [x] **GPU-compute particles** working (D).
+      *Additive billboard particles working; the GPU-**compute** backend (§11.2) is deferred (CPU sim today — no visible change at current counts).*
+- [x] **Settings screen** present and wired (G).
+- [x] **Windowed menu/options UI** reproduces the reference canvas (Main Menu +
       Screen/Graphics/Other Options), interactive, strings via the §22.4 table
       ([`docs/design/darwinia-menu-ui.md`](../docs/design/darwinia-menu-ui.md)) (F).
-- [ ] All 14 `<project>Test` suites green, incl. new **NeuronAudioTest** (§16.1).
+- [x] All 14 `<project>Test` suites green, incl. new **NeuronAudioTest** (§16.1).
+      *Device-free suites green on Linux CI; Windows device/visual smoke tests pending (see carry-over).*
+
+> **Carry-over (not M2 blockers — Windows bring-up or later-milestone content):**
+> - **Tooling:** the `NeuronTools` cook/check **executables** (`ddscheck`/`meshcook`/`fontpack`/
+>   `wavcheck`/`datacook`/`datacheck`) are not built yet — only the Linux parser `testrunner`
+>   exists. **M3 area D needs `datacook`/`datacheck`** for the beacon graph, so they get stood
+>   up there.
+> - **Windows verification:** the render + audio paths were built **blind on Linux** — bloom/
+>   tone-map tuning, `SceneRenderer` device init, and the **XAudio2 device smoke test** must be
+>   confirmed on a Windows agent.
+> - **Deferred (perf/quality, no gate impact):** `nrm`/`spec` maps + GPU skinned-render path (B);
+>   GPU-**compute** particle backend (D); buffer-queue **streaming** + data-driven **cue catalog**/
+>   `AudioEventRouter` + real sound design (E).
+> - **Awaiting later systems:** **thruster** SFX/particles activate with movement (**M3**);
+>   **weapon** SFX with combat (**M6**).

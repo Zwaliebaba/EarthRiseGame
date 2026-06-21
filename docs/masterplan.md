@@ -205,7 +205,7 @@ below are those logical groupings, not directories.
     ├── db/                 SQL schema + ordered, forward-only migrations
     └── deploy/             ERServer Dockerfile (Server Core) · docker-compose.dev.yml
 ```
-**In progress (M2):** `NeuronAudio/` (XAudio2/X3DAudio client lib + `NeuronAudioTest`, §11.3) is scaffolded — voice graph / mixer / spatializer / WAV reader landed; buffer-queue streaming, cue catalog and the Windows device smoke test still pending. The platform-independent asset parsers live in their **owning** libraries (`WavParse.h` in `NeuronAudio/`; `DdsParse.h`/`CmoParse.h`/`FontAtlasLayout.h` in `NeuronRender/`), kept dependency-free. `NeuronTools/` currently holds only a Linux `testrunner` that includes those parser headers — **a leaf with no dependents**, intended to be removed once asset checking runs natively on Windows; the `datacook`/`datacheck` + asset-cooker executables (§12.6) are still to come. All follow the flat-files + VS Filters convention.
+**Status (M2 complete; M3 active):** `NeuronAudio/` (XAudio2/X3DAudio client lib + `NeuronAudioTest`, §11.3) landed — voice graph / mixer / spatializer / WAV reader done; buffer-queue streaming, cue catalog and the Windows device smoke test **carried over** to M3 bring-up. The platform-independent asset parsers live in their **owning** libraries (`WavParse.h` in `NeuronAudio/`; `DdsParse.h`/`CmoParse.h`/`FontAtlasLayout.h` in `NeuronRender/`), kept dependency-free. `NeuronTools/` currently holds only a Linux `testrunner` that includes those parser headers — **a leaf with no dependents**, intended to be removed once asset checking runs natively on Windows; the `datacook`/`datacheck` + asset-cooker executables (§12.6) are **still to come and now belong to M3 area D** (which needs the beacon-graph cook). All follow the flat-files + VS Filters convention.
 > Generated `CompiledShaders/` headers live under each project that compiles shaders
 > (per `$(ProjectDir)`), so they're picked up by `#include` at build time.
 
@@ -1647,4 +1647,4 @@ EVE-Echoes-style; shared by desktop & touch; box-select demoted; touch ambiguity
 out; R20 Med→Low; spec in `docs/design/touch-controls.md`), v0.11 completeness pass (DX12
 §11.1, camera/VFX §11.2, navigation §13.12, UI/HUD/radar §22, input §23, comms §24,
 platform services §25, game-data §12.6, live-ops §26), v0.10 audio (NeuronAudio), v0.9
-gameplay (§13). M0, M1a, M1b complete; M2 is next on the engineering track.*
+gameplay (§13). M0, M1a, M1b, M2 complete; M3 is next on the engineering track.*

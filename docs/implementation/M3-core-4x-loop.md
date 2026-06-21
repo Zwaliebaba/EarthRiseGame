@@ -1,7 +1,7 @@
 # M3 — Core 4X Loop, Fleet Command & Navigation (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M3**).
-> **Status:** ⏳ Not started (M2 active; M0/M1a/M1b complete).
+> **Status:** 🔨 Active — **now the hot milestone** (M0/M1a/M1b/M2 complete).
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 
 ## Milestone goal (verbatim from §17)
@@ -56,9 +56,11 @@
   to the full intent set.
 - **Snapshots** build full-world state (interest = everything until M4). Client has
   `replica`/`interp`/`session`/`control` (M1b) and renders via NeuronRender.
-- **M2 (in progress)** provides the render/HUD foundation M3's UI builds on: monospace
-  Canvas HUD + **radar/overview basics** (M2 area F), instanced CMO ships, and the
-  **`datacook`/`datacheck`** tooling (M2 area A) M3 needs for the beacon-graph/balance data.
+- **M2 (complete)** provides the render/HUD foundation M3's UI builds on: monospace
+  Canvas HUD + **radar/overview basics** (M2 area F) and instanced CMO ships (M2 area B) —
+  area G is now **unblocked**. **Caveat:** the **`datacook`/`datacheck`** tool *executables*
+  (M2 area A) were **carried over** — only the Linux parser `testrunner` landed in M2 — so
+  **M3 area D must stand them up** before it can cook the beacon-graph/balance data.
 - **No navigation, harvesting, build queue, sensor/fog, NPC AI, or fleet-command intents
   exist yet** — all net-new in M3. `ERServer/` has no `ai/`, `interest/`, or `simloop/`
   modules yet (only `netio/`).
@@ -159,7 +161,8 @@
   - [ ] **Mobile-base travel:** base warps slowly / jumps via beacons (larger fuel + longer
         spool) — how the "mobile home" relocates.
   - [ ] **Beacon graph + balance as game data** (§12.6): authored text → `datacook` →
-        NeuronCore; `datacheck` verifies every beacon links to a valid region (M2 tooling).
+        NeuronCore; `datacheck` verifies every beacon links to a valid region (tooling
+        carried over from M2 — only the Linux `testrunner` exists; build the executables here).
   - [ ] **Interest prefetch (R21):** on warp/jump start, prefetch the destination sector's
         interest set so fast cross-sector travel doesn't stall replication. (Lightweight at
         M3; full interest mgmt is M4.)
@@ -276,9 +279,11 @@
 4. **G (client UI)** follows the server features it surfaces (B, D, E, F) and M2's HUD.
 5. **H (bots/determinism)** continuously, and is the final end-to-end gate.
 
-Server track (A→B→{C,D,E,F}) is independent of the M2 render track and can start while M2
-finishes; only **G** hard-depends on M2 being done. **Cross-milestone:** D needs M2 area A
-(data tooling); G needs M2 areas B/F (instanced ships + HUD/overview basics).
+Server track (A→B→{C,D,E,F}) is independent of the M2 render track. **G** hard-depended on
+M2, which is **now complete**, so it's unblocked. **Cross-milestone:** D needs the
+`datacook`/`datacheck` tooling nominally from M2 area A, but that was **carried over** (only
+the Linux parser `testrunner` exists) — so **build the cook/check executables in D**. G
+builds on M2 areas B/F (instanced ships + HUD/overview basics), both done.
 
 ## Done gate (mirrors §17 "Done")
 
