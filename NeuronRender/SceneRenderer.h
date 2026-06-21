@@ -17,6 +17,7 @@
 #include <d3d12.h>
 #include <winrt/base.h>
 
+#include <DirectXMath.h>
 #include <array>
 #include <cstdint>
 #include <unordered_map>
@@ -51,10 +52,11 @@ public:
     void Uninitialize();
 
     // Record draw commands for 'count' entities into 'cl'.
-    // viewProjT: 16 floats, column-major (i.e. XMMatrixTranspose of the camera matrix).
-    // Called between DeviceResources::BeginFrame and EndFrame.
+    // viewProj: view*proj stored row-major (no transpose); the HLSL column-major
+    // cbuffer reinterprets it as the transpose the shader's mul() needs (see
+    // SceneVS). Called between DeviceResources::BeginFrame and EndFrame.
     void Render(ID3D12GraphicsCommandList* cl,
-                const float viewProjT[16],
+                const DirectX::XMFLOAT4X4& viewProj,
                 const SceneEntity* entities, uint32_t count);
 
     // Scene lighting, uploaded to the pixel shaders as root constants b1 (matches
@@ -127,7 +129,7 @@ private:
 
     // Draw one contiguous run of instances [startInstance, startInstance+count)
     // sharing shapeId 'sid', picking the textured/untextured pipeline and mesh.
-    void DrawRun(ID3D12GraphicsCommandList* cl, const float viewProjT[16],
+    void DrawRun(ID3D12GraphicsCommandList* cl, const DirectX::XMFLOAT4X4& viewProj,
                  uint16_t sid, UINT startInstance, UINT count, UINT fi);
 
     // Textured pipeline (separate root sig/PSO so the untextured geometry path is

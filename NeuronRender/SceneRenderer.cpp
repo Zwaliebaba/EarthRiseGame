@@ -370,8 +370,8 @@ namespace Neuron::Render
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
-  void SceneRenderer::Render(ID3D12GraphicsCommandList* cl, const float viewProjT[16], const SceneEntity* entities,
-                             uint32_t count)
+  void SceneRenderer::Render(ID3D12GraphicsCommandList* cl, const DirectX::XMFLOAT4X4& viewProj,
+                             const SceneEntity* entities, uint32_t count)
   {
     // Select this frame's instance buffer (avoids racing the GPU on the buffer
     // still being read by the previous in-flight frame).
@@ -454,7 +454,7 @@ namespace Neuron::Render
       const uint16_t sid = entities[order[k]].shapeId;
       uint32_t start = k;
       while (k < count && entities[order[k]].shapeId == sid) ++k;
-      DrawRun(cl, viewProjT, sid, start, k - start, fi);
+      DrawRun(cl, viewProj, sid, start, k - start, fi);
     }
   }
 
@@ -463,7 +463,7 @@ namespace Neuron::Render
   // the textured pipeline when the shape has a diffuse, else the untextured
   // emissive path; unregistered shapes fall back to the placeholder cube.
   // ---------------------------------------------------------------------------
-  void SceneRenderer::DrawRun(ID3D12GraphicsCommandList* cl, const float viewProjT[16], uint16_t sid,
+  void SceneRenderer::DrawRun(ID3D12GraphicsCommandList* cl, const DirectX::XMFLOAT4X4& viewProj, uint16_t sid,
                               UINT startInstance, UINT count, UINT fi)
   {
     auto it = m_shapes.find(sid);
@@ -474,7 +474,7 @@ namespace Neuron::Render
     {
       cl->SetGraphicsRootSignature(m_rootSigTex.get());
       cl->SetPipelineState(m_psoTex.get());
-      cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
+      cl->SetGraphicsRoot32BitConstants(0, 16, &viewProj.m[0][0], 0);
       D3D12_GPU_DESCRIPTOR_HANDLE srv = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
       srv.ptr += static_cast<UINT64>(shape->srvIndex) * m_srvDescSize;
       cl->SetGraphicsRootDescriptorTable(1, srv);
@@ -484,7 +484,7 @@ namespace Neuron::Render
     {
       cl->SetGraphicsRootSignature(m_rootSig.get());
       cl->SetPipelineState(m_pso.get());
-      cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
+      cl->SetGraphicsRoot32BitConstants(0, 16, &viewProj.m[0][0], 0);
       cl->SetGraphicsRoot32BitConstants(1, 28, &m_light, 0); // b1 lighting
     }
 
