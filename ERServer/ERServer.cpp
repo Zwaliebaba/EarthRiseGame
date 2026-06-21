@@ -32,7 +32,7 @@
 
 // NeuronCore
 #include "FixedStepAccumulator.h"
-#include "ServerWorld.h"
+#include "ServerUniverse.h"
 #include "CngCrypto.h"
 #include "WinsockSocket.h"
 #include "ServerHost.h"
@@ -183,7 +183,7 @@ int main()
   const Neuron::Net::EcPubKey staticPub = crypto.GetStaticPublicKey();
   RunCryptoSelfTest(crypto, staticPriv, staticPub);
 
-  Neuron::Sim::ServerWorld world;
+  Neuron::Sim::ServerUniverse world;
   Neuron::Net::ServerHost host(&crypto, staticPriv, serverSecret, &world);
 
   Neuron::Net::WinsockSocket sock;

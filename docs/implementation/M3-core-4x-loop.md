@@ -47,7 +47,7 @@
 
 ## Current state (what M1a/M1b/M2 left us)
 
-- **Sim is M1a-level.** `NeuronCore/sim/ServerWorld.h` spawns **one mobile `Base` per
+- **Sim is M1a-level.** `NeuronCore/sim/ServerUniverse.h` spawns **one mobile `Base` per
   player**, applies a single validated `MoveCommand` (`SetBaseVelocity`→`ClampSpeed`), and
   steps `MovementSystem` at the fixed 30 Hz. `Components.h` defines `Transform`/`Velocity`/
   `BaseTag`/`ShipTag`/`NetId`/`Health` and **already enumerates** `EntityKind::{NpcUnit,

@@ -29,10 +29,10 @@ All projects keep their source and header files **flat** in the project director
 `NeuronCore.vcxitems` is a shared items project consumed by `EarthRise`, `NeuronClient`, and `ERServer`; its sources are compiled into each consumer rather than into a separate library. `NeuronCore/NeuronCore.cpp` is the translation unit that includes the subsystem headers so the header-only subsystems are validated; platform-backed subsystems carry their own `.cpp` files (`CngCrypto.cpp`, `WinsockSocket.cpp`, `SimComponents.cpp`). The headers group into:
 - Platform: `Debug.h`, `TimerCore.h`, `Allocators.h`
 - ECS: `Ecs.h`
-- World/math: `WorldPos.h`, `GameMath.h`, `MathCommon.h`
+- Universe/math: `UniversePos.h`, `GameMath.h`, `MathCommon.h`
 - Serialization: `BitStream.h`, `Serde.h`
 - Networking: protocol, sequencing, replay, reliability, packet codec, crypto/socket abstractions, secure channel, handshake, connection
-- Simulation/server: components, fixed-step accumulation, movement, snapshot, command, server world/host
+- Simulation/server: components, fixed-step accumulation, movement, snapshot, command, server universe/host
 
 ### Client
 `NeuronClient/` (static library) holds the client library. Files are flat, grouped by VS Filters:

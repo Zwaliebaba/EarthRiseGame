@@ -8,7 +8,7 @@
 // contract for snapshots.
 
 #include "Ecs.h"
-#include "WorldPos.h"
+#include "UniversePos.h"
 
 #include <DirectXMath.h>
 #include <cstdint>
@@ -55,7 +55,7 @@ enum class EntityKind : uint8_t
 // rebased into 'pos' by the movement system when it leaves the sector.
 struct Transform
 {
-    Neuron::World::WorldPos pos{};      // authoritative integer position
+    Neuron::Universe::UniversePos pos{};      // authoritative integer position
     DirectX::XMFLOAT3       localOffset{ 0, 0, 0 }; // fractional metres within sector
 };
 

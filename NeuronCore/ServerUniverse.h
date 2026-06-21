@@ -1,5 +1,5 @@
 #pragma once
-// ServerWorld — authoritative simulation state for ERServer (§9).
+// ServerUniverse — authoritative simulation state for ERServer (§9).
 //
 // M1a scope: one mobile Base per player, integrated by the shared MovementSystem
 // at the fixed 30 Hz step, with a full snapshot built per tick (interest =
@@ -15,7 +15,7 @@
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
 #include "Ecs.h"
-#include "WorldPos.h"
+#include "UniversePos.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -24,10 +24,10 @@
 namespace Neuron::Sim
 {
 
-class ServerWorld
+class ServerUniverse
 {
 public:
-    ServerWorld()
+    ServerUniverse()
     {
         m_world.RegisterComponent<Transform>();
         m_world.RegisterComponent<Velocity>();
@@ -48,7 +48,7 @@ public:
     // Spawn a mobile base for a player. Returns the assigned network id.
     // Bases are placed on a line and given an eastward drift so the M1a test can
     // watch them cross a sector boundary.
-    uint32_t SpawnBase(Neuron::World::WorldPos start, DirectX::XMFLOAT3 vel)
+    uint32_t SpawnBase(Neuron::Universe::UniversePos start, DirectX::XMFLOAT3 vel)
     {
         const uint32_t netId = m_nextNetId++;
         auto e = m_world.CreateEntity();
@@ -67,7 +67,7 @@ public:
     // Spawn a static catalog prop (scenery: stations, asteroids, jumpgates, ...).
     // Replicated like any entity (gets a NetId); no Velocity, so it stays put.
     // Kind defaults to the catalog category's kind. Returns the net id.
-    uint32_t SpawnProp(uint16_t shapeId, Neuron::World::WorldPos pos)
+    uint32_t SpawnProp(uint16_t shapeId, Neuron::Universe::UniversePos pos)
     {
         const ShapeDef* def = ShapeById(shapeId);
         const EntityKind kind = def ? KindForCategory(def->category) : EntityKind::Unknown;
@@ -89,7 +89,7 @@ public:
             v->metresPerSecond = ClampSpeed(vel, kMaxBaseSpeed);
     }
 
-    // Remove a player's base from the world (on disconnect/timeout). Returns
+    // Remove a player's base from the universe (on disconnect/timeout). Returns
     // true if a base for that net id existed.
     bool DespawnBase(uint32_t netId)
     {
@@ -131,7 +131,7 @@ public:
     [[nodiscard]] Neuron::ECS::World& World() noexcept { return m_world; }
 
     // Read a base's authoritative position (for tests / diagnostics).
-    [[nodiscard]] bool GetBasePos(uint32_t netId, Neuron::World::WorldPos& out)
+    [[nodiscard]] bool GetBasePos(uint32_t netId, Neuron::Universe::UniversePos& out)
     {
         auto it = m_netIdToEntity.find(netId);
         if (it == m_netIdToEntity.end()) return false;
@@ -142,7 +142,7 @@ public:
     static constexpr float kMaxBaseSpeed = 50.0f; // m/s cap (server validates intents)
 
 private:
-    // Populate the world with a spread of static catalog props clustered around
+    // Populate the universe with a spread of static catalog props clustered around
     // the player spawn point so the client exercises the whole shape catalog (a
     // jumpgate, a few stations, asteroids, debris and a sampling of ship hulls).
     // Runs once at construction, before any player connects. Offsets are kept
@@ -152,7 +152,7 @@ private:
     void SpawnScenery()
     {
         // Match ServerHost's first-player spawn (sector-0 edge, on the X axis).
-        const int64_t bx = Neuron::World::kSectorSize - 200;
+        const int64_t bx = Neuron::Universe::kSectorSize - 200;
         struct Placement { const char* name; int64_t dx, dy, dz; };
         static constexpr Placement kProps[] = {
             { "Jumpgate01",            0,   0,  380 }, // big landmark dead ahead

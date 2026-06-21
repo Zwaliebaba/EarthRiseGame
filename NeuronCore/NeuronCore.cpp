@@ -28,7 +28,7 @@
 #include "Ecs.h"
 
 // World
-#include "WorldPos.h"
+#include "UniversePos.h"
 
 // Serialization
 #include "BitStream.h"

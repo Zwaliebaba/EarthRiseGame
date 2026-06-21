@@ -211,11 +211,11 @@ below are those logical groupings, not directories.
 
 ---
 
-## 6. Coordinate System & World Model
+## 6. Coordinate System & Universe Model
 
 ### 6.1 Absolute position — `int64_t` per axis, **1 unit = 1 metre** 🔒
 ```cpp
-struct WorldPos { int64_t x, y, z; };   // absolute metres, signed, origin at 0
+struct UniversePos { int64_t x, y, z; };   // absolute metres, signed, origin at 0
 ```
 - Extent ≈ **±2⁶³ m ≈ ±975 light-years** per axis — far beyond any gameplay need;
   the meaningful constraint is sector size vs. float precision (§6.3), not range.
@@ -260,7 +260,7 @@ sector-offset representation from §6.1, so no separate render-space conversion 
 
 ### 7.1 Math — DirectXMath 🔒
 Compute in `XMVECTOR`/`XMMATRIX`; store `XMFLOAT*` for tight ECS packing. **💡**
-row-major, row-vector, right-handed (`*RH`). A `WorldPos` fixed-point layer bridges
+row-major, row-vector, right-handed (`*RH`). A `UniversePos` fixed-point layer bridges
 `int64` sector ↔ sector-local `float`.
 
 `XMVECTOR`/`XMMATRIX` are also used as **call parameters**, passed **by value with the
@@ -851,7 +851,7 @@ Destruction must create **demand**, or conquest and loot are hollow.
 - **Persistence:** all trades/currency/loot/build-completion are **economy events**
   → **write-through / outbox, zero-loss** (§15).
 
-### 13.5 World structure — tiered security (high → low → null) 🔒
+### 13.5 Universe structure — tiered security (high → low → null) 🔒
 The universe is a **risk→reward gradient**, replacing v0.8's "safe-zone bubbles
 only" model (which doesn't support conquest):
 
@@ -1062,7 +1062,7 @@ all but the longest are sim-stepped so they can be **interdicted** — core PvP)
 
 | Project under test | Test project | Scope |
 | --- | --- | --- |
-| **NeuronCore** | **NeuronCoreTest** | ECS, WorldPos/sectors, serde, sim rules, fixed-step timer, allocators |
+| **NeuronCore** | **NeuronCoreTest** | ECS, UniversePos/sectors, serde, sim rules, fixed-step timer, allocators |
 | **NeuronClient** | **NeuronClientTest** | Session, ReplicaManager, InterpBuffer, controller logic |
 | **NeuronRender** | **NeuronRenderTest** | DeviceResources init/teardown, SceneRenderer/CanvasRenderer unit logic |
 | **NeuronAudio** | **NeuronAudioTest** | WAV/RIFF parser (valid/invalid/edge), bus/volume logic, X3DAudio emitter math, XAudio2 device init/teardown |

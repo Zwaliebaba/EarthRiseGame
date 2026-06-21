@@ -30,7 +30,7 @@
 #include "Connection.h"
 #include "Command.h"
 #include "Snapshot.h"
-#include "WorldPos.h"
+#include "UniversePos.h"
 
 namespace
 {
@@ -121,7 +121,7 @@ int main(int argc, char* argv[])
                         if (Neuron::Sim::DecodeSnapshot(m.body, snap)) {
                             for (const auto& e : snap.entities) {
                                 if (e.netId == b.conn->PlayerNetId()) {
-                                    const auto sec = Neuron::World::WorldToSector(e.pos);
+                                    const auto sec = Neuron::Universe::UniverseToSector(e.pos);
                                     b.observedSectorsX.insert(sec.x);
                                 }
                             }

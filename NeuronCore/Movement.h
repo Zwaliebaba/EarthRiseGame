@@ -3,12 +3,12 @@
 //
 // Integrates velocity into a Transform at the fixed sim step, carrying the
 // fractional position in the sector-local float offset and rebasing into the
-// int64 WorldPos when the offset leaves the sector (§6.1). Deterministic and
+// int64 UniversePos when the offset leaves the sector (§6.1). Deterministic and
 // pure (no globals, no time calls) so client and server step identically and
 // the record/replay determinism harness reproduces runs exactly.
 
 #include "Components.h"
-#include "WorldPos.h"
+#include "UniversePos.h"
 
 #include <DirectXMath.h>
 #include <cmath>

@@ -23,7 +23,7 @@ NeuronRender/                [static lib, client/UWP only — files flat; names 
 ├── canvas/   CanvasRenderer (2D), QuadBatch, TextBatch (monospace), LineBatch
 └── assets/   DdsLoader, CmoLoader, FontAtlas   (parsers; cooked data from NeuronTools)
 
-depends on:  NeuronCore (math, WorldPos/sector, handles, time) + Windows SDK (d3d12,
+depends on:  NeuronCore (math, UniversePos/sector, handles, time) + Windows SDK (d3d12,
              dxgi, d3dcompiler-free — DXIL is embedded), C++/WinRT (CoreWindow swapchain)
 consumes:    CompiledShaders/*.h (embedded DXIL, §12.4); cooked .dds/.cmo/font (§12)
 used by:     EarthRise.Client (UWP)          NOT linked by: ERHeadless / NeuronClient

@@ -1,14 +1,14 @@
 #pragma once
 // ReplicaManager — decodes server snapshots into a client-side entity mirror.
 //
-// Converts absolute int64 WorldPos → sector-relative float3 via
+// Converts absolute int64 UniversePos → sector-relative float3 via
 // FloatingOriginHelper so no int64_t ever reaches the GPU (§6, M1b criterion).
 // The rendering origin rebases automatically when the tracked player moves to a
 // new sector, keeping render-space offsets small (< 16 384 m).
 
 #include "Replica.h"
 #include "Snapshot.h"
-#include "WorldPos.h"
+#include "UniversePos.h"
 
 #include <cstdint>
 #include <span>
@@ -33,7 +33,7 @@ public:
         // First pass: rebase floating origin to the tracked player's sector.
         for (const auto& e : snap.entities) {
             if (e.netId == playerNetId || (playerNetId == 0 && !snap.entities.empty())) {
-                const auto sec = Neuron::World::WorldToSector(e.pos);
+                const auto sec = Neuron::Universe::UniverseToSector(e.pos);
                 m_floatingOrigin.RebaseToSector(sec);
                 break;
             }
@@ -43,8 +43,8 @@ public:
         for (const auto& e : snap.entities) {
             if (m_current.count >= ReplicaSet::kMaxEntities) break;
 
-            // Combine base WorldPos with the sub-metre localOffset before projection.
-            const Neuron::World::WorldPos worldWithOffset{
+            // Combine base UniversePos with the sub-metre localOffset before projection.
+            const Neuron::Universe::UniversePos worldWithOffset{
                 e.pos.x + static_cast<int64_t>(e.localOffset.x),
                 e.pos.y + static_cast<int64_t>(e.localOffset.y),
                 e.pos.z + static_cast<int64_t>(e.localOffset.z)
@@ -68,12 +68,12 @@ public:
     [[nodiscard]] const ReplicaSet& Current() const noexcept { return m_current; }
     [[nodiscard]] uint32_t          LastTick() const noexcept { return m_tick; }
 
-    [[nodiscard]] const Neuron::World::FloatingOriginHelper& FloatingOrigin() const noexcept
+    [[nodiscard]] const Neuron::Universe::FloatingOriginHelper& FloatingOrigin() const noexcept
         { return m_floatingOrigin; }
 
 private:
     ReplicaSet                          m_current;
-    Neuron::World::FloatingOriginHelper m_floatingOrigin{};
+    Neuron::Universe::FloatingOriginHelper m_floatingOrigin{};
     uint32_t                            m_tick{ 0 };
 };
 

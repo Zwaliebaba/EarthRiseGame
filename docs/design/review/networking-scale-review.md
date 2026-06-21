@@ -223,11 +223,11 @@ enum is a versioned wire change later.
 ## 4. Implementation-level notes (current M1a — mostly "correct for a slice")
 
 The code does **not** overreach, and the comments honestly mark the deferrals
-(`ServerWorld.h:4`, `Snapshot.h:15`, `IocpUdpListener.h:17`). The items below are flagged
+(`ServerUniverse.h:4`, `Snapshot.h:15`, `IocpUdpListener.h:17`). The items below are flagged
 so they are tracked toward M4, **not** as defects in M1a:
 
 - **`ServerHost::BroadcastSnapshots` builds one full snapshot and sends identical bytes to
-  every connection** (`ServerHost.h`), and `ServerWorld::BuildSnapshot` iterates **all**
+  every connection** (`ServerHost.h`), and `ServerUniverse::BuildSnapshot` iterates **all**
   entities with no culling. This is the documented M1a behavior; at scale it is the
   `O(players × entities)` broadcast that Wall 1 replaces with per-client interest diffs.
   *Track: M4.*

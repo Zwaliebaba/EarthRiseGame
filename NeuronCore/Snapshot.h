@@ -20,7 +20,7 @@
 
 #include "Components.h"
 #include "Serde.h"
-#include "WorldPos.h"
+#include "UniversePos.h"
 
 #include <cstdint>
 #include <span>
@@ -34,7 +34,7 @@ struct SnapshotEntity
 {
     uint32_t                netId{ 0 };
     EntityKind              kind{ EntityKind::Unknown };
-    Neuron::World::WorldPos pos{};
+    Neuron::Universe::UniversePos pos{};
     DirectX::XMFLOAT3       localOffset{ 0, 0, 0 };
     int32_t                 hp{ 0 };
     uint16_t                shapeId{ 0xFFFF }; // index into ShapeCatalog (kInvalidShapeId)

@@ -1,12 +1,12 @@
 // ShapeCatalog + ECS/snapshot integration tests (ShapeCatalog.h, Components.h,
-// Snapshot.h, ServerWorld.h). Platform-independent: the catalog data, the ECS
+// Snapshot.h, ServerUniverse.h). Platform-independent: the catalog data, the ECS
 // spawn path, and the snapshot wire format all run identically on server and
 // client, so the Linux runner can verify them (a tiny DirectXMath shim supplies
 // XMFLOAT3 — see dxmath_shim/). Mirrors the wire contract the Windows client
 // relies on to pick a mesh per entity.
 
 #include "ShapeCatalog.h"
-#include "ServerWorld.h"
+#include "ServerUniverse.h"
 #include "Snapshot.h"
 #include "TestRunner.h"
 
@@ -62,9 +62,9 @@ ER_TEST(ShapeCatalog, EveryCategoryHasAtLeastOneShape)
     ER_CHECK(FirstShapeOfCategory(static_cast<ShapeCategory>(c)) != kInvalidShapeId);
 }
 
-ER_TEST(ServerWorld, ScenerySpawnedWithShapeAndKind)
+ER_TEST(ServerUniverse, ScenerySpawnedWithShapeAndKind)
 {
-  ServerWorld w;
+  ServerUniverse w;
   const Snapshot snap = w.BuildSnapshot();
   ER_CHECK(!snap.entities.empty());
 
@@ -83,9 +83,9 @@ ER_TEST(ServerWorld, ScenerySpawnedWithShapeAndKind)
   ER_CHECK(sawGate);
 }
 
-ER_TEST(ServerWorld, SpawnedBaseCarriesBaseKind)
+ER_TEST(ServerUniverse, SpawnedBaseCarriesBaseKind)
 {
-  ServerWorld w;
+  ServerUniverse w;
   const uint32_t net = w.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
   const Snapshot snap = w.BuildSnapshot();
   bool sawBase = false;
@@ -94,14 +94,14 @@ ER_TEST(ServerWorld, SpawnedBaseCarriesBaseKind)
     {
       sawBase = true;
       ER_CHECK(e.kind == EntityKind::Base);
-      ER_CHECK(e.shapeId == ServerWorld::BaseShapeId());
+      ER_CHECK(e.shapeId == ServerUniverse::BaseShapeId());
     }
   ER_CHECK(sawBase);
 }
 
 ER_TEST(Snapshot, RoundTripPreservesShapeIdAndKind)
 {
-  ServerWorld w;
+  ServerUniverse w;
   w.SpawnBase({ 100, 0, 0 }, { 0, 0, 0 });
   const Snapshot snap = w.BuildSnapshot();
 

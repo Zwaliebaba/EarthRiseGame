@@ -1,5 +1,5 @@
 #pragma once
-// World coordinate system — §6 of the masterplan.
+// Universe coordinate system — §6 of the masterplan.
 //
 // Absolute position: int64_t per axis, 1 unit = 1 metre, signed, origin (0,0,0).
 // Sector: 2^kSectorShift metres per side (default 14 → 16 384 m).
@@ -13,16 +13,16 @@
 
 using namespace DirectX;
 
-namespace Neuron::World
+namespace Neuron::Universe
 {
 
 // ---------------------------------------------------------------------------
 // Absolute position — 1 unit = 1 metre, signed, int64_t per axis.
 // ---------------------------------------------------------------------------
-struct WorldPos
+struct UniversePos
 {
     int64_t x{ 0 }, y{ 0 }, z{ 0 };
-    bool operator==(const WorldPos&) const = default;
+    bool operator==(const UniversePos&) const = default;
 };
 
 // ---------------------------------------------------------------------------
@@ -58,20 +58,20 @@ struct SectorHash
 // Coordinate math
 // ---------------------------------------------------------------------------
 
-// Sector index for a world coordinate (arithmetic right-shift preserves sign).
-[[nodiscard]] inline SectorId WorldToSector(const WorldPos& p) noexcept
+// Sector index for a universe coordinate (arithmetic right-shift preserves sign).
+[[nodiscard]] inline SectorId UniverseToSector(const UniversePos& p) noexcept
 {
     return { p.x >> kSectorShift, p.y >> kSectorShift, p.z >> kSectorShift };
 }
 
-// World position of the sector's (0,0,0) corner.
-[[nodiscard]] inline WorldPos SectorToOrigin(const SectorId& s) noexcept
+// Universe position of the sector's (0,0,0) corner.
+[[nodiscard]] inline UniversePos SectorToOrigin(const SectorId& s) noexcept
 {
     return { s.x << kSectorShift, s.y << kSectorShift, s.z << kSectorShift };
 }
 
 // Sector-local float offset in metres [0, kSectorSize) per axis.
-[[nodiscard]] inline XMFLOAT3 WorldToLocalOffset(const WorldPos& p) noexcept
+[[nodiscard]] inline XMFLOAT3 UniverseToLocalOffset(const UniversePos& p) noexcept
 {
     const int64_t mask = kSectorSize - 1;
     // Signed modulo: use bitwise AND (works for powers of two with signed types
@@ -82,11 +82,11 @@ struct SectorHash
     return { static_cast<float>(lx), static_cast<float>(ly), static_cast<float>(lz) };
 }
 
-// Rebuild WorldPos from a sector and its floating local offset.
+// Rebuild UniversePos from a sector and its floating local offset.
 // Call when the local float offset has left [0, kSectorSize) after physics integration.
-[[nodiscard]] inline WorldPos RebuildFromSectorLocal(const SectorId& s, const XMFLOAT3& local) noexcept
+[[nodiscard]] inline UniversePos RebuildFromSectorLocal(const SectorId& s, const XMFLOAT3& local) noexcept
 {
-    const WorldPos origin = SectorToOrigin(s);
+    const UniversePos origin = SectorToOrigin(s);
     // Round to nearest integer metre; caller should rebase sector if |local| >= kSectorSize.
     return {
         origin.x + static_cast<int64_t>(local.x),
@@ -99,7 +99,7 @@ struct SectorHash
 [[nodiscard]] inline int64_t AxisDelta(int64_t a, int64_t b) noexcept { return a - b; }
 
 // Relative float vector from 'from' to 'to'. Valid within interest range (~km).
-[[nodiscard]] inline XMFLOAT3 RelativeVec3(const WorldPos& from, const WorldPos& to) noexcept
+[[nodiscard]] inline XMFLOAT3 RelativeVec3(const UniversePos& from, const UniversePos& to) noexcept
 {
     return {
         static_cast<float>(AxisDelta(to.x, from.x)),
@@ -116,10 +116,10 @@ struct SectorHash
 // ---------------------------------------------------------------------------
 struct FloatingOriginHelper
 {
-    WorldPos origin;  // current render origin (sector corner or any fixed point)
+    UniversePos origin;  // current render origin (sector corner or any fixed point)
 
     // Camera-relative float3 for an entity at 'p'. Feed directly to DX12 upload.
-    [[nodiscard]] XMFLOAT3 ToRenderSpace(const WorldPos& p) const noexcept
+    [[nodiscard]] XMFLOAT3 ToRenderSpace(const UniversePos& p) const noexcept
     {
         return RelativeVec3(origin, p);
     }
@@ -132,7 +132,7 @@ struct FloatingOriginHelper
 
     // True when the camera has moved far enough to warrant a rebase
     // (defaults to one sector width — tune as needed).
-    [[nodiscard]] bool NeedsRebase(const WorldPos& cameraPos) const noexcept
+    [[nodiscard]] bool NeedsRebase(const UniversePos& cameraPos) const noexcept
     {
         const XMFLOAT3 rel = RelativeVec3(origin, cameraPos);
         const float    limit = static_cast<float>(kSectorSize);
@@ -142,4 +142,4 @@ struct FloatingOriginHelper
     }
 };
 
-} // namespace Neuron::World
+} // namespace Neuron::Universe
