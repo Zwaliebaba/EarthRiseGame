@@ -48,6 +48,10 @@ public:
 
     // Primitives — screen-pixel coordinates, top-left origin.
     void DrawRect(float x, float y, float w, float h, float r, float g, float b, float a = 1.0f);
+    // Vertical two-colour gradient quad (top row -> bottom row), e.g. the title bar.
+    void DrawVGradient(float x, float y, float w, float h,
+                       float tr, float tg, float tb, float ta,
+                       float br, float bg, float bb, float ba);
     void DrawTriangle(float x0, float y0, float x1, float y1, float x2, float y2,
                       float r, float g, float b, float a = 1.0f);
     // Textured quad: 'uv' is the source sub-rect in [0,1]; tint multiplies the texel.

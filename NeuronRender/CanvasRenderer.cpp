@@ -191,6 +191,19 @@ void CanvasRenderer::DrawRect(float x, float y, float w, float h, float r, float
     Vtx(x,     y + h, 0, 0, r, g, b, a);
 }
 
+void CanvasRenderer::DrawVGradient(float x, float y, float w, float h,
+                                   float tr, float tg, float tb, float ta,
+                                   float br, float bg, float bb, float ba)
+{
+    Prim(Mode::Solid, 0);
+    Vtx(x,     y,     0, 0, tr, tg, tb, ta);
+    Vtx(x + w, y,     0, 0, tr, tg, tb, ta);
+    Vtx(x + w, y + h, 0, 0, br, bg, bb, ba);
+    Vtx(x,     y,     0, 0, tr, tg, tb, ta);
+    Vtx(x + w, y + h, 0, 0, br, bg, bb, ba);
+    Vtx(x,     y + h, 0, 0, br, bg, bb, ba);
+}
+
 void CanvasRenderer::DrawTriangle(float x0, float y0, float x1, float y1, float x2, float y2,
                                   float r, float g, float b, float a)
 {

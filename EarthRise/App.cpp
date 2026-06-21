@@ -285,33 +285,37 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     OutputDebugStringA(buf);
   }
 
-  // Draw one Darwinia-style skinned button. selected = the light "beam" highlight.
+  // Draw one Darwinia-style skinned button. selected = the light blue highlight
+  // (same blue gradient as the title bar); otherwise the interface_red strip.
   void DrawButton(float x, float y, float w, float h, const char* caption, float s, bool selected)
   {
-    // Skin: red gradient strip normally; grey (cool, brighter) when selected.
     if (selected)
-      m_canvas.DrawTexturedQuad(x, y, w, h, 0, 0, 1, 1, m_uiGrey, 1.15f, 1.25f, 1.6f, 1.f);
+      m_canvas.DrawVGradient(x, y, w, h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
     else
       m_canvas.DrawTexturedQuad(x, y, w, h, 0, 0, 1, 1, m_uiRed, 1.0f, 1.0f, 1.0f, 1.f);
 
     const float ts = s * 0.85f;
     const float tw = m_canvas.TextWidth(caption, ts);
     const float th = m_canvas.TextHeight(ts);
-    // Cream caption (dark when selected, like the reference's highlighted row).
+    const float cx = x + (w - tw) * 0.5f, cy = y + (h - th) * 0.5f;
+    // Drop shadow then caption: dark text on the blue highlight, cream otherwise.
+    m_canvas.DrawText(cx + 1.5f * s, cy + 1.5f * s, caption, 0.f, 0.f, 0.f, ts);
     if (selected)
-      m_canvas.DrawText(x + (w - tw) * 0.5f, y + (h - th) * 0.5f, caption, 0.10f, 0.12f, 0.16f, ts);
+      m_canvas.DrawText(cx, cy, caption, 0.10f, 0.12f, 0.16f, ts);
     else
-      m_canvas.DrawText(x + (w - tw) * 0.5f, y + (h - th) * 0.5f, caption, 0.92f, 0.88f, 0.80f, ts);
+      m_canvas.DrawText(cx, cy, caption, 0.92f, 0.88f, 0.80f, ts);
   }
 
-  // Draw the Main Menu window (chrome + buttons) from docs/design/darwinia-menu-ui.md.
-  // Static for now (MU-1 visual); pointer interactivity + the toolkit land in MU-2/3.
+  // Draw the Main Menu window, faithful to Darwinia's Window render: a full-height
+  // bright interface_red body (V across the whole window), a blue vertex-gradient
+  // title bar, a light-blue border frame + dark outer loop, and a shadowed centred
+  // title. Static for now (MU-1 visual); interactivity + the toolkit land in MU-2/3.
   void DrawMainMenu(UINT screenW, UINT screenH)
   {
     if (!m_uiReady) return;
     const float s = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f; // HUD scale
 
-    const float titleH = 30.f * s;
+    const float titleH = 28.f * s;
     const float pad = 14.f * s;
     const float btnH = 34.f * s;
     const float gap = 9.f * s;
@@ -323,24 +327,19 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const float bodyH = pad + n * (btnH + gap) + gap + btnH + pad; // n buttons + gap + Close
     const float totalH = titleH + bodyH;
 
-    // Centre the window a touch above mid-screen.
     const float gx = (static_cast<float>(screenW) - w) * 0.5f;
     const float gy = static_cast<float>(screenH) * 0.5f - totalH * 0.5f - 40.f * s;
 
-    // Window body (dark translucent red), then title bar (bright grey).
-    m_canvas.DrawTexturedQuad(gx, gy, w, totalH, 0, 0, 1, 1, m_uiRed, 0.55f, 0.5f, 0.5f, 0.92f);
-    m_canvas.DrawTexturedQuad(gx, gy, w, titleH, 0, 0, 1, 1, m_uiGrey, 1.35f, 1.4f, 1.5f, 1.f);
+    // 1) Body fill: interface_red, full white tint, V across the whole window
+    //    height (dark top/bottom, bright middle), slightly translucent.
+    m_canvas.DrawTexturedQuad(gx, gy, w, totalH, 0.f, 0.f, 1.f, 1.f, m_uiRed, 1.f, 1.f, 1.f, 0.96f);
 
-    const float tts = s * 0.95f;
-    const char* title = "MAIN MENU";
-    m_canvas.DrawText(gx + (w - m_canvas.TextWidth(title, tts)) * 0.5f,
-                      gy + (titleH - m_canvas.TextHeight(tts)) * 0.5f, title, 0.08f, 0.08f, 0.11f, tts);
+    // 2) Title bar: smooth blue vertex gradient (199,214,220 → 112,141,168).
+    m_canvas.DrawVGradient(gx, gy, w, titleH,
+                           0.780f, 0.839f, 0.863f, 1.f,
+                           0.439f, 0.553f, 0.659f, 1.f);
 
-    // Close box (top-right).
-    const float cb = 16.f * s;
-    m_canvas.DrawTexturedQuad(gx + w - cb - 7.f * s, gy + (titleH - cb) * 0.5f, cb, cb,
-                              0, 0, 1, 1, m_uiGrey, 1.2f, 1.2f, 1.3f, 1.f);
-
+    // 3) Buttons (inside the body, below the title bar).
     float by = gy + titleH + pad;
     for (int i = 0; i < n; ++i)
     {
@@ -349,6 +348,33 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     }
     by += gap;
     DrawButton(gx + pad, by, w - 2 * pad, btnH, "Close", s, false);
+
+    // 4) Border frame: 2px light-blue edges + 1px dark-blue outer loop.
+    const float bw = 2.f * s;
+    constexpr float lbR = 0.780f, lbG = 0.839f, lbB = 0.863f;     // 199,214,220
+    m_canvas.DrawRect(gx, gy, w, bw, lbR, lbG, lbB, 1.f);             // top
+    m_canvas.DrawRect(gx, gy + totalH - bw, w, bw, lbR, lbG, lbB, 1.f); // bottom
+    m_canvas.DrawRect(gx, gy, bw, totalH, lbR, lbG, lbB, 1.f);        // left
+    m_canvas.DrawRect(gx + w - bw, gy, bw, totalH, lbR, lbG, lbB, 1.f); // right
+    constexpr float dbR = 0.165f, dbG = 0.220f, dbB = 0.322f;     // 42,56,82 outer
+    const float o = 2.f * s;
+    m_canvas.DrawRect(gx - o, gy - o, w + 2 * o, s, dbR, dbG, dbB, 1.f);
+    m_canvas.DrawRect(gx - o, gy + totalH + o - s, w + 2 * o, s, dbR, dbG, dbB, 1.f);
+    m_canvas.DrawRect(gx - o, gy - o, s, totalH + 2 * o, dbR, dbG, dbB, 1.f);
+    m_canvas.DrawRect(gx + w + o - s, gy - o, s, totalH + 2 * o, dbR, dbG, dbB, 1.f);
+
+    // 5) Title: centred, with a dark drop shadow for readability (warm-pale text).
+    const float tts = s * 0.85f;
+    const char* title = "MAIN MENU";
+    const float tx = gx + (w - m_canvas.TextWidth(title, tts)) * 0.5f;
+    const float ty = gy + (titleH - m_canvas.TextHeight(tts)) * 0.5f;
+    m_canvas.DrawText(tx + 1.5f * s, ty + 1.5f * s, title, 0.f, 0.f, 0.f, tts);   // shadow
+    m_canvas.DrawText(tx, ty, title, 0.13f, 0.16f, 0.22f, tts);                    // dark title
+
+    // 6) Close box (top-right) — small light-blue square.
+    const float cb = 14.f * s;
+    m_canvas.DrawVGradient(gx + w - cb - 7.f * s, gy + (titleH - cb) * 0.5f, cb, cb,
+                           0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
   }
 
   // Load every ShapeCatalog entry into the renderer: the CMO mesh plus its
