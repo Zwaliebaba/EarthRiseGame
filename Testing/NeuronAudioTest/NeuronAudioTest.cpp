@@ -9,6 +9,7 @@
 #include "AudioTypes.h"
 #include "SpatialMath.h"
 #include "VoiceHandle.h"
+#include "WavParse.h"
 #include "WavReader.h"
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -211,6 +212,131 @@ namespace NeuronAudioTest
       Emitter e{};
       e.position = {0, 0, 100};
       Assert::AreEqual(1.0f, dopplerRatio(l, e), 1e-4f);
+    }
+  };
+
+  // WavParseTests — the platform-independent RIFF/WAVE PCM-16 parser core
+  // (er::format::parseWav in WavParse.h) mirrored from NeuronTools/testrunner
+  // (§16.2). WavReaderTests above covers the thin WavReader wrapper; these
+  // exercise the parser directly, including chunk-walking edge cases.
+  TEST_CLASS(WavParseTests)
+  {
+  public:
+    TEST_METHOD(ValidMono16)
+    {
+      auto file = makeWav(er::format::WAV_PCM_TAG, 1, 44100, 16, 64);
+      er::format::WavData out{};
+      Assert::IsTrue(er::format::parseWav(file, out) == er::format::WavStatus::Ok);
+      Assert::IsTrue(out.format.channels == static_cast<uint16_t>(1));
+      Assert::IsTrue(out.format.sampleRate == 44100u);
+      Assert::IsTrue(out.format.bitsPerSample == static_cast<uint16_t>(16));
+      Assert::IsTrue(er::format::isMono(out.format));
+      Assert::IsTrue(out.pcm.size() == static_cast<size_t>(64));
+    }
+
+    TEST_METHOD(ValidStereo16)
+    {
+      auto file = makeWav(er::format::WAV_PCM_TAG, 2, 48000, 16, 128);
+      er::format::WavData out{};
+      Assert::IsTrue(er::format::parseWav(file, out) == er::format::WavStatus::Ok);
+      Assert::IsTrue(out.format.channels == static_cast<uint16_t>(2));
+      Assert::IsTrue(!er::format::isMono(out.format));
+      Assert::IsTrue(out.pcm.size() == static_cast<size_t>(128));
+    }
+
+    TEST_METHOD(RejectsNonPcm)
+    {
+      // audioFormat 0x0011 = IMA ADPCM — must be rejected (PCM-16 only, §11.3).
+      auto file = makeWav(0x0011, 1, 44100, 16, 32);
+      er::format::WavData out{};
+      Assert::IsTrue(er::format::parseWav(file, out) == er::format::WavStatus::UnsupportedFormat);
+    }
+
+    TEST_METHOD(RejectsNon16Bit)
+    {
+      auto file = makeWav(er::format::WAV_PCM_TAG, 1, 44100, 24, 30);
+      er::format::WavData out{};
+      Assert::IsTrue(er::format::parseWav(file, out) == er::format::WavStatus::NotPcm16);
+    }
+
+    TEST_METHOD(RejectsNotRiff)
+    {
+      std::vector<std::byte> garbage(32, std::byte{0xAB});
+      er::format::WavData out{};
+      Assert::IsTrue(er::format::parseWav(garbage, out) == er::format::WavStatus::NotRiffWave);
+    }
+
+    TEST_METHOD(RejectsTruncatedDataChunk)
+    {
+      auto file = makeWav(er::format::WAV_PCM_TAG, 1, 44100, 16, 64);
+      // Inflate the declared 'data' size beyond the buffer. The 'data' size field
+      // sits after: 12 (RIFF) + 8+16 (fmt) + 4 ('data' tag).
+      const size_t dataSizeOffset = 12 + 8 + 16 + 4;
+      file[dataSizeOffset + 0] = std::byte{0xff};
+      file[dataSizeOffset + 1] = std::byte{0xff};
+      file[dataSizeOffset + 2] = std::byte{0xff};
+      file[dataSizeOffset + 3] = std::byte{0x7f};
+      er::format::WavData out{};
+      Assert::IsTrue(er::format::parseWav(file, out) == er::format::WavStatus::Truncated);
+    }
+
+    TEST_METHOD(MissingDataChunk)
+    {
+      // fmt-only file (no data chunk).
+      std::vector<std::byte> b;
+      pushTag(b, "RIFF");
+      pushU32(b, 4 + 8 + 16);
+      pushTag(b, "WAVE");
+      pushTag(b, "fmt ");
+      pushU32(b, 16);
+      pushU16(b, er::format::WAV_PCM_TAG);
+      pushU16(b, 1);
+      pushU32(b, 44100);
+      pushU32(b, 88200);
+      pushU16(b, 2);
+      pushU16(b, 16);
+      er::format::WavData out{};
+      Assert::IsTrue(er::format::parseWav(b, out) == er::format::WavStatus::MissingData);
+    }
+
+    TEST_METHOD(SkipsUnknownChunkBeforeData)
+    {
+      // RIFF/WAVE with a 'LIST' chunk (odd size → padded) ahead of fmt/data.
+      std::vector<std::byte> b;
+      pushTag(b, "RIFF");
+      const size_t riffSizeOffset = b.size();
+      pushU32(b, 0); // patched below
+      pushTag(b, "WAVE");
+
+      pushTag(b, "LIST");
+      pushU32(b, 3); // odd size → one pad byte follows
+      b.push_back(std::byte{1});
+      b.push_back(std::byte{2});
+      b.push_back(std::byte{3});
+      b.push_back(std::byte{0}); // pad
+
+      pushTag(b, "fmt ");
+      pushU32(b, 16);
+      pushU16(b, er::format::WAV_PCM_TAG);
+      pushU16(b, 1);
+      pushU32(b, 22050);
+      pushU32(b, 44100);
+      pushU16(b, 2);
+      pushU16(b, 16);
+
+      pushTag(b, "data");
+      pushU32(b, 16);
+      b.insert(b.end(), 16, std::byte{0});
+
+      // Patch the RIFF size to everything after the 8-byte RIFF header.
+      const uint32_t riffSize = static_cast<uint32_t>(b.size() - 8);
+      for (int i = 0; i < 4; ++i)
+        b[riffSizeOffset + i] = static_cast<std::byte>((riffSize >> (8 * i)) & 0xff);
+
+      er::format::WavData out{};
+      Assert::IsTrue(er::format::parseWav(b, out) == er::format::WavStatus::Ok);
+      Assert::IsTrue(out.format.sampleRate == 22050u);
+      Assert::IsTrue(out.pcm.size() == static_cast<size_t>(16));
     }
   };
 } // namespace NeuronAudioTest

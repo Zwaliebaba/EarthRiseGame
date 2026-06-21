@@ -3,6 +3,7 @@
     <Platform Name="x64" />
   </Configurations>
   <Folder Name="/Testing/">
+    <Project Path="Testing/EarthRiseTest/EarthRiseTest.vcxproj" />
     <Project Path="Testing/ERHeadlessTest/ERHeadlessTest.vcxproj" />
     <Project Path="Testing/ERServerTest/ERServerTest.vcxproj" />
     <Project Path="Testing/NeuronAudioTest/NeuronAudioTest.vcxproj" />
