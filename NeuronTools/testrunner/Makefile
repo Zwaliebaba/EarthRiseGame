@@ -13,7 +13,8 @@ CXX ?= g++
 CXXFLAGS ?= -std=c++23 -Wall -Wextra -Wpedantic -O2 -g -I../../NeuronCore -Idxmath_shim
 
 SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParseTests.cpp \
-        CmoAnimationTests.cpp ShapeCatalogTests.cpp UiLayoutTests.cpp StringTableTests.cpp
+        CmoAnimationTests.cpp ShapeCatalogTests.cpp UiLayoutTests.cpp StringTableTests.cpp \
+        UniverseDataTests.cpp
 BIN := testrunner
 
 .PHONY: all build run clean
@@ -24,7 +25,8 @@ build: $(BIN)
 # The parser headers under test live in their owning libraries (NeuronAudio /
 # NeuronRender), not in NeuronTools — nothing depends on NeuronTools.
 PARSER_HEADERS := ../../NeuronAudio/WavParse.h ../../NeuronRender/DdsParse.h \
-                  ../../NeuronRender/CmoParse.h ../../NeuronRender/FontAtlasLayout.h
+                  ../../NeuronRender/CmoParse.h ../../NeuronRender/FontAtlasLayout.h \
+                  ../datacook/UniverseSource.h ../../NeuronCore/UniverseData.h
 
 $(BIN): $(SRCS) $(wildcard *.h) $(PARSER_HEADERS)
 	$(CXX) $(CXXFLAGS) $(SRCS) -o $(BIN)
