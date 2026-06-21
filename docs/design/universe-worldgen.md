@@ -78,8 +78,11 @@ is no celestial-mechanics sim; the universe is sectors + placed content.
 
 > **Today:** `ServerUniverse::SpawnScenery()` hand-places ~12 catalog props (a jumpgate, 3
 > asteroids, stations, debris, hulls) near spawn to exercise the M2 `ShapeCatalog` render
-> path. That is **placeholder dressing**, not the layer-3/4 systems below — those are net-new
-> from M3.
+> path. That is **placeholder dressing**. Alongside it, `SpawnDemoSeed()` now places a small
+> **functional** seed near spawn — two linked jump beacons, a harvestable `ResourceNode`, and a
+> 3-ship starter fleet — so the M3 navigation/economy entities are visible in the live client
+> (gated by the `ServerUniverse(seedDemoContent)` flag; tests opt out). The real data-driven
+> path (ERServer loads the cooked universe; areas B/C/G drive it) supersedes both.
 
 ---
 

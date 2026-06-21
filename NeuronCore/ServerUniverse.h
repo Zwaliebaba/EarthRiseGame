@@ -37,7 +37,10 @@ namespace Neuron::Sim
 class ServerUniverse
 {
 public:
-    ServerUniverse()
+    // seedDemoContent: spawn the M2 scenery + a small dev seed (working beacons,
+    // a resource node, a starter fleet) near spawn so the M3 entities are visible
+    // in the live client. Tests pass false for a pristine world.
+    explicit ServerUniverse(bool seedDemoContent = true)
     {
         m_world.RegisterComponent<Transform>();
         m_world.RegisterComponent<Velocity>();
@@ -56,7 +59,10 @@ public:
         m_world.RegisterComponent<BuildQueue>();
         m_world.RegisterComponent<FleetMember>();
         m_world.RegisterComponent<Sensor>();
-        SpawnScenery();
+        if (seedDemoContent) {
+            SpawnScenery();
+            SpawnDemoSeed();
+        }
     }
 
     // Shape used for a player's mobile home base (a station hull reads as a base).
@@ -115,6 +121,26 @@ public:
         m_world.AddComponent<Transform>(e).pos = pos;
         m_world.AddComponent<NetId>(e).value = netId;
         m_world.AddComponent<ShapeId>(e) = { shapeId, kind };
+        m_netIdToEntity[netId] = e;
+        return netId;
+    }
+
+    // Spawn a harvestable resource node (area C spawns these from the dataset's
+    // resource fields; the dev seed places one near spawn). Rendered as an asteroid.
+    uint32_t SpawnResourceNode(ResourceType type, float yield, Neuron::Universe::UniversePos pos)
+    {
+        const uint16_t shape = (type == ResourceType::Ice) ? ShapeIdByName("Asteroid04Ice")
+                             : (type == ResourceType::Gas) ? ShapeIdByName("Asteroid06Lava")
+                                                           : ShapeIdByName("Asteroid01Rock");
+        const uint32_t netId = m_nextNetId++;
+        auto e = m_world.CreateEntity();
+        m_world.AddComponent<Transform>(e).pos = pos;
+        m_world.AddComponent<NetId>(e).value = netId;
+        const uint16_t sid = (shape != kInvalidShapeId) ? shape : uint16_t{ 0 };
+        m_world.AddComponent<ShapeId>(e) = { sid, EntityKind::ResourceNode };
+        auto& rn = m_world.AddComponent<ResourceNodeTag>(e);
+        rn.type      = static_cast<uint8_t>(type);
+        rn.remaining = yield;
         m_netIdToEntity[netId] = e;
         return netId;
     }
@@ -372,6 +398,31 @@ private:
             const uint32_t ship = SpawnFleetShip(d.player, ShipShapeId(), d.pos);
             if (ship) m_buildCompleted.push_back(ship);
         }
+    }
+
+    // Dev seed (live only): two linked jump beacons + a harvestable resource node +
+    // a small starter fleet near the spawn, so the M3 navigation/economy entities
+    // are visible in the client before the cooked universe + command UI (B/C/G) land.
+    void SpawnDemoSeed()
+    {
+        const int64_t bx = Neuron::Universe::kSectorSize - 200; // matches ServerHost's first spawn
+
+        // Two linked public beacons flanking the cluster — real jumps work on them.
+        UniverseDataset demo;
+        RegionDef reg; reg.name = "DEMO"; reg.security = SecurityTier::High; reg.yieldMult = 1.0f;
+        demo.regions.push_back(reg);
+        BeaconDef gw; gw.name = "DEMO_GATE_W"; gw.region = "DEMO"; gw.pos = { bx - 800, 0, 260 }; gw.links = { "DEMO_GATE_E" };
+        BeaconDef ge; ge.name = "DEMO_GATE_E"; ge.region = "DEMO"; ge.pos = { bx + 800, 0, 260 }; ge.links = { "DEMO_GATE_W" };
+        demo.beacons.push_back(gw);
+        demo.beacons.push_back(ge);
+        LoadUniverse(demo);
+
+        // A harvestable ore node below the cluster.
+        SpawnResourceNode(ResourceType::Ore, 8000.0f, { bx, -240, 340 });
+
+        // A small starter fleet (unowned demo ships) in a short row.
+        for (int i = 0; i < 3; ++i)
+            SpawnFleetShip(0, ShipShapeId(), { bx + (i - 1) * 120, 170, 180 });
     }
 
     // Populate the universe with a spread of static catalog props clustered around

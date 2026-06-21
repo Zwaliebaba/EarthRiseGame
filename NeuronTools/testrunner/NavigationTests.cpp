@@ -82,7 +82,7 @@ ER_TEST(Navigation, CheckJumpReadyFuelAndBusy)
 
 ER_TEST(Navigation, LoadUniverseSpawnsBeacons)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     ER_CHECK_EQ(su.Universe().beacons.size(), size_t(3));
     ER_CHECK(su.BeaconNetId("HUB") != 0);
@@ -92,7 +92,7 @@ ER_TEST(Navigation, LoadUniverseSpawnsBeacons)
 
 ER_TEST(Navigation, JumpAcrossLinkedBeaconsConsumesFuelAndArrives)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 }); // sitting on HUB
     ER_CHECK(su.FuelOf(base)->current == 100.0f);
@@ -119,7 +119,7 @@ ER_TEST(Navigation, JumpAcrossLinkedBeaconsConsumesFuelAndArrives)
 
 ER_TEST(Navigation, JumpRejectedWhenNotLinked)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 }); // on HUB
     // HUB links only RIM; FAR is not reachable in one jump from HUB.
@@ -128,7 +128,7 @@ ER_TEST(Navigation, JumpRejectedWhenNotLinked)
 
 ER_TEST(Navigation, JumpRejectedWhenNotAtBeacon)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 50000, 0, 0 }, { 0, 0, 0 }); // far from every beacon
     ER_CHECK(su.BeginJumpTo(base, "RIM") == JumpReject::NotAtBeacon);
@@ -136,7 +136,7 @@ ER_TEST(Navigation, JumpRejectedWhenNotAtBeacon)
 
 ER_TEST(Navigation, JumpRejectedWhenOutOfFuel)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     su.FuelOf(base)->current = 5.0f; // below the 20 cost
@@ -146,7 +146,7 @@ ER_TEST(Navigation, JumpRejectedWhenOutOfFuel)
 
 ER_TEST(Navigation, InterdictionDropsBaseOutOfWarp)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     ER_CHECK(su.BeginWarpTo(base, { 300000, 0, 0 })); // align 0, base speed 10000 m/s
@@ -166,7 +166,7 @@ ER_TEST(Navigation, InterdictionDropsBaseOutOfWarp)
 
 ER_TEST(Navigation, BusyUnitCannotStartASecondTravel)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     ER_CHECK(su.BeginWarpTo(base, { 300000, 0, 0 }));
@@ -178,7 +178,7 @@ ER_TEST(Navigation, BusyUnitCannotStartASecondTravel)
 
 ER_TEST(Navigation, InterestPrefetchRecordsDestinationSector)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     su.BeginWarpTo(base, { 1310720, 0, 0 }); // sector x = 1310720 >> 14 = 80

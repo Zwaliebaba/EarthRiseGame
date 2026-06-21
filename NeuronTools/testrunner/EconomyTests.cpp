@@ -116,7 +116,7 @@ ER_TEST(Economy, FuelAndSensorRules)
 
 ER_TEST(Economy, BaseHasStorageAndSensorFromTuning)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     ER_CHECK(su.StorageOf(base) != nullptr);
@@ -127,7 +127,7 @@ ER_TEST(Economy, BaseHasStorageAndSensorFromTuning)
 
 ER_TEST(Economy, FleetCapIsEnforced)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     const uint32_t player = base; // a player ≈ their base net id
@@ -139,7 +139,7 @@ ER_TEST(Economy, FleetCapIsEnforced)
 
 ER_TEST(Economy, BuildQueueSpawnsAShip)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     // stock the base storage with enough to build (needs 100 ore, 50 ice)
@@ -162,7 +162,7 @@ ER_TEST(Economy, BuildQueueSpawnsAShip)
 
 ER_TEST(Economy, BuildWithEmptyStorageSpawnsNothing)
 {
-    ServerUniverse su;
+    ServerUniverse su(false);
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 }); // storage empty
     ER_CHECK(su.EnqueueBuild(base));
@@ -170,4 +170,18 @@ ER_TEST(Economy, BuildWithEmptyStorageSpawnsNothing)
     ER_CHECK(su.DrainBuildCompleted().empty());
     ER_CHECK(su.OwnedShipCount(base) == 0);
     ER_CHECK(!su.BuildQueueOf(base)->active); // cancelled — insufficient
+}
+
+ER_TEST(Economy, DefaultConstructorSeedsVisibleDemoContent)
+{
+    ServerUniverse su; // default → live seed (scenery + demo beacons/node/fleet)
+    ER_CHECK(su.OwnedShipCount(0) == 3);          // the starter fleet (unowned demo ships)
+    ER_CHECK(su.BeaconNetId("DEMO_GATE_W") != 0); // working, jump-linked beacons
+    ER_CHECK(su.BeaconNetId("DEMO_GATE_E") != 0);
+
+    const Snapshot snap = su.BuildSnapshot();
+    int nodes = 0;
+    for (const auto& e : snap.entities)
+        if (e.kind == EntityKind::ResourceNode) ++nodes;
+    ER_CHECK(nodes >= 1); // the harvestable resource node renders
 }
