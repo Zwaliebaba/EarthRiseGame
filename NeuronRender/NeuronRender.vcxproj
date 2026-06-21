@@ -40,6 +40,7 @@
     <ClInclude Include="DeviceResources.h" />
     <ClInclude Include="FontAtlasLayout.h" />
     <ClInclude Include="MeshGpu.h" />
+    <ClInclude Include="PixMarkers.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="SceneRenderer.h" />
     <ClInclude Include="TextureGpu.h" />
@@ -137,6 +138,15 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <!-- PIX (WinPixEventRuntime) — opt-in GPU profiling markers (§11.1, PixMarkers.h).
+       Everything is gated on the NuGet package being restored, so a checkout without
+       it builds byte-for-byte unchanged. Restore the package (packages.config) to
+       light up NEURON_USE_PIX in the x64 configs. -->
+  <PropertyGroup Label="NeuronPix">
+    <NeuronPixRoot>$(SolutionDir)packages\WinPixEventRuntime.1.0.240308001</NeuronPixRoot>
+    <NeuronUsePix Condition="Exists('$(NeuronPixRoot)\Include\WinPixEventRuntime\pix3.h')">true</NeuronUsePix>
+    <NeuronPixInclude Condition="'$(NeuronUsePix)'=='true'">$(NeuronPixRoot)\Include\WinPixEventRuntime</NeuronPixInclude>
+  </PropertyGroup>
   <PropertyGroup />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <GenerateManifest>false</GenerateManifest>
@@ -179,7 +189,8 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>$(SolutionDir)NeuronCore;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)NeuronCore;$(NeuronPixInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions Condition="'$(NeuronUsePix)'=='true'">NEURON_USE_PIX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpplatest</LanguageStandard>
     </ClCompile>
     <Link>

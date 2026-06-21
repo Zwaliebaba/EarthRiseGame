@@ -2,6 +2,7 @@
 
 #include "pch.h"
 #include "DeviceResources.h"
+#include "PixMarkers.h"
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -181,6 +182,11 @@ void DeviceResources::BeginFrame()
     winrt::check_hresult(m_cmdAllocators[m_frameIndex]->Reset());
     winrt::check_hresult(m_cmdList->Reset(m_cmdAllocators[m_frameIndex].get(), nullptr));
 
+    // Open the frame-wide PIX event; the matching End is in EndFrame so the whole
+    // recorded command list (clear, scene, canvas, present) nests under one "Frame".
+    NEURON_PIX_BEGIN(m_cmdList.get(), PixColors::Frame, "Frame %u", m_frameIndex);
+    NEURON_PIX_BEGIN(m_cmdList.get(), PixColors::Clear, "Clear + Setup");
+
     // Transition back buffer: PRESENT → RENDER_TARGET
     D3D12_RESOURCE_BARRIER rb{};
     rb.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -203,10 +209,14 @@ void DeviceResources::BeginFrame()
     D3D12_RECT     sr{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
     m_cmdList->RSSetViewports(1, &vp);
     m_cmdList->RSSetScissorRects(1, &sr);
+
+    NEURON_PIX_END(m_cmdList.get()); // "Clear + Setup"
 }
 
 void DeviceResources::EndFrame()
 {
+    NEURON_PIX_BEGIN(m_cmdList.get(), PixColors::Present, "Present transition");
+
     // Transition back buffer: RENDER_TARGET → PRESENT
     D3D12_RESOURCE_BARRIER rb{};
     rb.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -215,6 +225,9 @@ void DeviceResources::EndFrame()
     rb.Transition.StateAfter  = D3D12_RESOURCE_STATE_PRESENT;
     rb.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     m_cmdList->ResourceBarrier(1, &rb);
+
+    NEURON_PIX_END(m_cmdList.get()); // "Present transition"
+    NEURON_PIX_END(m_cmdList.get()); // "Frame" (opened in BeginFrame)
 
     winrt::check_hresult(m_cmdList->Close());
 

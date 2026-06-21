@@ -49,6 +49,8 @@ All projects keep their source and header files **flat** in the project director
 
 Shader sources live under `NeuronRender/shaders/`; compiled shader headers are generated at build time and are not in source control.
 
+PIX GPU profiling markers live in `NeuronRender/PixMarkers.h` — use the `NEURON_PIX_SCOPED` / `NEURON_PIX_BEGIN` / `NEURON_PIX_END` / `NEURON_PIX_MARKER` macros (never the raw `PIX*` names) to annotate command-list work; they wrap the PIX3 API and compile to no-ops unless `NEURON_USE_PIX` is set. `NEURON_USE_PIX` is enabled automatically in **Debug|x64** when the **WinPixEventRuntime** NuGet (in `packages.config`) is restored, and is gated entirely on the package existing so a checkout without it builds unchanged.
+
 ### Hosts
 - `ERServer/ERServer.cpp` is the authoritative dedicated server host. It owns the fixed-step simulation loop, processes UDP datagrams (`IocpUdpListener`), and broadcasts snapshots.
 - `ERHeadless/ERHeadless.cpp` runs multiple bot clients against a live server and is useful for end-to-end validation.

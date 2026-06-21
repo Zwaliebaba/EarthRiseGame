@@ -158,6 +158,11 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\Microsoft.Windows.CppWinRT.3.0.260520.1\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.3.0.260520.1\build\native\Microsoft.Windows.CppWinRT.targets')" />
+    <!-- PIX (WinPixEventRuntime) — opt-in: links WinPixEventRuntime.lib and deploys the
+         DLL into the package so NeuronRender's PIX markers (PixMarkers.h, §11.1) are
+         captured at runtime. Guarded on the package being restored, so a checkout
+         without it builds unchanged. -->
+    <Import Project="..\packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets" Condition="'$(Configuration)'=='Debug' And Exists('..\packages\WinPixEventRuntime.1.0.240308001\build\WinPixEventRuntime.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>

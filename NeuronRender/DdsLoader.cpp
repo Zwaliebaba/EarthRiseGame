@@ -2,6 +2,7 @@
 
 #include "pch.h"
 #include "DdsLoader.h"
+#include "PixMarkers.h"
 
 #include "DdsParse.h"
 
@@ -112,6 +113,7 @@ namespace Neuron::Render
     winrt::check_hresult(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, alloc.get(),
                                                    nullptr, IID_PPV_ARGS(cl.put())));
 
+    NEURON_PIX_BEGIN(cl.get(), PixColors::Upload, "DDS texture upload (%u subres)", subCount);
     for (UINT i = 0; i < subCount; ++i)
     {
       D3D12_TEXTURE_COPY_LOCATION dst{};
@@ -134,6 +136,7 @@ namespace Neuron::Render
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     cl->ResourceBarrier(1, &barrier);
+    NEURON_PIX_END(cl.get()); // "DDS texture upload"
 
     winrt::com_ptr<ID3D12CommandQueue> queue;
     D3D12_COMMAND_QUEUE_DESC qd{};

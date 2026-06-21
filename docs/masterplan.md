@@ -1,7 +1,7 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.14 — for review
-> **Date:** 2026-06-20
+> **Status:** DRAFT v0.15 — for review
+> **Date:** 2026-06-21
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
 > Microsoft SQL Server, a UWP/DirectX 12 client with **XAudio2/X3DAudio audio
@@ -14,7 +14,45 @@
 
 ## Changelog
 
-**v0.14 (this revision) — Darwinia windowed menu/options UI**
+**v0.15 (this revision) — networking scale-out pass (hundreds of players)**
+- **Folds in the MMO networking review
+  [`docs/design/review/networking-scale-review.md`](docs/design/review/networking-scale-review.md):**
+  grades the §8/§9 design + current M1a code against a **hundreds-of-players,
+  single-shard** target and turns its "spec now" items into decisions.
+- **§8.4 eviction made self-healing (correctness fix):** interest leave/despawn is no
+  longer a fire-and-forget record on the Unreliable channel (a lost despawn left a
+  **ghost entity forever**). Removals are now **tombstones reconciled against the acked
+  baseline** — re-sent until the client acks a baseline without that `netId` — so they
+  ride the same ack-advanced convergence guarantee as every other fact.
+- **§8.4 snapshot pipeline made concrete (was prose):** **cell-based publish/subscribe**
+  interest (per-sector subscriber lists), **per-entity version/dirty stamping** so a diff
+  is "entities newer than the client's acked version" not a field compare, a **named
+  priority function** for the quota scheduler, **quantized sector-local delta encoding**
+  (no `int64` on the wire), and a **per-client baseline memory budget** (App. B).
+- **§7.2/§8.5/§9 time dilation (TiDi) adopted** as the launch **graceful-degradation**
+  mechanism for single-sector pileups: under sustained tick overrun the authoritative
+  fixed step **dilates** instead of dropping ticks; clock sync carries server time so
+  interpolation follows it. Multi-shard (§19) remains the post-launch capacity lever.
+- **§8.2 channel split + large-reliable-payload path:** **gameplay commands** separated
+  from **chat/social/events** (no head-of-line stalls); an **app-level chunked reliable**
+  message defined for the rare >1200 B reliable payload (fits/market/mail) — transport
+  stays fragmentation-free.
+- **§9 sim scaling:** simulation designed for **spatial/island parallelism** (deterministic
+  partition + ordered merge) even if run serial at launch; connections **routed by
+  `connectionToken` into a slot array** (not `ip:port` string hashing); per-connection
+  reliability state moves to **fixed-size ring/bitset** (no hot-path heap).
+- **§17 M4 re-gated:** load target raised to the **real player count** with the
+  **contested-single-sector** case as the *primary* gate, plus a **per-tick sim-time**
+  gate (separate from bandwidth). **Entity aggregation/LOD** promoted to a **committed M7
+  feature** (mandatory at hundreds), not an optional lever.
+- **Risks:** R3/R16/R22 updated; **R23 (single-sector pileup → TiDi)** and **R24
+  (per-client snapshot CPU/RAM at scale)** added. App. A (tombstone + delta records,
+  command/chat split) and App. B (hundreds-contested row, server aggregate egress,
+  sim-time + baseline-RAM budgets) updated. §2 decisions + §19 updated. **No change to the
+  core wire security model or the no-bulk-sync design** — this revision specifies the
+  scale-out path that was previously deferred to M4 as prose.
+
+**v0.14 — Darwinia windowed menu/options UI**
 - **New design + implementation doc
   [`docs/design/darwinia-menu-ui.md`](docs/design/darwinia-menu-ui.md):** a **reusable
   immediate-mode window toolkit** on the CanvasRenderer (§11) that reproduces the
@@ -261,6 +299,8 @@ players at launch and designed to grow well past that.
 | **Tactical UI / radar** | **3D bracket overlay + sortable overview list + 2D radar disc** (IFF, range rings) (§22). |
 | **Communications** | **Chat channels + in-game mail + offline notifications** (§24). |
 | **Server uptime** | **24/7, rolling restarts via warm-restart; no scheduled downtime** (§26). |
+| **Scale & degradation** | Single shard sized ~100 → **designed for hundreds**: **cell pub/sub interest + per-entity-version quantized delta** snapshots (§8.4), **island-parallel sim**, **time dilation** as the overload floor (§7.2/§9); **multi-shard** is the post-launch capacity lever (§19). |
+| **Reliable channels** | **`ReliableOrdered` split → `Commands` + `Chat/Social/Events`** (no head-of-line block); large reliable payloads avoided by design, **app-level chunking only as a last resort** (§8.2). |
 | **Localization** | **English at launch, localization-ready** (string table; Unicode-capable font) (§22). |
 | **Accessibility** | **Scalable UI/HUD + audio cues** at launch (§22). |
 | First milestone | Networked tech slice, split **M1a (headless) → M1b (client)** (§17). |
@@ -284,6 +324,7 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | **XAudio2 (2.9)** (`xaudio2.h`) | NeuronAudio (client) | Low-level audio playback / voice graph (SDK; UWP-supported) |
 | **X3DAudio** (`x3daudio.h`) | NeuronAudio (client) | 3D positional audio (DSP settings for XAudio2 voices) |
 | MSBuild HLSL Compiler (`dxc`) | build-time | HLSL → embedded **SM6/DXIL** bytecode headers |
+| **WinPixEventRuntime** (`pix3.h`) | NeuronRender (client) | PIX3 GPU event/markers (§11.1, `PixMarkers.h`); MS component via NuGet. **Opt-in, Debug\|x64 only** — gated on the package being restored, so no PIX runtime ships in Release/Store builds. |
 | STL | all | 🔒 allowed |
 
 ---
@@ -445,6 +486,15 @@ row-major, row-vector, right-handed (`*RH`). A `WorldPos` fixed-point layer brid
   `MaxCatchUpTicksPerFrame`, carrying the remainder. (The provided `TimerCore.h` is a
   *variable*-step timer; the server loop must not advance by raw wall-clock delta.)
   Ticks are canonical; **snapshots 20 Hz**. Core timing stays **WinRT-free**.
+  - **Time dilation (TiDi) 🔒** — the graceful-degradation lever for the single-shard
+    pileup case (§9, R23). The fixed **step length is the sim clock**, not wall-clock:
+    when a tick consistently overruns its real-time budget (the accumulator can't drain),
+    the server **stretches the authoritative step** (slows in-game time, e.g. down to a
+    floor like 10% speed) instead of dropping ticks or racing the clock. Determinism is
+    preserved — the step *count* and order are unchanged, only their real-time spacing
+    dilates. The current dilation factor is part of the authoritative clock and is
+    published to clients (§8.5) so interpolation/prediction track **server time**, not
+    wall-clock. A normal 100-player shard never dilates; it bounds the worst case.
 - **Shared sim rules:** pure functions for movement, build costs, yields, combat
   (PvE+PvP) — used by client interpolation/validation and server authority.
 
@@ -463,13 +513,42 @@ row-major, row-vector, right-handed (`*RH`). A `WorldPos` fixed-point layer brid
   debug; test without it before Store). ERHeadless (Win32) is exempt.
 
 ### 8.2 Channels
-`Unreliable` (snapshots) · `ReliableOrdered` (commands/chat/events) ·
-`ReliableUnordered` (notifications). Per-channel 16-bit sequences are for
-reliability/ordering only — **not** the AEAD nonce (§8.3).
+`Unreliable` (snapshots) · `ReliableOrdered` **split into two independent streams —
+`Commands` (gameplay intents) and `Chat/Social/Events`** · `ReliableUnordered`
+(notifications). Per-channel 16-bit sequences are for reliability/ordering only —
+**not** the AEAD nonce (§8.3).
+
+> **Why split the reliable-ordered traffic (R-review F5).** Gameplay commands and
+> chat/social/event spam must not share one ordered stream: a burst of chat or a single
+> dropped event's retransmit would **head-of-line-block** the player's orders. They are
+> ordered *within* a stream, independent *across* streams. The channel enum is a
+> versioned wire change (App. A), so this is fixed **now**, before the format freezes.
 
 There is **no `Bulk`/world-sync channel and no on-wire fragmentation** (§8.4): the
 world is never shipped as one large artifact, so no realtime datagram ever exceeds
 the safe MTU and nothing on the gameplay path requires fragment sequencing/reassembly.
+
+**Large reliable payloads (true last-resort exception) 🔒.** A few *reliable* payloads
+can exceed the ~1200 B MTU — a full ship fit, a market order-book page, a long mail, a
+territory-state blob. The design's first answer is **"don't"** — and the escape hatch is
+explicitly the path taken **only when every other option has been exhausted**, never a
+convenience for "this message is a bit big." In priority order, a payload that looks too
+large must first be:
+1. **Kept small by design.** Reference data by **id**, not by value (send a fit/template
+   id the client already has, not the expanded fit); send **diffs**, not whole objects.
+2. **Streamed as interest-deltas** if it is world state at all — it belongs on the §8.4
+   snapshot loop, decomposed into per-entity records, not sent as one blob.
+3. **Paginated** if it is a list/book (markets, inventory): request one MTU-bounded page
+   at a time, each its own ordinary reliable message.
+4. **Fetched out-of-band over HTTP**, hash-addressed and cached like assets (§8.4), for
+   anything genuinely bulky or cold (large/static catalogs, history).
+- **Only if 1–4 all genuinely fail** does an **application-level chunked reliable
+  message** apply: the *application* splits the payload into MTU-sized **reliable** records
+  carrying `{msgId, partIdx, partCount}` and reassembles above the transport. Each such
+  use is a **documented, reviewed exception** (it is the one place app-level reassembly
+  exists); the transport itself stays fragmentation-/reassembly-free, and **nothing on the
+  snapshot hot path ever chunks**. If chunking starts showing up routinely, that is a
+  design smell to fix at the source (1–3), not to normalise.
 
 ### 8.3 Reliability & encryption
 **Reliability:** 16-bit per-channel sequences; **ack + 32-bit ack-bitfield**; RTT/RTO
@@ -543,9 +622,49 @@ machinery disappear:
   (the same scheduler as cold-start, just from a non-empty baseline). This holds the
   "never larger than MTU, never fragmented" invariant even in dense interest sets (e.g.
   large fights), at the cost of **bounded staleness** on the least-relevant entities.
-- **Eviction.** When an entity leaves a player's interest set it is sent once as a
-  **leave/despawn** record so the client drops it; thereafter it is absent from that
-  client's baselines.
+- **Eviction (tombstone-reconciled, self-healing) 🔒.** When an entity leaves a player's
+  interest set (or is destroyed) the server marks a **tombstone** in that client's
+  pending-removal set and **keeps emitting the leave/despawn record until the client acks
+  a baseline that no longer contains that `netId`** — exactly the ack-advanced rule used
+  for live entities. A despawn is therefore **not fire-and-forget**: were it sent only
+  once on the Unreliable channel and lost, the server would otherwise emit nothing further
+  about an out-of-interest entity and the client would keep a **ghost forever**. Tombstones
+  cost one record until acked, then the entity is absent from that client's baselines.
+  (This closes the one place the otherwise self-healing snapshot model did not heal.)
+
+**Snapshot pipeline — the concrete data structures (M4) 🔒.** "Delta vs the client's
+last acked baseline" implies the server holds per-client state and recomputes a
+prioritised, byte-budgeted diff per client per snapshot — naïvely `O(players ×
+visible-entities)` of CPU *and* RAM every 50 ms, which is the real MMO bottleneck at
+hundreds of players (R24). The model is made concrete, not prose:
+- **Cell-based publish/subscribe interest, not per-client pull.** Each sector cell
+  (§6.3) holds a **subscriber list**; a player subscribes/unsubscribes as it crosses
+  sector boundaries (an explicit enter/leave event — which the §8.4 tombstone rule needs
+  anyway). An entity mutation is enqueued **once to its cell's subscribers**, turning the
+  broadcast from `O(players × entities)` into `O(Σ subscriptions)`.
+- **Per-entity version/dirty stamping.** Each replicated entity carries a monotonic
+  **version** bumped when its replicated state changes; the per-client baseline stores the
+  **last acked version per `netId`**. A diff is then "entities whose version > the client's
+  acked version," **not** a field-by-field compare. (Extends the existing per-record
+  source-`tick` LWW tag into the server-side relevance model.)
+- **A named priority function** for the quota scheduler (replaces "closest/most important
+  first"):
+  `priority(e, client) = relevance(distance, IFF, is-target, is-own-fleet, is-base) ×
+  staleness(ticks since last sent to this client)`, round-robined into the per-tick MTU
+  byte budget. It is a function with units, so it is **testable and tunable** (§16.3,
+  §21).
+- **Quantized sector-local delta encoding (no `int64` on the wire).** Because an entity is
+  in the client's interest set its sector is already known, so positions ship as
+  **sector-local quantized deltas** with a **changed-field mask** (a stationary entity
+  costs ≈0), bit-packed via the serde primitives (§7.2) — never absolute `int64` per axis
+  (mirrors the "no `int64` reaches the GPU/audio" rule, R2). This is what makes the
+  App. B ~16 B/delta target reachable rather than the ~46 B fixed record of the M1a slice.
+- **Per-client baseline memory budget.** The acked-version map + tombstone set is sized
+  per client (bytes/client × max clients) and stated in App. B, because that — together
+  with the per-tick encode CPU — is what sizes a shard's RAM and core count, not
+  per-client kbit/s.
+- **Encoding still runs on the read-only job pool** over a frozen post-tick snapshot of
+  versions/positions (§9), so the per-client diffs parallelise across cores.
 
 ### 8.5 Connection sequence
 1. **Stateless cookie:** client → server hello; server replies with a token derived
@@ -555,7 +674,10 @@ machinery disappear:
    rejected with a clear reason before any state is allocated.
 3. **CNG ECDH** handshake with **server-key signature verification** → shared key.
 4. **Clock sync:** RTT/offset estimation (timestamp echo) so interpolation delay and
-   later prediction share a common clock.
+   later prediction share a common clock. The echoed server time is the **authoritative
+   sim clock including the current time-dilation factor** (§7.2/§9), so clients track
+   **server time, not wall-clock**, and interpolation stays correct while a sector is
+   dilated.
 5. **Login** (§14, custom username/password) over the encrypted channel → verify vs
    SQL → expiring **session token**.
 6. Enter the tick/snapshot loop directly (baseline **∅**) — no separate world-sync
@@ -567,16 +689,41 @@ machinery disappear:
 - Single Win32 console exe (one shard, ~100 players) in a **Windows Server Core
   container** (§20); **stateless** (durable state in SQL Server).
 - **Threading (💡):** IOCP net threads → decode/reliability/decrypt → enqueue; a
-  **single-threaded 30 Hz simulation** owns state; a **persistence thread** does the
-  outbox + write-behind via ODBC. MPSC queues. Reliability/decrypt state is
-  **per-connection-affinitised** (or lock-free per-conn queues) so IOCP threads never
-  race on a connection's sequence/nonce/decrypt state.
+  **30 Hz simulation** owns state (single-threaded at launch, **designed for island
+  parallelism** — see below); a **persistence thread** does the outbox + write-behind via
+  ODBC. MPSC queues. Reliability/decrypt state is **per-connection-affinitised** (or
+  lock-free per-conn queues) so IOCP threads never race on a connection's
+  sequence/nonce/decrypt state.
+- **Connection routing by token, not string (R-review).** Datagrams route by the 64-bit
+  `connectionToken` into a **generation-tagged slot/index array** (like the ECS handles),
+  **not** an `ip:port` string hash — so the IOCP per-connection-affinity lanes dispatch by
+  lane with no hot-path hashing/allocation. (M1a's `unordered_map<"ip:port">` is a slice
+  shortcut, replaced at M4.)
+- **Per-connection reliability state is fixed-size.** The sliding-window ack model already
+  implies bounded history; per-connection sequence/ack/replay state uses **ring buffers /
+  bitsets**, not per-message hash containers, so it adds no hot-path heap traffic at
+  hundreds of connections (extends the §7.2 no-global-heap-in-tick rule to the net layer).
 - **Tick:** commands → systems (movement, harvest, build, **PvE AI**, **PvP**) →
-  advance fixed step → per-player interest snapshots → net → periodic persistence
-  batch.
-- **Snapshot encoding** (interest + delta for ~100 players) runs over a **read-only
-  job pool** against a frozen post-tick state — the first scaling lever if the single
-  sim thread saturates (M4). M1a may encode inline.
+  advance fixed step (**dilated under overload**, §7.2) → per-player interest snapshots →
+  net → periodic persistence batch.
+- **Sim parallelism (design now, run serial at launch) 🔒.** Single-threaded at 30 Hz is
+  fine at ~100 players; at **hundreds** in a contested sector one core is the first hard
+  wall (R23), and the determinism rule (§7.2) makes naïve threading unsafe. So the sim is
+  **structured for spatial/island parallelism from the start**: systems operate on
+  sector-partitioned **islands** that only interact within an island, runnable on a job
+  graph with a **fixed, ordered reduce** (determinism is a *scheduling* property —
+  partition + ordered merge — never a data race). Launch may execute islands serially;
+  the partitioning is reserved now because retrofitting it after systems are written is
+  far more expensive. The **snapshot read-only job pool** (below) parallelises *encoding*;
+  this parallelises the *sim* itself.
+- **Time dilation is the load-shedding floor (§7.2, R23).** When islands in a hot sector
+  can't hold 33.3 ms even parallelised, the authoritative step **dilates** for the shard
+  (or, later, per-island) rather than dropping ticks — bounded, EVE-style graceful
+  degradation for the inevitable single-sector pileup, with multi-shard (§19) as the
+  separate post-launch *capacity* lever.
+- **Snapshot encoding** (interest + delta, §8.4) runs over a **read-only job pool**
+  against a frozen post-tick state — parallelises the per-client diffs across cores. M1a
+  may encode inline.
 - **PvE NPCs** are server ECS entities (`ERServer/ai/`), distinct from *bots*.
 - DB is **out of the tick hot path** — SQL latency never stalls the sim.
 
@@ -671,9 +818,15 @@ integrated, ample for the cheap low-poly Darwinia look. No mesh shaders / ray tr
   handle DPI/orientation via `DisplayInformation`; on UWP **suspend**, call
   `IDXGIDevice3::Trim()` to release memory, rebuild on resume; on
   `DXGI_ERROR_DEVICE_REMOVED`, recreate the device (DRED logs the cause).
-- **Profiling:** **PIX markers** + a **timestamp query heap** feed the render
+- **Profiling:** **PIX3 markers** + a **timestamp query heap** feed the render
   frame-time perf gate (§16.3, App. B). Render runs on its own thread, decoupled from
-  the sim/snapshot cadence.
+  the sim/snapshot cadence. PIX events are implemented in `NeuronRender/PixMarkers.h`
+  (thin `NEURON_PIX_*` wrappers over `PIXScopedEvent`/`PIXBeginEvent`/`PIXEndEvent`/
+  `PIXSetMarker`); the command stream is annotated with a `Frame → Clear/Scene/Canvas/
+  Present` hierarchy plus resource-upload ranges, so captures read as a labelled pass
+  timeline. Markers are **opt-in and zero-cost when off** — `NEURON_USE_PIX` is gated on
+  the **WinPixEventRuntime** NuGet being restored and is enabled only in **Debug|x64**,
+  so Release/Store builds carry no PIX runtime dependency.
 
 ### 11.2 Camera & VFX / particles 🔒
 - **Camera (space-RTS):** right-handed perspective; **orbit / pan / zoom / follow**,
@@ -1171,9 +1324,16 @@ over a 6–12-ship fleet + mobile base; **navigation: warp + jump-beacon network
 return → build a ship, **warp/jump across beacons**, and **command a multi-ship fleet**
 to clear a basic NPC site, server-authoritative.
 
-**M4 — Scale & interest** *(L)* — sector subscriptions, delta compression, snapshot
-job pool; **ERHeadless ~100 bots**. **Done:** 100-bot load test holds 30 Hz within
-the bandwidth budget (App. B); per-client bandwidth measured vs the M0 estimate.
+**M4 — Scale & interest** *(L)* — **cell pub/sub interest** + per-entity version
+stamping, **quantized delta compression** (tombstone eviction, §8.4), snapshot job pool;
+**token-indexed connection routing** + IOCP per-connection affinity (§9); **time-dilation
+accumulator** (§7.2). **ERHeadless to the target player count (hundreds), not just 100**,
+with a **contested single-sector pileup** scenario as the **primary** gate (the dispersed
+case passes while the pileup hides the failure — R23). **Done:** the contested-sector load
+test holds its frame budget under **two separate gates** — **per-tick sim time p99**
+*and* per-client **bandwidth** (App. B) — degrading via **bounded time dilation**, never
+ticket-dropping; per-client downstream + **per-client baseline RAM** measured vs the App. B
+budgets; the §21 net/sim counters are wired *before* the run, not during.
 
 **M5 — Accounts, auth & persistence** *(M–L)* — real login (custom username/password,
 PBKDF2 + pepper + rate-limit); ODBC persist layer + schema/migrations + **outbox
@@ -1198,8 +1358,11 @@ capture/hold timers, upkeep/yield, ownership persistence); **player crafting eco
 insurance**; **dynamic faction invasions** + **procedural anomalies/expeditions**;
 **protected starter onboarding** + objective chain; retention loop; **full UI suite**
 (fitting / market / research / inventory / territory), **in-game mail + notifications**
-(§24), **touch control scheme** (§23). **Interest at scale:** entity aggregation/LOD
-validated for contested sectors (App. B, R16). **Done:** a full sandbox session —
+(§24), **touch control scheme** (§23). **Interest at scale:** **entity aggregation/LOD is
+a committed feature here, not an optional lever** — at hundreds of players a contested
+sector *must* send distant fleets as a **cluster, not N ships** (plus projectile batching)
+to hold App. B; validated for contested sectors (App. B, R16, R24). **Done:** a full
+sandbox session —
 onboard in high-sec, build & fit a fleet, run anomalies, trade, push into null, and
 **claim & hold territory** through a contested fight — playable end-to-end by players +
 bots (mouse+keyboard and touch), with zero economy loss across a server restart.
@@ -1212,7 +1375,7 @@ bots (mouse+keyboard and touch), with zero economy loss across a server restart.
 | --- | --- | --- | --- |
 | R1 | **UWP networking sandbox / loopback / platform decline** | High | §8.1; `ISocket`; headless Win32 dodges loopback; test Store path early (M1b). **UWP kept for Store reach; revisit Win32/Windows App SDK if Store is dropped.** |
 | R2 | `int64`/sector vs float GPU precision | Med | Floating origin + sector-local floats (~1 mm @ S=14); single sector-offset representation (§6). |
-| R3 | Single-shard scaling to 100 | Med | 30 Hz sim; interest mgmt + delta compression + snapshot job pool; ERHeadless load tests (M4). |
+| R3 | Single-shard scaling (100 now → **hundreds**) | Med→**High** | 30 Hz sim; **cell pub/sub interest** + per-entity version stamping + **quantized delta** + snapshot job pool (§8.4); **island-parallel sim** + **time dilation** floor (§9); ERHeadless load tests **at the target count, contested-sector primary** (M4). |
 | R4 | **External DB latency/availability** | Med | DB out of tick hot path; in-memory sim; outbox + write-behind; co-locate ERServer near SQL/Azure SQL. |
 | R5 | **K8s + Windows containers + UDP** | Med | Windows node pool; **UDP-capable LoadBalancer**; one pod per shard + **client→pod affinity** (§20). |
 | R6 | **Credential/session security & active MITM** | High | **Server-key-pinned ECDH** + AES-GCM; **nonce-per-packet + replay window**; PBKDF2 + pepper; rate-limit/lockout; tokens; `Encrypt=yes` to SQL. |
@@ -1225,13 +1388,15 @@ bots (mouse+keyboard and touch), with zero economy loss across a server restart.
 | R13 | **GCM nonce reuse / handshake DoS** | High | Direction‖64-bit packet-counter nonce, rekey-before-wrap; stateless cookie before ECDH (§8.3/§8.5). |
 | R14 | **Fixed-step vs provided variable-step timer** | Med | Real accumulator with bounded catch-up, WinRT-free core; unit-tested in M0 (§7.2). |
 | R15 | **Gameplay depth / retention thin** (was: no real game design) | **High** | §13 rewritten to a full spec (combat/progression/economy/conquest/PvE/onboarding); retention loop defined (§13.10); validate the *fun* with bots + a closed playtest before M7 polish. |
-| R16 | **Fleet entity-count blows the bandwidth/sim budget** | **High** | Launch fleet cap 6–12; **interest-bounded** per-client visible set + entity aggregation/LOD + projectile batching; load-test the *contested-sector* case at M4 (App. B). |
+| R16 | **Fleet entity-count blows the bandwidth/sim budget** | **High** | Launch fleet cap 6–12; **interest-bounded** per-client visible set + entity aggregation/LOD (**committed M7 feature** — fleet-as-cluster) + projectile batching; load-test the *contested-sector* case at M4 (App. B). |
 | R17 | **Conquest too brutal for newcomers → no growth** | High | High-sec protected onboarding (§13.5/13.9); ship insurance + base disable-not-destroy; catch-up/flattened power curve (§13.3); onboarding objective chain. |
 | R18 | **Thin social glue (light fleets only) hurts retention & conquest defense** | Med–High | Individual ownership works at ~100 players; **persistent corporations tracked as the first social expansion** (§13.8/§19) — promote forward if retention or coordinated defense suffers. |
 | R19 | **Audio on UWP / WAV-only / X3DAudio correctness** | Low | XAudio2 2.9 + X3DAudio are SDK components (UWP-supported); custom RIFF reader + `wavcheck` validate PCM-16; emitter math + parser unit-tested (NeuronAudioTest, testrunner); suspend/resume voice handling; audio is presentation-only (no sim/determinism impact). |
 | R20 | **UI/HUD scope, esp. RTS-on-touch** | **Med→Low** | **Decided approach (§23.1):** an **overview-driven command model** shared by desktop & touch (per EVE Echoes prior art) — select/command via overview list + smart-select + smart action, **camera on two-finger only** (no one-finger select-vs-pan ambiguity), box-select demoted to a desktop shortcut. Stances/autopilot cut APM; custom immediate-mode toolkit on Canvas; touch spec in `docs/design/touch-controls.md`; still prototype/validate touch separately before relying on it. |
 | R21 | **Warp/jump interception netcode & fast interest churn** | Med | Warp/jump are sim-stepped & server-authoritative (interdiction validated); **prefetch destination-sector interest** on warp/jump start; beacon graph is data-driven; test interception + sector-transition churn at M3/M7 (§13.12, §8.4). |
 | R22 | **24/7 uptime depends on warm-restart reliability** | Med–High | Warm-restart (snapshot+outbox) is now an **uptime SLA**, not just crash recovery: restart drills in M5; reconnect **backoff/jitter** against thundering-herd; rolling-restart playbook (§26); economy stays zero-loss via outbox (§15). |
+| R23 | **Single-sector pileup on one contiguous shard** (everyone in one fight; the EVE "Jita" case) | **High** | **Time dilation** (§7.2/§9) as the bounded graceful-degradation floor — stretch the authoritative step under overload, never drop ticks; **island-parallel sim** to raise the ceiling first; entity aggregation/LOD (R16); **multi-shard is the separate post-launch capacity lever** (§19). Validate the pileup as the **primary** M4 gate, not the dispersed case. |
+| R24 | **Per-client snapshot CPU/RAM at hundreds of players** (per-client baselines + per-client prioritised diffs every 50 ms) | **High** | Concrete pipeline (§8.4): **cell pub/sub** (`O(Σ subscriptions)`, not `O(players×entities)`), **per-entity version stamping** (diff by version, not field compare), **read-only job-pool encode**, **per-client baseline memory budget** (App. B). Wire §21 counters before the M4 run; gate on per-tick **encode time** + **baseline RAM**, not just kbit/s. |
 
 ---
 
@@ -1275,6 +1440,12 @@ SM6/DXIL via `dxc`; M1 split M1a/M1b; crypto hardening.
   interdiction strength; tune for interception gameplay without making travel tedious.
 - **Mail/notification volume & anti-spam** (rate-limits, blocklists) at scale (§24).
 - **Particle/voice budgets** in big fights (render + audio) vs App. B (R16).
+- **Snapshot priority-function weights** (distance/IFF/target/own-fleet/staleness) and the
+  **per-client visible-entity cap** — tune against the M4 contested-sector test (§8.4, R24).
+- **Time-dilation policy** (overrun threshold, dilation floor e.g. 10%, per-shard vs
+  per-island, recovery ramp) — tune against the pileup test (§7.2/§9, R23).
+- **Per-client baseline RAM** at the target player count — the number that, with encode
+  CPU, sizes a shard's hardware (App. B, R24).
 
 **Deferred to post-launch (fit the v0.9 frame, not selected now):**
 - **Persistent corporations / alliances + diplomacy & shared wallet** (launch = light
@@ -1288,8 +1459,11 @@ SM6/DXIL via `dxc`; M1 split M1a/M1b; crypto hardening.
 - **Colorblind-safe IFF** and **visual alerts/subtitles** for audio cues — recommended
   accessibility follow-ups beyond the launch scope (§22.5).
 - Federated **Entra ID** / social login (launch is custom username/password).
-- **Multi-shard** topology + directory/matchmaking — the main lever to grow well past
-  100 players (§13.1 growth intent).
+- **Multi-shard** topology + directory/matchmaking — the **capacity** lever to grow well
+  past one shard (§13.1 growth intent). Note: the *single-shard* path to **hundreds** is
+  now in-plan (§8.4 pipeline + §9 island-parallel sim + §7.2 **time dilation** as the
+  overload floor, v0.15); multi-shard is the next lever *after* a single shard is
+  saturated, not a prerequisite for hundreds.
 - Azure SQL **tier sizing**, read-replicas, geo-redundancy.
 - Revisiting **Win32 / Windows App SDK** if Microsoft Store distribution is dropped.
 
@@ -1523,10 +1697,24 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 ├── Header (AAD): protocol_id u32 · connection_token u64 · packet_number u64
 │                 · per-channel: sequence u16 · ack u16 · ack_bits u32
 └── Payload (encrypted): 1..N messages { channel u8, msg_type u8, length u16, body … }
+
+channel ∈ { Unreliable, Commands, ChatSocialEvents, ReliableUnordered }   // §8.2 split
+
+Snapshot body (Unreliable):  tick u32 · count u16 · records[count]
+  record: netId u32 · flags u8 (changed-field mask | tombstone bit) ·
+          [Δsector-local pos quantised] · [Δfields…]                 // §8.4, no int64 on wire
+  tombstone record: netId u32 · flags(tombstone)                     // re-sent until acked
+
+Large reliable (last-resort, §8.2): body carries { msgId u32, partIdx u16, partCount u16 }
+  — application-level chunking; transport stays fragmentation-free.
 ```
 > The 64-bit `packet_number` doubles as the AEAD nonce input and feeds the replay
-> window; the 16-bit per-channel `sequence` is reliability/ordering only. Every
-> message fits one safe-MTU datagram (§8.4) — there are no fragment fields.
+> window; the 16-bit per-channel `sequence` is reliability/ordering only. Every realtime
+> message fits one safe-MTU datagram (§8.4) — there are no transport fragment fields.
+> Snapshots carry **quantized sector-local deltas + a changed-field mask** (not absolute
+> `int64`), and **tombstones** for eviction (re-sent until the client acks a baseline
+> without that `netId`). `ReliableOrdered` is **two independent streams** —
+> `Commands` and `ChatSocialEvents` — so neither head-of-line-blocks the other.
 
 ## Appendix B — Tick & timing budget
 | Quantity | Target |
@@ -1539,6 +1727,9 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 | Launch fleet cap | **6–12 ships/player (💡 8)** — data-driven (§13.1) |
 | **Per-client downstream (re-derived for fleets)** | see below — **interest-bounded**, not flat 100 |
 | Per-client upstream | RTS intents/orders only, ≪ downstream |
+| **Per-tick sim time (gate)** | **p99 < 33.3 ms at the contested-sector entity count** — separate gate from bandwidth (§9, R23/R24) |
+| **Per-client baseline RAM (gate)** | acked-version map + tombstone set, **bytes/client × max clients** — sizes shard RAM (§8.4, R24) |
+| **Server aggregate egress** | **N clients × per-client downstream** — datacenter-NIC-bound; the per-tick **encode CPU** fails before the NIC |
 
 > **v0.9 — fleets change the entity math.** v0.8 assumed a flat ~100 visible
 > entities. With fleet command, a *contested sector* is roughly
@@ -1556,6 +1747,22 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 >   case — not just the dispersed case — in the M4 load test.
 > - **Growth:** the shard is sized for ~100 now but the fleet cap, interest budget,
 >   and (later) multi-shard (§19) are the knobs to grow "much more" when successful.
+>
+> **v0.15 — hundreds, single contested sector (the worst case to size for).** At a few
+> hundred concurrent players the binding limits are **server-side**, not per-client
+> kbit/s:
+> - **Per-tick encode CPU.** Per-client prioritised diffs every 50 ms are `O(Σ
+>   subscriptions)` with cell pub/sub (§8.4), parallelised over the read-only job pool
+>   (§9). This — with **sim** time (R23) — is the **first** thing to blow the 33.3 ms
+>   budget, well before any NIC. Gate both **sim p99** and **encode p99** at M4.
+> - **Per-client baseline RAM** (acked-version map + tombstones) × N clients sizes shard
+>   memory; budget it explicitly (table above).
+> - **Aggregation is mandatory, not optional.** With hundreds in one fight, distant fleets
+>   *must* replicate as **clusters, not N ships** (committed M7 feature, R16) and
+>   projectiles batch — otherwise even interest-bounded per-client sets exceed ~250.
+> - **Degrade, don't fall over.** When sim+encode can't hold the step, **time dilation**
+>   (§7.2/§9) slows in-game time for the hot sector — bounded, recoverable — rather than
+>   dropping ticks. Multi-shard (§19) is the separate capacity lever beyond one shard.
 
 ## Appendix C — Glossary
 - **Shard** — one server process / one contiguous world.
@@ -1606,9 +1813,16 @@ UDP datagram (post-handshake: AES-GCM AEAD; nonce = dir-bit ‖ 64-bit packet nu
 
 ---
 
-*End of DRAFT v0.14 — Darwinia windowed menu/options UI (§22.6; reusable Canvas window
+*End of DRAFT v0.15 — networking scale-out pass for **hundreds of players** (folds in
+`docs/design/review/networking-scale-review.md`): self-healing tombstone eviction +
+concrete snapshot pipeline (cell pub/sub, per-entity version stamping, named priority
+function, quantized sector-local delta) §8.4; **time dilation** §7.2/§9; reliable-channel
+split + last-resort large-payload chunking §8.2; island-parallel sim + token-indexed
+routing §9; M4 re-gated to the real player count with the contested-sector case primary,
+plus sim-time/baseline-RAM gates §17/App. B; R23/R24 added. Earlier: v0.14 Darwinia
+windowed menu/options UI (§22.6; reusable Canvas window
 toolkit using InterfaceGrey/InterfaceRed skins + EditorFont; folded into M2; spec in
-`docs/design/darwinia-menu-ui.md`). Earlier: v0.13 repository-structure cleanup (flat
+`docs/design/darwinia-menu-ui.md`); v0.13 repository-structure cleanup (flat
 source tree + VS Filters, NeuronCore.vcxitems, EarthRise.slnx, Config/; §4/§5/§16), v0.12
 overview-driven control model (§23,
 EVE-Echoes-style; shared by desktop & touch; box-select demoted; touch ambiguity designed
