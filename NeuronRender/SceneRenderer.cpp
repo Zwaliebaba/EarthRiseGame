@@ -9,6 +9,8 @@
 // These headers are build artifacts; not checked into source control.
 #include "CompiledShaders/SceneVS.h"
 #include "CompiledShaders/ScenePS.h"
+#include "CompiledShaders/SceneTexVS.h"
+#include "CompiledShaders/SceneTexPS.h"
 
 #include <algorithm>
 #include <DirectXMath.h>
@@ -117,22 +119,25 @@ namespace Neuron::Render
   // ---------------------------------------------------------------------------
   // Initialize
   // ---------------------------------------------------------------------------
-  bool SceneRenderer::Initialize(DeviceResources* dr)
+  bool SceneRenderer::Initialize(DeviceResources* dr, DXGI_FORMAT sceneColorFormat)
   {
     m_dr = dr;
     m_device = dr->Device();
 
-    // --- Root signature: one entry — root constants (16 floats = 1 float4x4) ---
-    D3D12_ROOT_PARAMETER param{};
-    param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    param.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-    param.Constants.ShaderRegister = 0;
-    param.Constants.RegisterSpace = 0;
-    param.Constants.Num32BitValues = 16;
+    // --- Root signature: b0 viewProj (VS, 16 floats) + b1 lighting (PS, 16) ---
+    D3D12_ROOT_PARAMETER param[2]{};
+    param[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    param[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+    param[0].Constants.ShaderRegister = 0; // b0
+    param[0].Constants.Num32BitValues = 16;
+    param[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    param[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    param[1].Constants.ShaderRegister = 1; // b1 (Lighting.hlsli)
+    param[1].Constants.Num32BitValues = 28;
 
     D3D12_ROOT_SIGNATURE_DESC rsDesc{};
-    rsDesc.NumParameters = 1;
-    rsDesc.pParameters = &param;
+    rsDesc.NumParameters = 2;
+    rsDesc.pParameters = param;
     rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
     winrt::com_ptr<ID3DBlob> sigBlob, errBlob;
@@ -162,7 +167,7 @@ namespace Neuron::Render
     psoDesc.InputLayout = {kLayout, static_cast<UINT>(std::size(kLayout))};
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
-    psoDesc.RTVFormats[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
+    psoDesc.RTVFormats[0] = sceneColorFormat;
     psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     psoDesc.SampleMask = 0xFFFFFFFFu;
     psoDesc.SampleDesc.Count = 1;
@@ -183,6 +188,74 @@ namespace Neuron::Render
     psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
 
     winrt::check_hresult(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(m_pso.put())));
+
+    // --- Textured pipeline (root constants + diffuse SRV table + static sampler) ---
+    {
+      D3D12_DESCRIPTOR_RANGE srvRange{};
+      srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+      srvRange.NumDescriptors = 1;
+      srvRange.BaseShaderRegister = 0; // t0
+
+      D3D12_ROOT_PARAMETER params[3]{};
+      params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+      params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+      params[0].Constants.ShaderRegister = 0; // b0 viewProj
+      params[0].Constants.Num32BitValues = 16;
+      params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+      params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+      params[1].DescriptorTable.NumDescriptorRanges = 1;
+      params[1].DescriptorTable.pDescriptorRanges = &srvRange;
+      params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+      params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+      params[2].Constants.ShaderRegister = 1; // b1 lighting (Lighting.hlsli)
+      params[2].Constants.Num32BitValues = 28;
+
+      D3D12_STATIC_SAMPLER_DESC samp{};
+      samp.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+      samp.AddressU = samp.AddressV = samp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+      samp.MaxLOD = D3D12_FLOAT32_MAX;
+      samp.ShaderRegister = 0; // s0
+      samp.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+
+      D3D12_ROOT_SIGNATURE_DESC rsTex{};
+      rsTex.NumParameters = 3;
+      rsTex.pParameters = params;
+      rsTex.NumStaticSamplers = 1;
+      rsTex.pStaticSamplers = &samp;
+      rsTex.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+      winrt::com_ptr<ID3DBlob> texSig, texErr;
+      winrt::check_hresult(
+          D3D12SerializeRootSignature(&rsTex, D3D_ROOT_SIGNATURE_VERSION_1, texSig.put(), texErr.put()));
+      winrt::check_hresult(m_device->CreateRootSignature(0, texSig->GetBufferPointer(),
+                                                         texSig->GetBufferSize(),
+                                                         IID_PPV_ARGS(m_rootSigTex.put())));
+
+      // Textured input layout: stream-0 adds the per-vertex UV (CMO offset 44).
+      static constexpr D3D12_INPUT_ELEMENT_DESC kLayoutTex[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 4, DXGI_FORMAT_R32G32_FLOAT, 0, 44, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"TEXCOORD", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+        {"TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+        {"TEXCOORD", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+        {"TEXCOORD", 3, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 64, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1},
+      };
+      D3D12_GRAPHICS_PIPELINE_STATE_DESC texPso = psoDesc; // inherit RT/DS/raster/blend
+      texPso.pRootSignature = m_rootSigTex.get();
+      texPso.VS = {g_pSceneTexVS, sizeof(g_pSceneTexVS)};
+      texPso.PS = {g_pSceneTexPS, sizeof(g_pSceneTexPS)};
+      texPso.InputLayout = {kLayoutTex, static_cast<UINT>(std::size(kLayoutTex))};
+      winrt::check_hresult(m_device->CreateGraphicsPipelineState(&texPso, IID_PPV_ARGS(m_psoTex.put())));
+
+      D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
+      srvHeapDesc.NumDescriptors = kMaxShapes; // one diffuse SRV per registered shape
+      srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+      srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+      winrt::check_hresult(m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(m_srvHeap.put())));
+      m_srvDescSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    }
 
     // --- Upload geometry via a temporary command list ---
     // (Caller runs us inside the frame's command list which is open at Initialize time;
@@ -264,10 +337,41 @@ namespace Neuron::Render
   }
 
   // ---------------------------------------------------------------------------
+  // SetShape — register the mesh (and optional diffuse) drawn for a catalog id.
+  // Invalid meshes are ignored; a missing/invalid diffuse leaves the shape on the
+  // untextured emissive path. Each diffuse gets its own SRV-heap slot.
+  // ---------------------------------------------------------------------------
+  void SceneRenderer::SetShape(uint16_t id, MeshGpu mesh, TextureGpu diffuse)
+  {
+    if (!mesh.valid() || !m_device) return;
+
+    Shape shape;
+    shape.mesh = std::move(mesh);
+
+    if (diffuse.valid() && m_srvHeap && m_nextSrv < kMaxShapes)
+    {
+      shape.srvIndex = m_nextSrv++;
+      shape.diffuse = std::move(diffuse);
+
+      D3D12_CPU_DESCRIPTOR_HANDLE h = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+      h.ptr += static_cast<SIZE_T>(shape.srvIndex) * m_srvDescSize;
+
+      D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+      srv.Format = shape.diffuse.format;
+      srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+      srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      srv.Texture2D.MipLevels = shape.diffuse.mipCount ? shape.diffuse.mipCount : 1u;
+      m_device->CreateShaderResourceView(shape.diffuse.resource.get(), &srv, h);
+    }
+
+    m_shapes[id] = std::move(shape);
+  }
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
-  void SceneRenderer::Render(ID3D12GraphicsCommandList* cl, const float viewProjT[16], const SceneEntity* entities,
-                             uint32_t count)
+  void SceneRenderer::Render(ID3D12GraphicsCommandList* cl, const DirectX::XMFLOAT4X4& viewProj,
+                             const SceneEntity* entities, uint32_t count)
   {
     // Select this frame's instance buffer (avoids racing the GPU on the buffer
     // still being read by the previous in-flight frame).
@@ -277,11 +381,19 @@ namespace Neuron::Render
 
     NEURON_PIX_SCOPED(cl, PixColors::Scene, "Scene (%u instances)", count);
 
-    // Fill per-instance buffer.
-    for (uint32_t i = 0; i < count; ++i)
+    // Group entities by shapeId so each registered mesh is drawn in one instanced
+    // call. Sort a stable index list, fill the per-instance buffer in that order,
+    // then issue one DrawRun per contiguous shapeId run (StartInstanceLocation
+    // indexes into the shared instance buffer).
+    std::array<uint32_t, kMaxEntities> order;
+    for (uint32_t i = 0; i < count; ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.begin() + count,
+                     [&](uint32_t a, uint32_t b) { return entities[a].shapeId < entities[b].shapeId; });
+
+    for (uint32_t k = 0; k < count; ++k)
     {
-      const auto& e = entities[i];
-      InstanceData& inst = m_instPtr[fi][i];
+      const auto& e = entities[order[k]];
+      InstanceData& inst = m_instPtr[fi][k];
 
       // World matrix (scale × rotation around Y × translation), row-major.
       const float c = std::cos(e.yaw), s = std::sin(e.yaw);
@@ -303,7 +415,8 @@ namespace Neuron::Render
       inst.world[3][2] = 0.f;
       inst.world[3][3] = 1.f;
 
-      // Color: use per-entity override if >= 0, else default by kind.
+      // Color: per-entity override if >= 0, else default by kind. (Only used by
+      // the untextured path / as a tint; textured shapes sample their diffuse.)
       if (e.r >= 0.f)
       {
         inst.color[0] = e.r;
@@ -311,9 +424,8 @@ namespace Neuron::Render
         inst.color[2] = e.b;
         inst.color[3] = 1.f;
       }
-      else if (e.kind == 0)
+      else if (e.kind == static_cast<uint8_t>(1)) // Base
       {
-        // Base: neon blue
         inst.color[0] = 0.f;
         inst.color[1] = 0.5f;
         inst.color[2] = 1.f;
@@ -321,7 +433,6 @@ namespace Neuron::Render
       }
       else
       {
-        // Ship: orange
         inst.color[0] = 1.f;
         inst.color[1] = 0.3f;
         inst.color[2] = 0.f;
@@ -329,23 +440,61 @@ namespace Neuron::Render
       }
     }
 
-    // Record draw commands.
-    cl->SetGraphicsRootSignature(m_rootSig.get());
-    cl->SetPipelineState(m_pso.get());
-    cl->SetGraphicsRoot32BitConstants(0, 16, viewProjT, 0);
     cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    if (m_srvHeap)
+    {
+      // Bind the shared SRV heap once; textured runs index into it per shape.
+      ID3D12DescriptorHeap* heaps[] = {m_srvHeap.get()};
+      cl->SetDescriptorHeaps(1, heaps);
+    }
 
-    // Use the loaded CMO mesh if present, else the placeholder cube. Both expose
-    // POSITION@0 / NORMAL@12; the differing stride comes from the vertex-buffer
-    // view, so the same PSO/input layout works for either.
-    const bool useMesh = m_mesh.valid();
-    const D3D12_VERTEX_BUFFER_VIEW geomVb = useMesh ? m_mesh.vbView : m_vbView;
-    const D3D12_INDEX_BUFFER_VIEW geomIb = useMesh ? m_mesh.ibView : m_ibView;
-    const UINT geomIndexCount = useMesh ? m_mesh.indexCount : m_indexCount;
+    uint32_t k = 0;
+    while (k < count)
+    {
+      const uint16_t sid = entities[order[k]].shapeId;
+      uint32_t start = k;
+      while (k < count && entities[order[k]].shapeId == sid) ++k;
+      DrawRun(cl, viewProj, sid, start, k - start, fi);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // DrawRun — draw [startInstance, startInstance+count) for one shapeId, choosing
+  // the textured pipeline when the shape has a diffuse, else the untextured
+  // emissive path; unregistered shapes fall back to the placeholder cube.
+  // ---------------------------------------------------------------------------
+  void SceneRenderer::DrawRun(ID3D12GraphicsCommandList* cl, const DirectX::XMFLOAT4X4& viewProj, uint16_t sid,
+                              UINT startInstance, UINT count, UINT fi)
+  {
+    auto it = m_shapes.find(sid);
+    const Shape* shape = (it != m_shapes.end() && it->second.mesh.valid()) ? &it->second : nullptr;
+    const bool textured = shape && shape->diffuse.valid() && m_psoTex && m_srvHeap;
+
+    if (textured)
+    {
+      cl->SetGraphicsRootSignature(m_rootSigTex.get());
+      cl->SetPipelineState(m_psoTex.get());
+      cl->SetGraphicsRoot32BitConstants(0, 16, &viewProj.m[0][0], 0);
+      D3D12_GPU_DESCRIPTOR_HANDLE srv = m_srvHeap->GetGPUDescriptorHandleForHeapStart();
+      srv.ptr += static_cast<UINT64>(shape->srvIndex) * m_srvDescSize;
+      cl->SetGraphicsRootDescriptorTable(1, srv);
+      cl->SetGraphicsRoot32BitConstants(2, 28, &m_light, 0); // b1 lighting
+    }
+    else
+    {
+      cl->SetGraphicsRootSignature(m_rootSig.get());
+      cl->SetPipelineState(m_pso.get());
+      cl->SetGraphicsRoot32BitConstants(0, 16, &viewProj.m[0][0], 0);
+      cl->SetGraphicsRoot32BitConstants(1, 28, &m_light, 0); // b1 lighting
+    }
+
+    const D3D12_VERTEX_BUFFER_VIEW geomVb = shape ? shape->mesh.vbView : m_vbView;
+    const D3D12_INDEX_BUFFER_VIEW geomIb = shape ? shape->mesh.ibView : m_ibView;
+    const UINT geomIndexCount = shape ? shape->mesh.indexCount : m_indexCount;
 
     D3D12_VERTEX_BUFFER_VIEW vbViews[] = {geomVb, m_instView[fi]};
     cl->IASetVertexBuffers(0, 2, vbViews);
     cl->IASetIndexBuffer(&geomIb);
-    cl->DrawIndexedInstanced(geomIndexCount, count, 0, 0, 0);
+    cl->DrawIndexedInstanced(geomIndexCount, count, 0, 0, startInstance);
   }
 } // namespace Neuron::Render

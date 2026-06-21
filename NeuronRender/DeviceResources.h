@@ -43,6 +43,11 @@ public:
 
     [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE DsvHandle() const noexcept;
 
+    // RTV of the back buffer for the in-progress frame (valid between
+    // BeginFrame and EndFrame). Used by the post-process composite to write the
+    // tone-mapped result into the swap-chain buffer.
+    [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE RtvHandle() const noexcept { return CurrentRtv(); }
+
     [[nodiscard]] UINT Width()  const noexcept { return m_width; }
     [[nodiscard]] UINT Height() const noexcept { return m_height; }
 
@@ -51,6 +56,13 @@ public:
     // upload buffers off this so the CPU never overwrites data the GPU may still
     // be reading from an in-flight frame.
     [[nodiscard]] UINT FrameIndex() const noexcept { return m_frameIndex; }
+
+    // VSync toggle (settings). On = present synced to vblank; off = uncapped.
+    void SetVSync(bool on) noexcept { m_vsync = on; }
+
+    // Measured GPU time for the last completed frame, in milliseconds (0 until
+    // the first frame resolves, or if timestamp queries are unavailable).
+    [[nodiscard]] double GpuFrameMs() const noexcept { return m_gpuMs; }
 
 private:
     void CreateRenderTargetViews();
@@ -80,6 +92,16 @@ private:
     UINT    m_frameIndex{ 0 };
     UINT    m_width{ 1280 };
     UINT    m_height{ 720 };
+    bool    m_vsync{ true };
+
+    // GPU timestamp queries (perf gate): 2 timestamps (begin/end) per in-flight
+    // frame, resolved into a READBACK buffer and read back one frame later.
+    winrt::com_ptr<ID3D12QueryHeap> m_tsHeap;
+    winrt::com_ptr<ID3D12Resource>  m_tsReadback;
+    UINT64*                         m_tsMapped{ nullptr };
+    UINT64                          m_tsFreq{ 0 };
+    double                          m_gpuMs{ 0.0 };
+    bool                            m_tsOk{ false };
 };
 
 } // namespace Neuron::Render

@@ -1,6 +1,8 @@
-// ScenePS.hlsl — 3D scene pixel shader.
-// Single directional light with ambient term; emissive tint from per-instance color.
-// M2 adds bloom pre-pass and additive particles.
+// ScenePS.hlsl — untextured 3D scene pixel shader (cube fallback / untextured
+// meshes). Shades the per-instance colour as albedo with the shared camera-
+// relative three-point rig (Lighting.hlsli), matching the textured path.
+
+#include "Lighting.hlsli"
 
 struct PSIn
 {
@@ -11,9 +13,5 @@ struct PSIn
 
 float4 main(PSIn p) : SV_TARGET
 {
-    float3 L    = normalize(float3(0.3f, 1.0f, 0.5f));
-    float  ndotl = saturate(dot(normalize(p.normal), L));
-    // Darwinia look: dark ambient + bright emissive highlight.
-    float3 lit  = p.color.rgb * (0.12f + 0.88f * ndotl);
-    return float4(lit, p.color.a);
+    return float4(ApplyThreePoint(p.normal, p.color.rgb), p.color.a);
 }

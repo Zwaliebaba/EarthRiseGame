@@ -17,11 +17,14 @@
 #include <d3d12.h>
 #include <winrt/base.h>
 
+#include <DirectXMath.h>
 #include <array>
 #include <cstdint>
+#include <unordered_map>
 
 #include "DeviceResources.h"
 #include "MeshGpu.h"
+#include "TextureGpu.h"
 
 namespace Neuron::Render
 {
@@ -29,32 +32,58 @@ namespace Neuron::Render
 // Public description of one renderable entity (sector-relative coordinates).
 struct SceneEntity
 {
-    float   x, y, z;   // render-space position (floating-origin-relative metres)
-    float   yaw;        // rotation around Y (radians)
-    float   scale;      // half-extent in metres (100 for base, 20 for ship)
-    float   r, g, b;   // emissive color override (< 0 = use kind default)
-    uint8_t kind;       // 0 = Base, 1 = Ship, others use orange
+    float    x, y, z;   // render-space position (floating-origin-relative metres)
+    float    yaw;        // rotation around Y (radians)
+    float    scale;      // uniform world scale applied to the mesh
+    float    r, g, b;   // emissive color override (< 0 = use kind default)
+    uint8_t  kind;       // EntityKind (color default when no override)
+    uint16_t shapeId;    // ShapeCatalog index → which registered mesh to draw
 };
 
 class SceneRenderer
 {
 public:
-    bool Initialize(DeviceResources* dr);
+    // sceneColorFormat is the render-target format the scene draws into. With
+    // post-processing it is the HDR buffer (R16G16B16A16_FLOAT); without it, the
+    // LDR swap-chain format. Both PSOs are created against this format, so it
+    // must match the bound render target at draw time.
+    bool Initialize(DeviceResources* dr,
+                    DXGI_FORMAT sceneColorFormat = DXGI_FORMAT_R16G16B16A16_FLOAT);
     void Uninitialize();
 
     // Record draw commands for 'count' entities into 'cl'.
-    // viewProjT: 16 floats, column-major (i.e. XMMatrixTranspose of the camera matrix).
-    // Called between DeviceResources::BeginFrame and EndFrame.
+    // viewProj: view*proj stored row-major (no transpose); the HLSL column-major
+    // cbuffer reinterprets it as the transpose the shader's mul() needs (see
+    // SceneVS). Called between DeviceResources::BeginFrame and EndFrame.
     void Render(ID3D12GraphicsCommandList* cl,
-                const float viewProjT[16],
+                const DirectX::XMFLOAT4X4& viewProj,
                 const SceneEntity* entities, uint32_t count);
 
-    // Use a loaded CMO mesh (CmoLoader) for all instances instead of the
-    // placeholder cube. Ignored if the mesh is invalid (keeps the cube), so the
-    // caller can fail-safe when an asset is missing.
-    void SetMesh(MeshGpu mesh) { if (mesh.valid()) m_mesh = std::move(mesh); }
+    // Scene lighting, uploaded to the pixel shaders as root constants b1 (matches
+    // Lighting.hlsli's cbuffer). World-fixed warm key + cool fill/ambient (a single
+    // "sun") plus a per-frame view-based rim. The caller (App) sets this each frame.
+    struct Lighting
+    {
+        float keyDir[3];    float _pad0;     // dir surface->sun (world)
+        float keyColor[3];  float _pad1;     // warm key radiance (colour * intensity)
+        float fillDir[3];   float _pad2;     // dir surface->fill (world)
+        float fillColor[3]; float _pad3;     // cool fill radiance (half-Lambert)
+        float ambient[3];   float _pad4;     // cool ambient floor
+        float rimColor[3];  float rimPower;  // rim tint + Fresnel exponent
+        float viewDir[3];   float _pad5;     // dir surface->camera (per-frame)
+    };
+    static_assert(sizeof(Lighting) == 28 * sizeof(float), "Lighting cbuffer layout");
+    void SetLighting(const Lighting& l) { m_light = l; }
+
+    // Register a catalog shape: the mesh drawn for entities whose SceneEntity::
+    // shapeId == id, plus an optional diffuse texture (creates its SRV; when
+    // present the textured pipeline is used for that shape). Invalid meshes are
+    // ignored. Entities referencing an unregistered shape fall back to the
+    // placeholder cube, so a missing asset never blanks the scene.
+    void SetShape(uint16_t id, MeshGpu mesh, TextureGpu diffuse);
 
     static constexpr UINT kMaxEntities = 512;
+    static constexpr UINT kMaxShapes   = 128; // SRV heap capacity (diffuse per shape)
 
 private:
     void BuildUnitCube();
@@ -88,8 +117,40 @@ private:
     D3D12_INDEX_BUFFER_VIEW  m_ibView{};
     UINT m_indexCount{ 0 };
 
-    // Optional real CMO mesh; when valid() it replaces the cube for all draws.
-    MeshGpu m_mesh;
+    // Registered catalog shape: its GPU mesh, optional diffuse, and the SRV-heap
+    // slot the diffuse was placed in (only meaningful when diffuse.valid()).
+    struct Shape
+    {
+        MeshGpu    mesh;
+        TextureGpu diffuse;
+        UINT       srvIndex{ 0 };
+    };
+    std::unordered_map<uint16_t, Shape> m_shapes;
+
+    // Draw one contiguous run of instances [startInstance, startInstance+count)
+    // sharing shapeId 'sid', picking the textured/untextured pipeline and mesh.
+    void DrawRun(ID3D12GraphicsCommandList* cl, const DirectX::XMFLOAT4X4& viewProj,
+                 uint16_t sid, UINT startInstance, UINT count, UINT fi);
+
+    // Textured pipeline (separate root sig/PSO so the untextured geometry path is
+    // untouched). The SRV heap holds one diffuse per registered shape.
+    winrt::com_ptr<ID3D12RootSignature> m_rootSigTex;
+    winrt::com_ptr<ID3D12PipelineState> m_psoTex;
+    winrt::com_ptr<ID3D12DescriptorHeap> m_srvHeap; // shader-visible, kMaxShapes SRVs
+    UINT m_srvDescSize{ 0 };
+    UINT m_nextSrv{ 0 };
+
+    // Current frame's lighting (b1). Default is a sane warm-sun rig so the scene
+    // is lit even if SetLighting is never called.
+    Lighting m_light{
+        { 0.45f, 0.55f, -0.70f }, 0.f,   // key dir (world: right/up/toward camera)
+        { 1.40f, 1.08f, 0.74f }, 0.f,    // warm sun radiance
+        { -0.76f, 0.23f, -0.61f }, 0.f,  // fill dir (world: opposite side)
+        { 0.30f, 0.26f, 0.22f }, 0.f,    // warm-neutral fill radiance
+        { 0.13f, 0.105f, 0.085f }, 0.f,  // warm-dark ambient floor
+        { 0.60f, 0.40f, 0.20f }, 2.5f,   // warm rim tint, Fresnel power
+        { 0.0f, 0.0f, -1.0f }, 0.f,      // view dir (rim), updated per frame
+    };
 };
 
 } // namespace Neuron::Render

@@ -1,6 +1,6 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.16 — for review
+> **Status:** DRAFT v0.17 — for review
 > **Date:** 2026-06-21
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
@@ -9,234 +9,6 @@
 > style of *Darwinia*. **Gameplay fantasy: _Homeworld × EVE_** — each player is a
 > **fleet commander** (RTS direct control) operating a **mobile mothership-base** in
 > a persistent, contested sandbox.
-
----
-
-## Changelog
-
-**v0.16 (this revision) — platform corrections (client socket, DirectXMath calling
-convention, DX 12.1 / SM 6.7)**
-- **Client transport corrected (§8.1, §2, §3):** the **UWP client uses WinRT
-  `Windows.Networking.Sockets.DatagramSocket`**, **not** Winsock. Winsock + IOCP is the
-  **server/headless (Win32)** path only. Both sit behind the `ISocket` seam. Allow-list
-  splits the two: `DatagramSocket` (client) vs Winsock (ERServer/ERHeadless).
-- **DirectXMath calling convention written down (§7.1):** `XMVECTOR`/`XMMATRIX` are also
-  passed **as call parameters by value with `XM_CALLCONV`**, using the
-  `FXMVECTOR`/`GXMVECTOR`/`HXMVECTOR`/`CXMVECTOR` (+ `FXMMATRIX`/`CXMMATRIX`) parameter
-  aliases — keeps vectors in SIMD registers and compiles correctly across architectures.
-- **Renderer standardised on DirectX 12.1 (§11.1, §2, §3, §11.2, §17 M1b):** **feature
-  level 12_1** and **Shader Model 6.7** (was FL 12_0 / SM 6.0). SM 6.7 now matches the
-  bytecode the shader build already emits (§12.4); FL 12_1 guarantees conservative
-  rasterisation / ROVs if later passes want them. Resource Binding Tier 2 / RS 1.1
-  unchanged.
-- Presentation/decisions only; no architecture or security-model change. (Earlier
-  changelog/"resolved" entries that record prior FL 12_0 / SM 6.0 targets are left as the
-  historical record.)
-
-**v0.15 — networking scale-out pass (hundreds of players)**
-- **Folds in the MMO networking review
-  [`docs/design/review/networking-scale-review.md`](docs/design/review/networking-scale-review.md):**
-  grades the §8/§9 design + current M1a code against a **hundreds-of-players,
-  single-shard** target and turns its "spec now" items into decisions.
-- **§8.4 eviction made self-healing (correctness fix):** interest leave/despawn is no
-  longer a fire-and-forget record on the Unreliable channel (a lost despawn left a
-  **ghost entity forever**). Removals are now **tombstones reconciled against the acked
-  baseline** — re-sent until the client acks a baseline without that `netId` — so they
-  ride the same ack-advanced convergence guarantee as every other fact.
-- **§8.4 snapshot pipeline made concrete (was prose):** **cell-based publish/subscribe**
-  interest (per-sector subscriber lists), **per-entity version/dirty stamping** so a diff
-  is "entities newer than the client's acked version" not a field compare, a **named
-  priority function** for the quota scheduler, **quantized sector-local delta encoding**
-  (no `int64` on the wire), and a **per-client baseline memory budget** (App. B).
-- **§7.2/§8.5/§9 time dilation (TiDi) adopted** as the launch **graceful-degradation**
-  mechanism for single-sector pileups: under sustained tick overrun the authoritative
-  fixed step **dilates** instead of dropping ticks; clock sync carries server time so
-  interpolation follows it. Multi-shard (§19) remains the post-launch capacity lever.
-- **§8.2 channel split + large-reliable-payload path:** **gameplay commands** separated
-  from **chat/social/events** (no head-of-line stalls); an **app-level chunked reliable**
-  message defined for the rare >1200 B reliable payload (fits/market/mail) — transport
-  stays fragmentation-free.
-- **§9 sim scaling:** simulation designed for **spatial/island parallelism** (deterministic
-  partition + ordered merge) even if run serial at launch; connections **routed by
-  `connectionToken` into a slot array** (not `ip:port` string hashing); per-connection
-  reliability state moves to **fixed-size ring/bitset** (no hot-path heap).
-- **§17 M4 re-gated:** load target raised to the **real player count** with the
-  **contested-single-sector** case as the *primary* gate, plus a **per-tick sim-time**
-  gate (separate from bandwidth). **Entity aggregation/LOD** promoted to a **committed M7
-  feature** (mandatory at hundreds), not an optional lever.
-- **Risks:** R3/R16/R22 updated; **R23 (single-sector pileup → TiDi)** and **R24
-  (per-client snapshot CPU/RAM at scale)** added. App. A (tombstone + delta records,
-  command/chat split) and App. B (hundreds-contested row, server aggregate egress,
-  sim-time + baseline-RAM budgets) updated. §2 decisions + §19 updated. **No change to the
-  core wire security model or the no-bulk-sync design** — this revision specifies the
-  scale-out path that was previously deferred to M4 as prose.
-
-**v0.14 — Darwinia windowed menu/options UI**
-- **New design + implementation doc
-  [`docs/design/darwinia-menu-ui.md`](docs/design/darwinia-menu-ui.md):** a **reusable
-  immediate-mode window toolkit** on the CanvasRenderer (§11) that reproduces the
-  reference options UI (Main Menu; Screen/Graphics/Other Options; settings) **1:1** —
-  styled with the supplied **`InterfaceGrey.dds`/`InterfaceRed.dds`** vertical-gradient
-  skins + the **`EditorFont`** bitmap atlas. Four widget kinds (**Window / Button /
-  DropDown / Label**), draggable/closable windows, hover/press/open interactivity;
-  captions via the **§22.4 string table** (EarthRise-themed, no hard-coded text).
-- Documents **verified asset metrics** — interface DDS are uncompressed 32-bit BGRA
-  (`B8G8R8A8_UNORM`) vertical "sheen" gradients; `EditorFont` is a **16×16-px grid,
-  16 cols × 14 rows, first codepoint 32** (cp 32–255).
-- Adds **§22.6**; **folded into M2** (Canvas widgets + settings screen — plan areas F/G);
-  references §11 (Canvas). No decision changes; presentation only.
-
-**v0.13 — repository-structure cleanup**
-- **Source tree flattened:** project sources/headers are now **flat files** with logical
-  grouping via **Visual Studio Filters** — no on-disk code subdirectories (was `net/`,
-  `session/`, `replica/`, `interp/`, `control/`, `gfx/`, `scene/`, `canvas/`, `netio/`).
-  §5 layout rewritten to match.
-- **NeuronCore is now a shared items project** (`NeuronCore.vcxitems`) compiled directly
-  into its consumers (EarthRise, NeuronClient, ERServer) instead of a standalone static
-  library. Updates §4, §5.
-- **Solution migrated to the XML format** `EarthRise.slnx` (was `EarthRise.sln`).
-- **Ops files relocated under `Config/`:** `Config/db/` (schema + migrations) and
-  `Config/deploy/` (Dockerfile, compose). Updates §5, §14/§15 paths.
-- No design decisions changed; this revision only reconciles the plan with the on-disk
-  structure. Updates §4, §5, §16.
-
-**v0.12 — overview-driven control model**
-- **§23 reworked around an overview-driven command model** (EVE-Echoes prior art) as
-  the **shared primary scheme for desktop *and* touch**: select/command via the §22.3
-  **overview list + smart-select buttons + a smart context action**, routed through the
-  existing intent layer (§8.4). The **3D view is camera-first**; **box-select is demoted
-  to a desktop convenience.**
-- **Touch ambiguity designed out:** camera lives on **two-finger gestures only**, so
-  one-finger select-vs-pan never conflicts; tap-and-hold = radial context menu. Full
-  gesture/smart-action tables in **`docs/design/touch-controls.md`**.
-- **R20 downgraded Med→Low** (decided approach with prior art, not an open UX gamble).
-- Updates §2 (Client input), §22.3, §23, R20.
-
-**v0.11 — completeness pass (client engine, UI/radar, navigation, live-ops)**
-- **DirectX 12 engine architecture written down (new §11.1):** adapter/feature-level
-  selection (**target FL 12_0, Resource Binding Tier 2, SM6.0** — broad reach),
-  **triple-buffered** flip-model swap chain + fences, command queues/allocators/lists,
-  **descriptor-heap strategy**, root-signature/binding model, resource heaps + upload
-  ring, **PSO management**, the **HDR forward + bloom** pass graph, barriers, GPU
-  memory budget, UWP suspend/`Trim`, device-removed/DRED, PIX/timestamp profiling.
-- **Camera & VFX (new §11.2):** space-RTS camera (orbit/pan/zoom/follow, floating-origin
-  rebase, feeds the audio listener) + **GPU-compute additive particle system**.
-- **Navigation & travel decided (new §13.12):** **warp + jump-beacon network** —
-  sublight combat movement, **interdictable warp** to scanned points, long-haul
-  **jump drive + fuel** between beacons (player/territory-owned beacons = chokepoints).
-  Fills the biggest gap (an interstellar world with no travel model).
-- **Client UI, HUD, radar & accessibility (new §22):** screen inventory, HUD spec,
-  **3D bracket overlay + sortable overview list + 2D radar disc** (IFF, range rings),
-  scalable/DPI-aware UI, **localization-ready** string table (English at launch),
-  accessibility (**scalable UI + audio cues** at launch).
-- **Input & controls (new §23):** **mouse+keyboard (primary) + touch (tablets)** RTS
-  scheme; commands → server-validated intents; rebindable keymap.
-- **Communications (new §24):** chat channels + **in-game mail + offline
-  notifications** (needs Mail/Notifications tables — §15).
-- **Client platform services (new §25):** settings/config (UWP local storage),
-  client logging & **crash/minidump** reporting, MSIX/Store update + version gate.
-- **Game-data files & tooling (new §12.6):** text source → cooked binary via
-  `datacook`/`datacheck`, **dev hot-reload**; one dataset drives server, client & bots.
-- **World clock & live-ops (new §26):** **24/7, rolling restarts, no scheduled
-  downtime** (warm-restart SLA); authoritative world clock; event director; live tunables.
-- **Risks R20–R22**; §2 decisions, milestones (M1b/M2/M3/M5/M7), §19, glossary updated.
-
-**v0.10 — audio subsystem**
-- **Audio added (new §11.3, `NeuronAudio`):** **XAudio2 (2.9)** for playback +
-  **X3DAudio** for 3D positional sound, **WAV (PCM 16-bit) only** via a custom
-  RIFF/WAVE reader (mirrors the CMO/DDS custom-parser approach). Both are Windows-SDK
-  components — fits the MS-only allow-list (§2).
-- **Dedicated `NeuronAudio` client library** (sibling to NeuronRender), used only by
-  the UWP client; **ERHeadless/bots link no audio**. Adds `NeuronAudioTest` per the
-  §16.1 per-project test policy → **14 projects**. Updates §2, §3, §4, §5, §16.1.
-- **Four mixer buses** (Master → **Music / Ambient / SFX / UI**): **ambient
-  background beds**, **event SFX**, **UI**, and a **musical score**.
-- **3D from day one:** X3DAudio listener = scene camera; mono emitters positioned in
-  **camera-relative / floating-origin** space (§6.4) — no `int64` reaches audio.
-- **Event sounds are client-side feedback** off replicated sim events — **no audio on
-  the wire**, no determinism requirement (presentation only).
-- **Delivered in M2 (Darwinia look)**; risk **R19** added; glossary + allow-list
-  updated.
-
-**v0.9 — gameplay design pass (PvP/PvE depth)**
-- **Core fantasy fixed as _Homeworld × EVE_:** RTS-style direct **fleet command**
-  from a **mobile mothership-base**, inside a persistent EVE-like contested universe.
-  Updates §1 pillars, §13.
-- **§13 rewritten from a half-page sketch into a real game-design spec** with
-  subsections: 13.1 Player fantasy & fleet command, 13.2 Combat model
-  (role + fitting + damage-type counters), 13.3 Progression (hybrid tech-tree +
-  fitting + catch-up), 13.4 Player-driven crafting economy, 13.5 World structure
-  (tiered security high→low→null), 13.6 Territorial conquest, 13.7 PvE content
-  (dynamic faction invasions + procedural anomalies), 13.8 Social/parties &
-  ownership, 13.9 New-player onboarding & loss mitigation, 13.10 Retention loop.
-- **Base role decided:** capital-class, **disable-not-destroy** (forced retreat at
-  low HP + cargo loss; never a one-base-per-player total wipe). §13.1, §13.6.
-- **Fleet scale decided:** launch cap **6–12 ships/player**, architecture designed
-  to scale entity counts beyond the initial 100-player shard as the game grows.
-  Updates App. B and §13.1.
-- **App. B re-derived for fleets** — a contested sector is now players × fleet, not
-  a flat ~100 entities; adds entity-aggregation / hard interest-culling as the lever.
-- **Risk table:** added R15 (gameplay-design depth/retention), R16 (fleet entity
-  blow-up vs bandwidth), R17 (newcomer brutality in conquest), R18 (thin social
-  glue at small scale). §18.
-- **Milestones:** M3 expanded to the real 4X+combat loop; new **M7 (territorial
-  conquest, economy, PvE content, onboarding)**. §17.
-- **§19 updated** with the new live unknowns (fleet-cap balance, market shard model,
-  whether persistent corps must come forward).
-
-**v0.8 — testing policy**
-- **Microsoft Native Unit Test policy added (§16):** every project must have a
-  corresponding `<project>Test` MSTest project (e.g., `NeuronCoreTest`,
-  `NeuronClientTest`, `NeuronRenderTest`, `ERServerTest`, `ERHeadlessTest`). Each new
-  feature ships with tests in the matching `<project>Test` project. All test projects
-  are included in `EarthRise.sln`.
-
-**v0.7 — engine/netcode review pass**
-- **Simulation tick reset to 30 Hz** (snapshot stays 20 Hz). 60 Hz in v0.6 only
-  mirrored a scaffold constant; 30 Hz halves per-tick CPU/delta-encoding cost and
-  is ample for a command-driven 4X. Fast projectiles sub-step locally. Updates §2,
-  §3, §4, §7.2, §9, §17, App. B. `TimerCore.h` constant updated to match.
-- **Fixed-step sim loop made real.** The provided `TimerCore.h` is a *variable*-step
-  timer (DX `StepTimer` with the fixed path stripped); §7.2/§9 now mandate a true
-  accumulator with bounded catch-up (`MaxCatchUpTicksPerFrame`), WinRT-free in core.
-- **World coordinates → `int64_t` centered at 0** (was `uint64_t` at 2⁶³). Interest
-  grid keyed on a **`SectorId` struct hash**, not a 64-bit Morton code (three 50-bit
-  sector indices overflow 64 bits). Position unified to **sector index + sector-local
-  float offset**. Updates §6, §7.1.
-- **Crypto hardened (§8/§14):** server **static-key pinning/signature** added to the
-  ECDH handshake (resists active MITM on the login exchange); **AES-GCM nonce =
-  direction‖64-bit packet counter** with **rekey-before-wrap**; **explicit replay
-  window** on decrypt; **stateless cookie before ECDH** (handshake-DoS guard);
-  connection token widened to 64-bit; **clock sync** and **protocol-version gate**
-  added to the connection sequence.
-- **Client-side prediction deferred past M1** — interpolation + snap-on-ack for the
-  tech slice; predict/reconcile added later only where feel demands it (§8.4, §10.1,
-  §17). Cuts scope risk R8.
-- **Persistence durability boundary defined (§15):** economy events
-  (trades/currency/loot) are **write-through / transactional outbox**; high-frequency
-  position is **write-behind** with a stated **RPO**. Warm-restart uses a **binary
-  state snapshot + event log since snapshot**, not row-by-row reconstruction.
-- **Shaders locked to SM6/DXIL via `dxc`** (not "dxc else fxc" — fxc cannot emit
-  SM6). Root signatures authored in HLSL. (§12.4)
-- **M1 split into M1a (headless transport) + M1b (client render)** to de-risk
-  reliable-UDP/crypto before a DX12 pipeline is in the loop. Per-milestone numeric
-  perf gates added; per-client bandwidth budget estimated **now** (App. B).
-- **Folded-in engineering specifics:** ECS handle generation bits + deterministic
-  iteration order; frame-arena / pool (`pmr`) allocators in the tick hot path;
-  input-log **record/replay determinism harness**; snapshot-encoding **job pool**;
-  IOCP **per-connection affinity**; login **rate-limit/lockout + server pepper**.
-- New **§21 Observability & Telemetry**; risk table updated (R1, R6, R12–R14).
-
-**v0.6** — Sim tick set to 60 Hz to match `TimerCore.h`; NeuronCore scaffolded as a
-Windows Store static library, added to the solution.
-**v0.5** — Shaders precompiled to embedded headers; custom username/password login
-locked; App→DB auth SQL login → managed identity; SQL edition direction confirmed.
-**v0.4** — SQL external (not containerized), self-hosted → Azure SQL; real login +
-CNG crypto; dev Docker Desktop / prod Kubernetes; 20 Hz.
-**v0.3** — ERServer/ERHeadless; metres; CMO; monospace fonts; STL; zoned PvP;
-SQLite→SQL Server.
-**v0.2** — NeuronCore/NeuronClient/NeuronRender/NeuronHeadless; 3D vs 2D;
-DirectXMath; MSBuild; Server Core container; PvE+PvP; user meshes.
 
 ---
 
@@ -866,6 +638,17 @@ mesh shaders / ray tracing.
   tactical range. The camera **is** the **floating-origin** render origin (§6.4) —
   panning far triggers a rebase — and supplies the **X3DAudio listener** (§11.3). Touch
   adds pinch-zoom / two-finger rotate (§23).
+- **Scene lighting — world-fixed sun + cool fill + rim 🔒:** a single **world-fixed warm
+  "sun"** (the key, hard Lambert) lights the whole scene from one direction, so every object
+  shows a consistent lit side and shadow side — the cue that reads as *natural* and gives
+  depth (a camera-relative rig was tried first but looked flat/gamey: every object lit the
+  same relative to view). The shadow side is lifted by a **warm-neutral ambient + soft
+  half-Lambert fill** (never pitch black) — Darwinia's world is **warm against a near-black
+  void**, so the palette leans warm throughout rather than cool. A per-frame view-based **warm
+  Fresnel rim** separates ships from the void and feeds the bloom pass for a glowing edge.
+  Shared HLSL (`Lighting.hlsli`, cbuffer `b1`); colours/
+  intensities are tunable. **Cast shadows** (shadow maps) and **IBL/ambient probes** (the
+  modern fill replacement) are **deferred** future upgrades; ambient + fill suffices at launch.
 - **VFX — GPU-compute particles:** particle pools in structured buffers (UAV);
   **spawn/update in compute shaders** (FL 12_1), drawn as **additive instanced
   billboards** into the HDR target. Categories: thrusters, weapon tracers/muzzle,

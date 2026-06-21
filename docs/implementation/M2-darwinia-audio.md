@@ -20,13 +20,13 @@
 | Area | Status | Notes |
 | --- | --- | --- |
 | **A** Asset pipeline & tooling | 🟢 mostly done | DDS/CMO/font/WAV parser cores + `NeuronTools/testrunner` (35 cases, Linux CI); MSTest parser mirrors. Loaders done (see B/E). Remaining: the `*check`/cook tool executables, `datacook`/`datacheck` cue catalog. |
-| **B** Instanced CMO ships | 🟡 in progress | `DdsLoader`/`CmoLoader`→GPU done; `SceneRenderer` renders the real `Jumpgate.cmo` instanced (size-normalized, cube fallback), validated vs the real file. **Next: material/texture binding;** then per-kind mesh mapping. |
-| **C** HDR + bloom + tone-map | ⚪ not started | scene still renders straight to the LDR backbuffer. |
-| **D** GPU-compute particles | ⚪ not started | — |
-| **E** NeuronAudio | 🟡 in progress | library scaffolded — voice graph / 4 buses / `WavReader` / X3DAudio `Spatializer` / `VoicePool` / `AudioEngine` + `NeuronAudioTest` (14 projects). Device-free math Linux-verified. Remaining: buffer-queue streaming, cue catalog, `wavcheck`, Windows device smoke test. |
-| **F** Canvas HUD + radar | ⚪ not started | `CanvasRenderer` still draws placeholder blocks for text; **no font atlas yet** (so on-screen HUD/strings are unreadable). `FontAtlasLayout` UV math done. |
-| **G** Settings screen | ⚪ not started | — |
-| **H** Integration / perf gate | 🟡 ongoing | 14 projects in `.slnx`; render frame-time gate not yet measured. |
+| **B** Instanced CMO ships | 🟢 mostly done | `DdsLoader`/`CmoLoader`→GPU; `SceneRenderer` renders real CMO meshes instanced (size-normalized per kind, cube fallback). **Diffuse texturing** (textured root sig/PSO, `SceneTexVS/PS`). **Full catalog integrated** — all 70 `Assets/Shapes` meshes in a generated `ShapeCatalog` (NeuronCore), `ShapeId` ECS component + snapshot field, server spawns scenery, client loads the catalog and draws the right mesh+diffuse **per entity** (grouped/instanced by shape). **Remaining: `nrm`/`spec` maps; GPU skinned-render path.** |
+| **C** HDR + bloom + tone-map | 🟢 done | `PostProcess`: scene→HDR (`R16G16B16A16_FLOAT`)→bright-pass→half-res→separable Gaussian blur (H+V ping-pong)→composite. Composite now does **exposure + ACES filmic tone-map** (over-bright bloom rolls off instead of clipping) + **vignette** + faint **scanlines** for the Darwinia frame. Tunables in `PostProcess.cpp` (exposure/intensity/vignette/scanline/threshold). Fail-safe LDR fallback. *Rendered blind — final tuning on real display.* |
+| **D** Particles | 🟢 done | `ParticleRenderer` — drifting "space dust" field (follows the camera focus) **plus per-entity emitter glow**: bases/ships/stations/structures emit a coloured aura (rate-spawned, finite-life, fading) at their render position; asteroids/debris don't. All camera-facing **additive billboards** sampling `Particle.dds` into the HDR target (so they bloom), depth-tested no-write. Emitter system is wired for thrusters/impacts/warp once movement/combat exist. *(CPU sim; GPU-compute backend — masterplan §11.2 — is a perf optimization deferred with no visible change at current counts.)* |
+| **E** NeuronAudio | 🟢 mostly done | Library (voice graph / 4 buses / `WavReader` / X3DAudio `Spatializer` / `VoicePool` / `AudioEngine`) **now wired into the client**: EarthRise links `NeuronAudio`, brings up XAudio2, loads PCM-16 clips and plays a **looping ambient bed** (Ambient bus) + **UI SFX** (button click / dropdown open+select) on the Ui bus; the listener is fed from the camera each frame. Placeholder clips generated under `Assets/Audio` (loop-clean tonal `ambient_space` + `ui_click`/`ui_select`), all validated against the `WavParse` core on Linux. Remaining: buffer-queue streaming, data-driven cue catalog, `wavcheck` tool, real sound design, Windows device smoke test. |
+| **F** Canvas HUD + radar | 🟢 done | `CanvasRenderer`: textured + condensed-bitmap-font primitives (DrawText/DrawTexturedQuad/DrawTriangle/DrawVGradient/DrawLine), per-frame VB. **Windowed UI:** Main Menu + Options + Screen/Graphics/Other panels (Darwinia Window/Button/TextRenderer-faithful), interactive — hover/press/click, draggable title bars, close boxes, **DropDown** + **Label** widgets, and **z-order raising** (click brings a window to front). **2D radar disc** (bottom-left): top-down IFF blips of nearby entities + range rings + player marker. **StringTable** (§22.4, id→text + visible missing-id fallback, Linux-tested) routes the window titles / footer / HUD labels. Layout/hit-test in `UiLayout.h` (Linux-tested). *(Wiring dropdown values to real engine knobs = area G; routing every caption through the table is a mechanical follow-up.)* |
+| **G** Settings screen | 🟢 mostly done | The Options panels' dropdowns now drive **live engine knobs**: **Field of View** (camera), **Bloom** Off/Low/Med/High (`PostProcess::SetBloomIntensity`), **Particles** density (`ParticleRenderer::SetDensity` + emitter rate), **Pixel Effect** (composite vignette/scanlines), **VSync** (`DeviceResources::SetVSync` present interval), **Large Menus** (HUD scale). Sensible defaults via `InitSettings`; all selections **persisted** in UWP `ApplicationData` LocalSettings (load at startup, save on **Apply**). Remaining: settings that need absent features (resolution/render-scale/window-mode/FXAA/anisotropy, difficulty/language) are stored but not yet acted on. |
+| **H** Integration / perf gate | 🟢 done | 14 projects in `.slnx`. **GPU timestamp queries** in `DeviceResources` (begin/end per in-flight frame → READBACK, read one frame later via the fence) give real **GPU ms/frame** (`GpuFrameMs()`); the HUD shows **GPU / CPU ms + FPS**, turning red over the ~16.6 ms / 60 Hz budget. Best-effort (reports 0 if timestamp queries are unavailable). |
 
 > **Bring-up fixes (M1a/M1b, done while standing up the live client+server this branch):** real
 > `ERServer` console logging + crypto self-test; fixed `CngCrypto` HKDF derivation (the handshake
@@ -64,9 +64,10 @@
   `SceneRenderer` (draws **placeholder unit cubes** — bases 100 m blue, ships 20 m orange —
   via per-instance stream; header explicitly says *"M2 replaces the cube with real CMO mesh
   assets and adds bloom"*), and `CanvasRenderer`.
-- Shaders present: `SceneVS/PS`, `CanvasVS/PS` (HLSL → embedded DXIL, §12.4). `ScenePS`
-  notes *"M2 adds bloom pre-pass and additive particles."* Scene currently renders straight
-  to the LDR backbuffer — **no HDR target / bloom chain yet**.
+- Shaders present: `SceneVS/PS`, `SceneTexVS/PS`, `CanvasVS/PS`, plus the post chain
+  `FullscreenVS` + `BrightPassPS`/`BlurPS`/`CompositePS` (HLSL → embedded DXIL, §12.4). The
+  scene now renders into an HDR target and is composited (bloom) to the LDR back buffer via
+  `PostProcess` (area C).
 - `EarthRise/` UWP client exists (App shell, manifest, one DDS texture asset:
   `Assets/Textures/starbox_1024.dds`).
 - **`NeuronAudio/` does not exist** — net-new library this milestone (sibling to
@@ -148,10 +149,18 @@
         Jumpgate.cmo` from the package at startup (fail-safe → cube if missing). On-screen size
         normalized by the CMO bounding radius (Jumpgate native radius ≈ 333). Cull mode → NONE
         (authored winding varies). *Rendered blind — pending Windows visual confirmation.*
-  - [ ] **Material/texture binding:** SRV descriptor heap + static sampler + a textured pixel
-        shader; bind `dif_512.dds` (then `nrm`/`spec`) via `DdsLoader` (§11.1). **(next)**
-  - [ ] **Per-kind mesh mapping** — a small mesh catalog (Base/Ship/structure → `.cmo`);
-        currently every entity uses the one loaded mesh. Needs a base/ship mesh.
+  - [x] **Material/texture binding (diffuse):** separate textured root sig/PSO — root constants
+        b0 + SRV table t0 + static linear-wrap sampler s0 — with `SceneTexVS`/`SceneTexPS`
+        (per-vertex UV at CMO offset 44 → diffuse sample + directional/ambient). `SetDiffuseTexture`
+        creates the SRV in a shader-visible heap; the client loads `dif_512.dds` via `DdsLoader`
+        and binds it. Untextured emissive path kept untouched as a fail-safe. *Rendered blind —
+        pending Windows visual confirmation.* **Remaining:** `nrm`/`spec` maps (normal/specular).
+  - [x] **Per-shape mesh mapping** — generated **`ShapeCatalog`** (NeuronCore) registers all
+        70 `Assets/Shapes` meshes with a stable id + category→`EntityKind`. A `ShapeId`
+        component (mesh id + kind) is replicated in the snapshot (`+u16 shapeId`); the server
+        spawns catalog scenery and stamps each entity, the client loads the whole catalog and
+        `SceneRenderer::SetShape`/grouped draws render the right mesh+diffuse per entity
+        (cube fallback for an unregistered/failed shape). +7 Linux catalog/snapshot tests.
   - [~] **Skeletal animation** — `CmoParse` fully extracts the skeleton (bones + parents +
         bind/inverse-bind/local matrices), animation clips (keyframes), and skinning vertices;
         `CmoAnimation.h` samples a clip → per-bone pose and builds the skinning palette
@@ -172,22 +181,32 @@
 > enumeration, vertex/index/material extraction, and bounding-radius — all Linux-tested and
 > validated against the real `Jumpgate.cmo`). `SceneRenderer` now renders the loaded mesh
 > instanced (size-normalized, cull-none, cube fallback); the client loads the packaged `.cmo`
-> at startup. **Geometry only** — diffuse/normal/spec **texturing is the next step** (SRV heap +
-> sampler + textured PS), then per-kind mesh mapping.
+> at startup. **Diffuse texturing now landed** — a separate textured root sig/PSO (SRV heap +
+> static sampler + `SceneTexVS`/`SceneTexPS`) binds `dif_512.dds`, with the untextured emissive
+> path kept as a fail-safe. **Next:** `nrm`/`spec` maps and per-kind mesh mapping.
 
 ### C. HDR forward + bloom + tone-map
 
 - **Goal:** the §11.1 pass graph — render scene to an HDR `R16G16B16A16_FLOAT` target,
   bright-pass → Gaussian ping-pong bloom (additive) → tone-map to LDR backbuffer.
 - **Masterplan refs:** §11 (bloom/additive), §11.1 (pass graph steps 1–4, no MSAA, barriers).
-- **Current state:** scene renders directly to LDR backbuffer; no HDR target, no post chain.
+- **Current state:** `PostProcess` implements the full pass graph (blind — pending Windows
+  visual confirmation). Scene renders into the HDR target; bloom + composite land in the back
+  buffer; HUD draws over the composite.
 - **Work:**
-  - [ ] Add HDR scene target + `D32_FLOAT` depth; render area B into it.
-  - [ ] Bright-pass extract → downsample → separable Gaussian blur (ping-pong) PSOs +
-        shaders (`shaders/` HLSL → embedded DXIL, §12.4).
-  - [ ] Tone-map + optional scanline/vignette/grain → LDR backbuffer.
-  - [ ] Manual resource-state barriers RT↔SRV, batched (§11.1). Canvas (area F) composites
-        after tone-map, no bloom.
+  - [x] Add HDR scene target (`R16G16B16A16_FLOAT`) sharing the `D32_FLOAT` depth; render
+        area B into it. `SceneRenderer::Initialize` takes the scene-colour format so its PSOs
+        match the HDR RT; `App` picks HDR when `PostProcess` initialized, else LDR (fail-safe).
+  - [x] Bright-pass extract (soft-knee luminance threshold) → half-res downsample →
+        separable 9-tap Gaussian blur (H then V, bloomA/bloomB ping-pong). Full-screen-triangle
+        `FullscreenVS` + `BrightPassPS`/`BlurPS` (`shaders/` HLSL → embedded DXIL).
+  - [x] Composite `CompositePS` — additive glow over the scene. **Conservative for now**
+        (base tone preserved, `saturate`); proper HDR tone-map curve (Reinhard/ACES) +
+        scanline/vignette/grain still **TODO** once tuned in Windows.
+  - [x] Manual resource-state barriers RT↔SRV per pass (single queue serialises GPU work, so
+        the shared targets need no per-frame duplication). Canvas (area F) composites after,
+        no bloom — drawn straight to the LDR back buffer.
+  - [ ] Threshold/intensity tuning + tone-map curve once seen on a real display.
 - **Tests (`NeuronRenderTest`):**
   - [ ] PSO build from embedded DXIL for each new pass (hash-cache hit path).
   - [ ] Render-target/barrier state machine unit logic (transitions valid, no
