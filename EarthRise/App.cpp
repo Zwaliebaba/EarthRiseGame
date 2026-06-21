@@ -7,7 +7,7 @@
 // Uses NeuronClient (session + ReplicaManager + InterpBuffer) and
 // NeuronRender (DeviceResources + SceneRenderer + CanvasRenderer).
 //
-// M1b: CngCrypto + WinsockSocket injected; three bots connect from ERHeadless.
+// M1b: CngCrypto + WinRT DatagramSocket (§8.1) injected; three bots connect from ERHeadless.
 // No int64_t propagated to the GPU — all world positions pass through
 // FloatingOriginHelper before reaching SceneRenderer.
 
@@ -36,7 +36,7 @@
 
 // NeuronCore platform impls (compiled into NeuronClient.lib / accessible via link)
 #include "CngCrypto.h"
-#include "WinsockSocket.h"
+#include "DatagramSocketAdapter.h"
 #include "Protocol.h"
 #include "Snapshot.h"
 
@@ -84,7 +84,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
   // ---- network ----
   Neuron::Net::CngCrypto m_crypto;
-  std::unique_ptr<Neuron::Net::WinsockSocket> m_socket;
+  std::unique_ptr<Neuron::Net::DatagramSocketAdapter> m_socket; // WinRT DatagramSocket (§8.1)
   Neuron::Net::EcPubKey m_pinnedPub{}; // zeroed = dev/test
   std::unique_ptr<Neuron::Client::SessionImpl> m_session;
   Neuron::Client::ReplicaManager m_replica;
@@ -107,10 +107,10 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   // ── IFrameworkView ───────────────────────────────────────────────────────
   void Initialize(const Windows::ApplicationModel::Core::CoreApplicationView&)
   {
-    check_bool(Neuron::Net::WinsockSocket::GlobalStartup());
     check_bool(m_crypto.Initialize());
 
-    m_socket = std::make_unique<Neuron::Net::WinsockSocket>();
+    // WinRT DatagramSocket (§8.1) — no WSAStartup; binds asynchronously off the ASTA.
+    m_socket = std::make_unique<Neuron::Net::DatagramSocketAdapter>();
     check_bool(m_socket->Open(0)); // ephemeral port
 
     m_session = std::make_unique<Neuron::Client::SessionImpl>(&m_crypto, m_pinnedPub, m_socket.get(), "player1");
@@ -224,7 +224,6 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_session->Disconnect(); // best-effort graceful notice while the socket is alive
     m_session.reset();
     m_socket.reset();
-    Neuron::Net::WinsockSocket::GlobalCleanup();
   }
 
   // ── Game tick ────────────────────────────────────────────────────────────

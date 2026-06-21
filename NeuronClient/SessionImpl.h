@@ -2,8 +2,8 @@
 // SessionImpl — concrete Session backed by ClientConnection (§8.5, §10.1).
 //
 // Inject ICrypto* + ISocket* at construction time so the same implementation
-// compiles in EarthRise.Client (CngCrypto + WinsockSocket) and in tests
-// (FakeCrypto + LoopbackSocket).
+// compiles in EarthRise.Client (CngCrypto + WinRT DatagramSocketAdapter, §8.1),
+// ERHeadless (CngCrypto + WinsockSocket) and in tests (FakeCrypto + LoopbackSocket).
 //
 // Thread-model: all calls from the same game-loop thread; no locking.
 
