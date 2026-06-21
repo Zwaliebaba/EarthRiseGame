@@ -1,6 +1,6 @@
 # EarthRise — Master Implementation Plan
 
-> **Status:** DRAFT v0.15 — for review
+> **Status:** DRAFT v0.16 — for review
 > **Date:** 2026-06-21
 > **Scope:** A space 4X MMO with a custom C++23 engine (**NeuronCore**), a
 > containerized Windows dedicated server (**ERServer**) backed by a networked
@@ -14,7 +14,26 @@
 
 ## Changelog
 
-**v0.15 (this revision) — networking scale-out pass (hundreds of players)**
+**v0.16 (this revision) — platform corrections (client socket, DirectXMath calling
+convention, DX 12.1 / SM 6.7)**
+- **Client transport corrected (§8.1, §2, §3):** the **UWP client uses WinRT
+  `Windows.Networking.Sockets.DatagramSocket`**, **not** Winsock. Winsock + IOCP is the
+  **server/headless (Win32)** path only. Both sit behind the `ISocket` seam. Allow-list
+  splits the two: `DatagramSocket` (client) vs Winsock (ERServer/ERHeadless).
+- **DirectXMath calling convention written down (§7.1):** `XMVECTOR`/`XMMATRIX` are also
+  passed **as call parameters by value with `XM_CALLCONV`**, using the
+  `FXMVECTOR`/`GXMVECTOR`/`HXMVECTOR`/`CXMVECTOR` (+ `FXMMATRIX`/`CXMMATRIX`) parameter
+  aliases — keeps vectors in SIMD registers and compiles correctly across architectures.
+- **Renderer standardised on DirectX 12.1 (§11.1, §2, §3, §11.2, §17 M1b):** **feature
+  level 12_1** and **Shader Model 6.7** (was FL 12_0 / SM 6.0). SM 6.7 now matches the
+  bytecode the shader build already emits (§12.4); FL 12_1 guarantees conservative
+  rasterisation / ROVs if later passes want them. Resource Binding Tier 2 / RS 1.1
+  unchanged.
+- Presentation/decisions only; no architecture or security-model change. (Earlier
+  changelog/"resolved" entries that record prior FL 12_0 / SM 6.0 targets are left as the
+  historical record.)
+
+**v0.15 — networking scale-out pass (hundreds of players)**
 - **Folds in the MMO networking review
   [`docs/design/review/networking-scale-review.md`](docs/design/review/networking-scale-review.md):**
   grades the §8/§9 design + current M1a code against a **hundreds-of-players,
@@ -294,7 +313,7 @@ players at launch and designed to grow well past that.
 | Persistence durability | **Economy = write-through / outbox; position = write-behind (RPO bounded).** |
 | Dev / Prod | **Dev: Docker Desktop. Prod: Kubernetes** (Windows nodes + UDP LB). |
 | **Navigation / travel** | **Warp + jump-beacon network**: sublight combat move; **interdictable warp** to scanned points; long-haul **jump drive + fuel** between beacons (§13.12). |
-| **Renderer target** | **D3D12 FL 12_0, Resource Binding Tier 2, SM6.0**; **triple-buffered** flip-model; **HDR forward + bloom**, no MSAA; GPU-compute particles (§11.1–11.2). |
+| **Renderer target** | **D3D12 12.1 — FL 12_1, Resource Binding Tier 2, SM 6.7**; **triple-buffered** flip-model; **HDR forward + bloom**, no MSAA; GPU-compute particles (§11.1–11.2). |
 | **Client input** | **Overview-driven command model** (EVE-Echoes-style; shared by desktop & touch): select/command via overview list + smart-select + smart action; **mouse+keyboard + touch**; box-select demoted to a desktop shortcut; commands → **server-validated intents** (§23). |
 | **Tactical UI / radar** | **3D bracket overlay + sortable overview list + 2D radar disc** (IFF, range rings) (§22). |
 | **Communications** | **Chat channels + in-game mail + offline notifications** (§24). |
@@ -318,7 +337,8 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | C++/WinRT | UWP client | App model / WinRT interop |
 | DirectXMath | all | Header-only (Windows SDK) |
 | DirectX 12 / DXGI | UWP client | Rendering |
-| Winsock | all | UDP sockets |
+| Winsock | **ERServer / ERHeadless** | UDP sockets + IOCP (Win32 hosts only — **not** the client) |
+| **WinRT `DatagramSocket`** | UWP client | Client UDP transport (UWP-sandbox-supported); behind `ISocket` (§8.1) |
 | ODBC (Driver 18) + SQL Server | ERServer | `sql.h`/`odbc32.lib` (SDK); driver installed in the container |
 | Windows CNG (`bcrypt.h`) | ERServer + client | ECDH, **ECDSA (server-key sign)**, AES-GCM, PBKDF2 hashing |
 | **XAudio2 (2.9)** (`xaudio2.h`) | NeuronAudio (client) | Low-level audio playback / voice graph (SDK; UWP-supported) |
@@ -338,10 +358,10 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
 | Server | **ERServer** — Win32 console in a Windows Server Core container; Winsock UDP + IOCP; **30 Hz** fixed-step sim / **20 Hz** snapshot |
 | Database | **SQL Server over the network** (self-hosted → Azure SQL); ODBC Driver 18 |
 | Crypto | **Windows CNG** — ECDH handshake (**server-key pinned**), AES-GCM AEAD, PBKDF2 password hashing |
-| Transport | Custom **encrypted** reliable-UDP (§8) |
+| Transport | Custom **encrypted** reliable-UDP (§8); sockets behind `ISocket` — **Winsock** on the server/headless, **WinRT `DatagramSocket`** on the UWP client |
 | Client app | `CoreApplication` + `IFrameworkView` (CoreWindow), C++/WinRT, no XAML |
 | Rendering | DX12 + DXGI flip-model; **Scene (3D)** + **Canvas (2D)** split |
-| Shaders | HLSL → **embedded SM6/DXIL headers** via `dxc` (var `g_p%(Filename)`, out `CompiledShaders\%(Filename).h`); root sigs in HLSL; no runtime HLSL on UWP |
+| Shaders | HLSL → **embedded SM 6.7/DXIL headers** via `dxc` (var `g_p%(Filename)`, out `CompiledShaders\%(Filename).h`); root sigs in HLSL; no runtime HLSL on UWP |
 | **Audio** | **NeuronAudio** (client-only lib): **XAudio2 (2.9)** voice graph + **X3DAudio** 3D; **WAV/PCM-16** via custom RIFF reader; buses Master→Music/Ambient/SFX/UI (§11.3) |
 | Meshes / fonts | CMO (custom parser) / fixed-grid monospace atlas |
 | Headless/bots | **ERHeadless** — many NeuronClient sessions, render-free |
@@ -471,6 +491,13 @@ Compute in `XMVECTOR`/`XMMATRIX`; store `XMFLOAT*` for tight ECS packing. **💡
 row-major, row-vector, right-handed (`*RH`). A `WorldPos` fixed-point layer bridges
 `int64` sector ↔ sector-local `float`.
 
+`XMVECTOR`/`XMMATRIX` are also used as **call parameters**, passed **by value with the
+`XM_CALLCONV` calling convention** and the `FXMVECTOR`/`GXMVECTOR`/`HXMVECTOR`/`CXMVECTOR`
+(and `FXMMATRIX`/`CXMMATRIX`) parameter-type aliases per the DirectXMath conventions —
+so vectors stay in SIMD registers across calls (no spill to memory) and the same source
+compiles correctly across x64/ARM64/x86. Math-heavy helpers in NeuronCore therefore take
+`FXMVECTOR`/`CXMMATRIX`, not `const XMVECTOR&`, and annotate with `XM_CALLCONV`.
+
 ### 7.2 Other subsystems
 - **ECS** (custom, data-oriented): **32-bit handles = index + generation bits**
   (stale-handle safe), packed archetypes, span systems; **deterministic system &
@@ -503,9 +530,11 @@ row-major, row-vector, right-handed (`*RH`). A `WorldPos` fixed-point layer brid
 ## 8. Networking — Encrypted Reliable UDP
 
 ### 8.1 Transport (verified vs current MS docs)
-- **ERServer / ERHeadless:** Winsock UDP + IOCP.
-- **UWP client:** Winsock (or `DatagramSocket`) behind a thin `ISocket`; **💡
-  default Winsock**.
+- **ERServer / ERHeadless:** Winsock UDP + IOCP (Win32 hosts).
+- **UWP client:** **WinRT `Windows.Networking.Sockets.DatagramSocket`** behind a thin
+  `ISocket` — the client does **not** use Winsock. `DatagramSocket` is the UWP-supported
+  UDP path (works within the app-container networking sandbox); the `ISocket` seam keeps
+  NeuronClient transport-agnostic and lets ERHeadless swap in a Winsock implementation.
 - **Capabilities:** `internetClient` + `internetClientServer`/
   `privateNetworkClientServer`.
 - **⚠️ Loopback isolation:** UWP is blocked from loopback by default; for local
@@ -764,16 +793,19 @@ Separate subsystems 🔒 (own modules/PSOs/command lists; composited last).
   `EditorFont` atlas) is specified in
   [`docs/design/darwinia-menu-ui.md`](docs/design/darwinia-menu-ui.md) (§22.6).
 
-Shaders are precompiled into embedded SM6/DXIL byte-array headers (no runtime HLSL on
-UWP); see §12.4.
+Shaders are precompiled into embedded **SM 6.7**/DXIL byte-array headers (no runtime HLSL
+on UWP); see §12.4.
 
 ### 11.1 DirectX 12 engine architecture (NeuronRender) 🔒
-The renderer targets **broad reach**: **D3D12 feature level 12_0, Resource Binding
-Tier 2, Shader Model 6.0, Root Signature 1.1** — runs on most DX12 GPUs incl.
-integrated, ample for the cheap low-poly Darwinia look. No mesh shaders / ray tracing.
+The renderer standardises on **DirectX 12.1**: **D3D12 feature level 12_1, Resource
+Binding Tier 2, Shader Model 6.7, Root Signature 1.1** — still broad reach (FL 12_1 is
+supported by effectively all DX12 discrete GPUs and modern integrated parts), and SM 6.7
+matches the bytecode the shader build already emits (§12.4). FL 12_1 guarantees
+conservative rasterisation and rasteriser-ordered views if a later pass wants them. No
+mesh shaders / ray tracing.
 
 - **Device & adapter:** DXGI factory enumerates adapters; pick the highest-performance
-  hardware adapter that meets FL 12_0 (`CheckFeatureSupport` for binding tier, SM6,
+  hardware adapter that meets FL 12_1 (`CheckFeatureSupport` for binding tier, **SM 6.7**,
   RS 1.1); **WARP** fallback for dev/CI. **Debug layer + GPU-based validation** in dev
   builds; **DRED** (Device Removed Extended Data) for device-removal diagnostics.
 - **Frames in flight = 3 (triple-buffered).** Swap chain via
@@ -781,7 +813,7 @@ integrated, ample for the cheap low-poly Darwinia look. No mesh shaders / ray tr
   (`R8G8B8A8_UNORM` or `R10G10B10A2`). Per-frame: **command allocator + a fence
   value**; the CPU waits on the frame fence before reusing a frame's allocators/upload
   ring. Optional **waitable swap chain** for low-latency frame pacing.
-- **Command model:** one **DIRECT** queue (graphics; compute runs here at FL 12_0) +
+- **Command model:** one **DIRECT** queue (graphics; compute runs here at FL 12_1) +
   one **COPY** queue for async resource uploads. Command lists recorded per frame
   (single-threaded record at M1b; parallel record a later lever).
 - **Descriptor heaps:**
@@ -835,7 +867,7 @@ integrated, ample for the cheap low-poly Darwinia look. No mesh shaders / ray tr
   panning far triggers a rebase — and supplies the **X3DAudio listener** (§11.3). Touch
   adds pinch-zoom / two-finger rotate (§23).
 - **VFX — GPU-compute particles:** particle pools in structured buffers (UAV);
-  **spawn/update in compute shaders** (FL 12_0), drawn as **additive instanced
+  **spawn/update in compute shaders** (FL 12_1), drawn as **additive instanced
   billboards** into the HDR target. Categories: thrusters, weapon tracers/muzzle,
   impacts, **explosions**, **warp/jump** effects, mining beams. CPU emits spawn
   requests only; the GPU simulates. A **per-frame particle budget** with distance LOD
@@ -1302,7 +1334,7 @@ a sector boundary under simulated loss/reorder/dup; MITM/replay tests pass; tick
 within budget (App. B).
 
 **M1b — Client tech slice** *(M)* — UWP client renders base + a few ships with **3D
-Scene + 2D Canvas HUD** as separate passes; **DX12 engine foundation** (FL 12_0,
+Scene + 2D Canvas HUD** as separate passes; **DX12 engine foundation** (FL 12_1,
 triple-buffered flip-model + fences, descriptor heaps, PSO cache, barriers — §11.1);
 **space-RTS camera** + basic **mouse+keyboard** input; snap-on-ack correction.
 **Done:** 1 UWP + ≥3 bots share the world; no `int64_t` reaches the GPU; 3D/2D split
@@ -1403,7 +1435,7 @@ bots (mouse+keyboard and touch), with zero economy loss across a server restart.
 ## 19. Open Questions & Future Considerations
 
 **Resolved this revision (v0.11 — completeness):** travel = warp + jump-beacon network;
-renderer = D3D12 FL 12_0 / Tier 2 / SM6.0, triple-buffered HDR forward + bloom;
+renderer = D3D12 12.1 (FL 12_1 / Tier 2 / SM 6.7, refined in v0.16), triple-buffered HDR forward + bloom;
 input = mouse+keyboard primary + touch on tablets; tactical UI = 3D overlay + overview
 list + 2D radar disc; comms = chat + in-game mail + offline notifications; uptime =
 24/7 rolling restarts (no scheduled downtime); localization = English at launch but
@@ -1813,7 +1845,10 @@ Large reliable (last-resort, §8.2): body carries { msgId u32, partIdx u16, part
 
 ---
 
-*End of DRAFT v0.15 — networking scale-out pass for **hundreds of players** (folds in
+*End of DRAFT v0.16 — platform corrections (UWP client uses WinRT `DatagramSocket`, not
+Winsock §8.1; DirectXMath `XM_CALLCONV` parameter passing §7.1; renderer standardised on
+DirectX 12.1 / FL 12_1 / SM 6.7 §11.1). Earlier: v0.15 networking scale-out pass for
+**hundreds of players** (folds in
 `docs/design/review/networking-scale-review.md`): self-healing tombstone eviction +
 concrete snapshot pipeline (cell pub/sub, per-entity version stamping, named priority
 function, quantized sector-local delta) §8.4; **time dilation** §7.2/§9; reliable-channel

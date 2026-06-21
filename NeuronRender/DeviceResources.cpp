@@ -35,23 +35,25 @@ bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
     winrt::check_hresult(CreateDXGIFactory2(dxgiFlags, IID_PPV_ARGS(factory.put())));
 
     // -----------------------------------------------------------------------
-    // Hardware adapter → D3D12 device
+    // Hardware adapter → D3D12 device — require DirectX 12.1 (FL 12_1) per §11.1.
+    // (TODO §11.1: also CheckFeatureSupport for Resource Binding Tier 2, SM 6.7 and
+    //  Root Signature 1.1 once the renderer relies on them.)
     // -----------------------------------------------------------------------
     winrt::com_ptr<IDXGIAdapter1> adapter;
     for (UINT i = 0; factory->EnumAdapters1(i, adapter.put()) != DXGI_ERROR_NOT_FOUND; ++i) {
         DXGI_ADAPTER_DESC1 desc{};
         adapter->GetDesc1(&desc);
         if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) { adapter = nullptr; continue; }
-        if (SUCCEEDED(D3D12CreateDevice(adapter.get(), D3D_FEATURE_LEVEL_11_0,
+        if (SUCCEEDED(D3D12CreateDevice(adapter.get(), D3D_FEATURE_LEVEL_12_1,
                                         IID_PPV_ARGS(m_device.put()))))
             break;
         adapter = nullptr;
     }
     if (!m_device) {
-        // WARP fallback — always works; slower than hardware
+        // WARP fallback — supports FL 12_1 (Win10 1709+); slower than hardware.
         winrt::com_ptr<IDXGIAdapter> warp;
         winrt::check_hresult(factory->EnumWarpAdapter(IID_PPV_ARGS(warp.put())));
-        winrt::check_hresult(D3D12CreateDevice(warp.get(), D3D_FEATURE_LEVEL_11_0,
+        winrt::check_hresult(D3D12CreateDevice(warp.get(), D3D_FEATURE_LEVEL_12_1,
                                                 IID_PPV_ARGS(m_device.put())));
     }
 
