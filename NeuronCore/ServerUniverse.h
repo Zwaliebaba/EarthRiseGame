@@ -59,6 +59,7 @@ public:
         m_world.RegisterComponent<BuildQueue>();
         m_world.RegisterComponent<FleetMember>();
         m_world.RegisterComponent<Sensor>();
+        m_world.RegisterComponent<HarvestOrder>();
         if (seedDemoContent) {
             SpawnScenery();
             SpawnDemoSeed();
@@ -174,6 +175,7 @@ public:
             m_beaconEntity[bi]     = netId;
             m_beaconName[b.name]   = bi;
         }
+        SpawnFieldNodes();
     }
 
     // Decode a cooked blob (NeuronTools/datacook output) and load it. The runtime
@@ -300,6 +302,28 @@ public:
     [[nodiscard]] BuildQueue* BuildQueueOf(uint32_t netId) { return m_world.GetComponent<BuildQueue>(EntityOf(netId)); }
     [[nodiscard]] const EconomyTuning& Economy() const noexcept { return m_economy; }
 
+    // Order a harvester to auto-mine a node and return to its base (server entry
+    // point; area B routes a Harvest command here). The home base is the ship
+    // owner's base (player ≈ base net id). False if ship / node / base invalid.
+    bool OrderHarvest(uint32_t shipNetId, uint32_t nodeNetId)
+    {
+        const auto shipE = EntityOf(shipNetId);
+        OwnerId* owner = m_world.GetComponent<OwnerId>(shipE);
+        if (!owner || !m_world.HasComponent<Cargo>(shipE)) return false;
+        if (!m_world.HasComponent<ResourceNodeTag>(EntityOf(nodeNetId))) return false;
+        const uint32_t baseNetId = owner->player; // player ≈ their base net id
+        if (!m_world.HasComponent<Storage>(EntityOf(baseNetId))) return false;
+        HarvestOrder* ord = m_world.GetComponent<HarvestOrder>(shipE);
+        if (!ord) ord = &m_world.AddComponent<HarvestOrder>(shipE);
+        ord->phase     = HarvestPhase::ToNode;
+        ord->nodeNetId = nodeNetId;
+        ord->baseNetId = baseNetId;
+        return true;
+    }
+
+    [[nodiscard]] HarvestOrder*     HarvestOrderOf(uint32_t netId) { return m_world.GetComponent<HarvestOrder>(EntityOf(netId)); }
+    [[nodiscard]] ResourceNodeTag*  ResourceNodeOf(uint32_t netId) { return m_world.GetComponent<ResourceNodeTag>(EntityOf(netId)); }
+
     // Remove a player's base from the universe (on disconnect/timeout). Returns
     // true if a base for that net id existed.
     bool DespawnBase(uint32_t netId)
@@ -316,6 +340,7 @@ public:
     {
         MovementSystem(m_world, dtSeconds);
         NavigationSystem(m_world, m_nav, dtSeconds);
+        HarvestSystem(dtSeconds);
         BuildSystem(dtSeconds);
         ++m_tick;
     }
@@ -400,6 +425,82 @@ private:
         }
     }
 
+    // Drive each ordered harvester through travel → mine → return → deposit (area C).
+    // The pure transfer rules (HarvestStep/DepositAll) live in Economy.h; this just
+    // sequences them across the harvester, its target node, and its home base.
+    void HarvestSystem(float dt)
+    {
+        const double maxStep = static_cast<double>(m_economy.harvesterSpeed) * static_cast<double>(dt);
+        const double range   = static_cast<double>(m_economy.harvestRange);
+        m_world.ForEach<HarvestOrder, Transform, Cargo>([&](HarvestOrder& ord, Transform& tr, Cargo& cargo) {
+            if (ord.phase == HarvestPhase::Idle) return;
+            Transform*       nodeTr  = m_world.GetComponent<Transform>(EntityOf(ord.nodeNetId));
+            ResourceNodeTag* node    = m_world.GetComponent<ResourceNodeTag>(EntityOf(ord.nodeNetId));
+            Transform*       baseTr  = m_world.GetComponent<Transform>(EntityOf(ord.baseNetId));
+            Storage*         storage = m_world.GetComponent<Storage>(EntityOf(ord.baseNetId));
+
+            switch (ord.phase) {
+            case HarvestPhase::ToNode:
+                if (!nodeTr || !node || node->remaining <= 0.0f)
+                    ord.phase = (SumSlots(cargo.amount) > 0.0f) ? HarvestPhase::ToBase : HarvestPhase::Idle;
+                else if (UniverseDistance(tr.pos, nodeTr->pos) <= range)
+                    ord.phase = HarvestPhase::Harvesting;
+                else
+                    StepToward(tr, nodeTr->pos, maxStep);
+                break;
+            case HarvestPhase::Harvesting:
+                if (!node || node->remaining <= 0.0f) {
+                    ord.phase = HarvestPhase::ToBase;
+                } else {
+                    HarvestStep(*node, cargo, m_economy.harvestRate, dt);
+                    if (CargoFree(cargo) <= 0.0f) ord.phase = HarvestPhase::ToBase;
+                }
+                break;
+            case HarvestPhase::ToBase:
+                if (!baseTr || !storage)
+                    ord.phase = HarvestPhase::Idle;
+                else if (UniverseDistance(tr.pos, baseTr->pos) <= range)
+                    ord.phase = HarvestPhase::Depositing;
+                else
+                    StepToward(tr, baseTr->pos, maxStep);
+                break;
+            case HarvestPhase::Depositing:
+                if (storage) DepositAll(cargo, *storage);
+                ord.phase = (node && node->remaining > 0.0f) ? HarvestPhase::ToNode : HarvestPhase::Idle;
+                break;
+            case HarvestPhase::Idle:
+                break;
+            }
+        });
+    }
+
+    // Pick a node's resource type from a field's composition (deterministic walk).
+    [[nodiscard]] static ResourceType PickFieldType(const ResourceFieldDef& f, int i, int count)
+    {
+        if (f.nodes.empty()) return ResourceType::Ore;
+        const double frac = (static_cast<double>(i) + 0.5) / static_cast<double>(count);
+        double cum = 0.0;
+        for (const auto& w : f.nodes) { cum += static_cast<double>(w.weight); if (frac <= cum) return w.type; }
+        return f.nodes.back().type;
+    }
+
+    // Spawn harvestable nodes from the cooked dataset's resource fields (area C):
+    // a deterministic ring within each field, typed by its composition.
+    void SpawnFieldNodes()
+    {
+        for (const auto& f : m_universe.fields) {
+            const int   count = std::clamp(static_cast<int>(f.countMin), 1, 8);
+            const float yield = 0.5f * (static_cast<float>(f.yieldMin) + static_cast<float>(f.yieldMax));
+            for (int i = 0; i < count; ++i) {
+                const double ang = (2.0 * 3.14159265358979323846 * static_cast<double>(i)) / static_cast<double>(count);
+                const int64_t ox = static_cast<int64_t>(std::llround(std::cos(ang) * static_cast<double>(f.radius) * 0.5));
+                const int64_t oz = static_cast<int64_t>(std::llround(std::sin(ang) * static_cast<double>(f.radius) * 0.5));
+                SpawnResourceNode(PickFieldType(f, i, count), yield,
+                                  { f.center.x + ox, f.center.y, f.center.z + oz });
+            }
+        }
+    }
+
     // Dev seed (live only): two linked jump beacons + a harvestable resource node +
     // a small starter fleet near the spawn, so the M3 navigation/economy entities
     // are visible in the client before the cooked universe + command UI (B/C/G) land.
@@ -411,18 +512,27 @@ private:
         UniverseDataset demo;
         RegionDef reg; reg.name = "DEMO"; reg.security = SecurityTier::High; reg.yieldMult = 1.0f;
         demo.regions.push_back(reg);
-        BeaconDef gw; gw.name = "DEMO_GATE_W"; gw.region = "DEMO"; gw.pos = { bx - 800, 0, 260 }; gw.links = { "DEMO_GATE_E" };
-        BeaconDef ge; ge.name = "DEMO_GATE_E"; ge.region = "DEMO"; ge.pos = { bx + 800, 0, 260 }; ge.links = { "DEMO_GATE_W" };
+        BeaconDef gw; gw.name = "DEMO_GATE_W"; gw.region = "DEMO"; gw.pos = { bx - 900, 0, 260 }; gw.links = { "DEMO_GATE_E" };
+        BeaconDef ge; ge.name = "DEMO_GATE_E"; ge.region = "DEMO"; ge.pos = { bx + 900, 0, 260 }; ge.links = { "DEMO_GATE_W" };
         demo.beacons.push_back(gw);
         demo.beacons.push_back(ge);
+        // Snappy self-contained economy so the eXploit loop visibly runs (ore-only build).
+        demo.economy.cargoCapacity  = 200.0f;
+        demo.economy.harvestRate    = 200.0f;
+        demo.economy.harvesterSpeed = 1500.0f;
+        demo.economy.harvestRange   = 600.0f;
+        demo.economy.buildOreCost   = 200.0f;
+        demo.economy.buildIceCost   = 0.0f;
+        demo.economy.buildSeconds   = 6.0f;
         LoadUniverse(demo);
 
-        // A harvestable ore node below the cluster.
-        SpawnResourceNode(ResourceType::Ore, 8000.0f, { bx, -240, 340 });
-
-        // A small starter fleet (unowned demo ships) in a short row.
-        for (int i = 0; i < 3; ++i)
-            SpawnFleetShip(0, ShipShapeId(), { bx + (i - 1) * 120, 170, 180 });
+        // An autonomous mini-economy below the cluster: a station + a harvester that
+        // mines an ore asteroid, returns, deposits, and the station builds a ship.
+        const uint32_t demoBase = SpawnBase({ bx, -1500, 360 }, { 0, 0, 0 });
+        const uint32_t node     = SpawnResourceNode(ResourceType::Ore, 100000.0f, { bx + 1600, -1500, 700 });
+        const uint32_t harv     = SpawnFleetShip(demoBase, ShipShapeId(), { bx + 220, -1500, 360 });
+        OrderHarvest(harv, node);
+        EnqueueBuild(demoBase);
     }
 
     // Populate the universe with a spread of static catalog props clustered around

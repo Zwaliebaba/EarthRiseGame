@@ -174,14 +174,18 @@ ER_TEST(Economy, BuildWithEmptyStorageSpawnsNothing)
 
 ER_TEST(Economy, DefaultConstructorSeedsVisibleDemoContent)
 {
-    ServerUniverse su; // default → live seed (scenery + demo beacons/node/fleet)
-    ER_CHECK(su.OwnedShipCount(0) == 3);          // the starter fleet (unowned demo ships)
+    ServerUniverse su; // default → live seed (scenery + an autonomous demo economy)
     ER_CHECK(su.BeaconNetId("DEMO_GATE_W") != 0); // working, jump-linked beacons
     ER_CHECK(su.BeaconNetId("DEMO_GATE_E") != 0);
 
     const Snapshot snap = su.BuildSnapshot();
-    int nodes = 0;
-    for (const auto& e : snap.entities)
-        if (e.kind == EntityKind::ResourceNode) ++nodes;
-    ER_CHECK(nodes >= 1); // the harvestable resource node renders
+    int nodes = 0, bases = 0, structures = 0;
+    for (const auto& e : snap.entities) {
+        if      (e.kind == EntityKind::ResourceNode) ++nodes;
+        else if (e.kind == EntityKind::Base)         ++bases;
+        else if (e.kind == EntityKind::Structure)    ++structures;
+    }
+    ER_CHECK(nodes >= 1);      // the harvestable asteroid
+    ER_CHECK(bases >= 1);      // the autonomous demo station
+    ER_CHECK(structures >= 2); // the two demo beacons (+ scenery jumpgate)
 }

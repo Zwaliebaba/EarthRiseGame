@@ -134,6 +134,8 @@ struct EconomyTuning
     float    buildIceCost{ 200.0f };
     float    buildSeconds{ 20.0f };
     uint8_t  buildShipType{ 1 };
+    float    harvesterSpeed{ 800.0f };    // m/s a harvester travels node↔base (sublight)
+    float    harvestRange{ 600.0f };      // within this of a node/base to mine / deposit
 };
 
 struct UniverseDataset
@@ -241,6 +243,7 @@ namespace detail
     wb.WriteFloat(d.economy.sensorRangeBase); wb.WriteFloat(d.economy.buildOreCost);
     wb.WriteFloat(d.economy.buildIceCost);    wb.WriteFloat(d.economy.buildSeconds);
     wb.WriteUint8(d.economy.buildShipType);
+    wb.WriteFloat(d.economy.harvesterSpeed);  wb.WriteFloat(d.economy.harvestRange);
 
     wb.Finalise();
     const auto bytes = wb.Data();
@@ -317,6 +320,7 @@ namespace detail
     d.economy.sensorRangeBase = rb.ReadFloat(); d.economy.buildOreCost    = rb.ReadFloat();
     d.economy.buildIceCost    = rb.ReadFloat(); d.economy.buildSeconds    = rb.ReadFloat();
     d.economy.buildShipType   = rb.ReadUint8();
+    d.economy.harvesterSpeed  = rb.ReadFloat(); d.economy.harvestRange    = rb.ReadFloat();
 
     if (!rb.IsGood()) return std::nullopt;
     return d;
@@ -426,6 +430,7 @@ namespace detail
     if (d.economy.buildSeconds <= 0.0f) err("economy build_seconds must be > 0");
     if (d.economy.buildOreCost < 0.0f || d.economy.buildIceCost < 0.0f) err("economy build costs must be ≥ 0");
     if (d.economy.sensorRangeShip < 0.0f || d.economy.sensorRangeBase < 0.0f) err("economy sensor ranges must be ≥ 0");
+    if (d.economy.harvesterSpeed <= 0.0f || d.economy.harvestRange <= 0.0f) err("economy harvester speed/range must be > 0");
 
     return errors.size() == before;
 }

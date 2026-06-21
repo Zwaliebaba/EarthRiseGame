@@ -36,6 +36,7 @@ enum ComponentSlot : uint8_t
     Slot_BuildQueue      = 14,
     Slot_FleetMember     = 15,
     Slot_Sensor          = 16,
+    Slot_HarvestOrder    = 17,
 };
 
 // Entity kinds carried in snapshots (matches §13 entity list). The first seven
@@ -143,5 +144,16 @@ struct FleetMember { uint8_t group{ 0 }; };
 
 // Sensor range in metres (§13.0 eXplore). Drives per-player detection / fog (area E).
 struct Sensor { float range{ 0.0f }; };
+
+// Harvest auto-pilot order (§13.0 eXploit). The harvest system drives a harvester
+// node → base → node: travel to the node, mine its yield into Cargo, return, and
+// deposit into the base Storage — the closed "harvest → return → build" loop.
+enum class HarvestPhase : uint8_t { Idle = 0, ToNode = 1, Harvesting = 2, ToBase = 3, Depositing = 4 };
+struct HarvestOrder
+{
+    HarvestPhase phase{ HarvestPhase::Idle };
+    uint32_t     nodeNetId{ 0 }; // target resource node
+    uint32_t     baseNetId{ 0 }; // home base to deposit at
+};
 
 } // namespace Neuron::Sim

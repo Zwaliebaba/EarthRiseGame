@@ -214,6 +214,8 @@ namespace detail
             else if (key == "build_ice")         setF(economy.buildIceCost);
             else if (key == "build_seconds")     setF(economy.buildSeconds);
             else if (key == "build_ship_type")   setU(economy.buildShipType);
+            else if (key == "harvester_speed")   setF(economy.harvesterSpeed);
+            else if (key == "harvest_range")     setF(economy.harvestRange);
             else err(line, "unknown economy key '" + key + "'");
         }
     };

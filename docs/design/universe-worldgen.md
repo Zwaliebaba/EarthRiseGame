@@ -78,11 +78,12 @@ is no celestial-mechanics sim; the universe is sectors + placed content.
 
 > **Today:** `ServerUniverse::SpawnScenery()` hand-places ~12 catalog props (a jumpgate, 3
 > asteroids, stations, debris, hulls) near spawn to exercise the M2 `ShapeCatalog` render
-> path. That is **placeholder dressing**. Alongside it, `SpawnDemoSeed()` now places a small
-> **functional** seed near spawn — two linked jump beacons, a harvestable `ResourceNode`, and a
-> 3-ship starter fleet — so the M3 navigation/economy entities are visible in the live client
-> (gated by the `ServerUniverse(seedDemoContent)` flag; tests opt out). The real data-driven
-> path (ERServer loads the cooked universe; areas B/C/G drive it) supersedes both.
+> path. That is **placeholder dressing**. Alongside it, `SpawnDemoSeed()` now seeds a small
+> **functional, autonomous** economy near spawn — two linked jump beacons plus a station whose
+> harvester mines an ore asteroid, returns, deposits, and builds a ship — so the M3
+> navigation/economy/eXploit-loop entities are visibly running in the live client (gated by the
+> `ServerUniverse(seedDemoContent)` flag; tests opt out). The real data-driven path (ERServer
+> loads the cooked universe; areas B/G drive it via player commands) supersedes the dev seed.
 
 ---
 
@@ -194,10 +195,12 @@ transferring the universe as a bulk artifact.
 - **M3 (now):** the **static-data slice** + the first dynamic loop. `datacook`/`datacheck`
   are **built** — the §4.1–4.3 schema is realized in `NeuronCore/UniverseData.h`, the first
   **region set + public beacon graph** is authored in `Config/universe/sol-frontier.universe`,
-  and integrity is gated by `make check`. **Navigation (area D) is done:** `ServerUniverse`
-  loads the cooked blob and spawns the jump beacons; bases warp/jump across them server-
-  authoritatively (`Navigation.h`, cooked `NavTuning`). **Remaining:** spawn **resource fields**
-  (the harvest loop, area C) + one **hand-placed NPC site** (area F). Non-procedural, non-claimable.
+  and integrity is gated by `make check`. **Navigation (D) + the eXploit loop (C) are done:**
+  `ServerUniverse` loads the cooked blob, spawns the jump beacons + resource nodes from the
+  fields; bases warp/jump (`Navigation.h`, cooked `NavTuning`) and a harvester mines → returns →
+  deposits → the base builds a ship (`Economy.h`/`HarvestSystem`, cooked `EconomyTuning`), all
+  server-authoritative. **Remaining:** one **hand-placed NPC site** (area F) + the player command
+  layer (B/G). Non-procedural, non-claimable.
 - **M4:** sector-subscription interest + warp/jump prefetch — universe content becomes
   interest-scoped instead of full-snapshot.
 - **M5:** persistence — ResourceNode depletion, cleared sites, and player/territory beacons

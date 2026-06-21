@@ -102,4 +102,6 @@ economy {
   build_ice         = 200
   build_seconds     = 20
   build_ship_type   = 1
+  harvester_speed   = 800
+  harvest_range     = 600
 }

@@ -1,8 +1,8 @@
 # M3 — Core 4X Loop, Fleet Command & Navigation (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M3**).
-> **Status:** 🔨 Active (M0/M1a/M1b/M2 complete). **Server track underway — areas A + D done,
-> C in progress;** B/E/F/G/H not started.
+> **Status:** 🔨 Active (M0/M1a/M1b/M2 complete). **Server track: areas A + C + D done;**
+> B/E/F/G/H not started.
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 
 ## Milestone goal (verbatim from §17)
@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | **A** Sim entities & shared rules | ✅ done | components (`OwnerId`/`ResourceNodeTag`/`Cargo`/`Storage`/`BuildQueue`/`FleetMember`/`Sensor`), pure rules (`Economy.h`), fleet spawning + data-driven cap, the build-queue system; balance = cooked `EconomyTuning`. |
 | **B** Fleet command — intents | ⏳ not started | `Command.h` still carries only `MoveCommand`. |
-| **C** eXploit loop (harvest→return→build) | 🔨 in progress | build works (A); the harvest/deposit systems + spawning resource nodes from the dataset's fields land here. |
+| **C** eXploit loop (harvest→return→build) | ✅ done | `HarvestSystem` auto-pilot (travel → mine → return → deposit) + the build queue; nodes spawn from the dataset's fields; `OrderHarvest` is the entry point. |
 | **D** Navigation — warp + jump | ✅ done | `Navigation.h` (warp/jump/interdiction), beacon graph loaded into `ServerUniverse`, fuel + spool/cooldown; balance = cooked `NavTuning`. |
 | **E** eXplore — sensor/fog | ⏳ not started | `Sensor` component + `SensorDetect` rule exist (A); the per-player detected-set (fog) filter is pending. |
 | **F** Basic PvE NPC site | ⏳ not started | no `ERServer/ai/` yet. |
@@ -152,19 +152,26 @@
 - **Goal:** the closed economic micro-loop that proves "eXploit": send a harvester to a
   node, fill cargo, return to base, deposit to storage, enqueue + complete a ship build.
 - **Masterplan refs:** §13.0 (eXploit), §13.4 (raw→…→ship, in-memory at M3), §13.11.
-- **Current state:** none.
+- **Current state:** ✅ **done** — `ServerUniverse::HarvestSystem` drives the auto-pilot loop;
+  `OrderHarvest` is the server entry point; nodes spawn from the dataset's fields.
 - **Work:**
-  - [ ] Harvest system: harvester within range of a `ResourceNode` + a `Harvest` intent →
-        transfer yield into `Cargo` over time (rule from A).
-  - [ ] Deposit: harvester at base → move `Cargo` into base `Storage`.
-  - [ ] Build: `BuildQueue` draws from `Storage` → spawns ship (area A) → "build complete"
-        event.
-  - [ ] All state **in-memory** (M5 persists later); keep it snapshot-shaped.
-- **Tests:**
-  - [ ] `NeuronCoreTest`: full loop as a deterministic sim sequence (node depletes → cargo →
-        storage → build → ship count +1).
-  - [ ] `ERHeadlessTest`: a scripted bot drives harvest→return→build end-to-end (area H).
-- **Depends on:** A, B. **Blocks:** Done gate "harvest → return → build a ship".
+  - [x] Harvest system: `HarvestSystem` auto-pilots a harvester (a `HarvestOrder`) ToNode →
+        Harvesting → ToBase → Depositing; mining uses the pure `HarvestStep` rule (area A);
+        `harvesterSpeed`/`harvestRange` are cooked tuning. `OrderHarvest` is the entry point
+        (area B routes a Harvest command here).
+  - [x] Deposit: at base range → `DepositAll` moves `Cargo` into base `Storage`.
+  - [x] Build: `BuildQueue` draws from `Storage` → spawns a ship (area A `BuildSystem`) →
+        `DrainBuildCompleted` event hook.
+  - [x] Resource nodes spawn from the dataset's **fields** (`SpawnFieldNodes`, deterministic
+        ring typed by the field's composition). All state **in-memory**, snapshot-shaped.
+- **Tests (mirrored in `NeuronTools/testrunner/`, §16.1/§16.2):**
+  - [x] Full loop as a deterministic sequence: node depletes → cargo → storage → build →
+        ship count +1 (`HarvestTests`).
+  - [x] Harvester drains a small node then idles; deposits banked; `OrderHarvest` validation;
+        fields spawn the right node count (`HarvestTests`).
+  - [ ] `ERHeadlessTest`: a scripted bot drives harvest→return→build end-to-end (**area H**).
+- **Depends on:** A, B (B's command wiring pending — driven via `OrderHarvest` for now).
+  **Blocks:** Done gate "harvest → return → build a ship".
 
 ### D. Navigation — warp + jump-beacon network (§13.12)
 
@@ -317,7 +324,7 @@ ships + HUD/overview basics), both done.
 
 ## Done gate (mirrors §17 "Done")
 
-- [ ] **Harvest → return → build a ship**, server-authoritative (A, C).
+- [x] **Harvest → return → build a ship**, server-authoritative (A, C) — *bot-driven E2E is area H.*
 - [x] **Warp and jump across beacons** (fuel, spool/cooldown, interdiction), server-
       authoritative (D) — *the bot-driven end-to-end run is area H.*
 - [ ] **Command a multi-ship fleet** (6–12 ships + base) via overview/command bar +

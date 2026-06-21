@@ -37,6 +37,21 @@ namespace Neuron::Sim
     return alignSeconds + static_cast<float>(distance / static_cast<double>(warpSpeed));
 }
 
+// Step a Transform toward 'target' by up to 'maxStep' metres (sublight travel —
+// used by the harvest auto-pilot, area C). Snaps + clears the local offset on
+// arrival. Pure/deterministic.
+inline void StepToward(Transform& tr, const Neuron::Universe::UniversePos& target, double maxStep) noexcept
+{
+    const double dist = UniverseDistance(tr.pos, target);
+    if (dist <= 0.0) return;
+    const double step = (maxStep >= dist) ? dist : maxStep;
+    const double frac = step / dist;
+    tr.pos.x += static_cast<int64_t>(std::llround(static_cast<double>(target.x - tr.pos.x) * frac));
+    tr.pos.y += static_cast<int64_t>(std::llround(static_cast<double>(target.y - tr.pos.y) * frac));
+    tr.pos.z += static_cast<int64_t>(std::llround(static_cast<double>(target.z - tr.pos.z) * frac));
+    if (step >= dist) tr.localOffset = { 0.0f, 0.0f, 0.0f };
+}
+
 // Why a jump request was rejected (server validation, §8.4).
 enum class JumpReject : uint8_t { Accepted = 0, NotAtBeacon, NotLinked, NoFuel, Busy };
 
