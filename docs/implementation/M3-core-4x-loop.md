@@ -76,25 +76,27 @@
 - **Masterplan refs:** §13.0 (4X loop), §13.1 (fleet of 6–12 ships + base), §13.4 (economy
   chain, in-memory only at M3), §13.11 (entities), §7.2 (shared sim rules, identical
   client/server), §6 (movement/sectors).
-- **Current state:** only `Base` + `MovementSystem`; ship/node/cargo/fuel components absent.
+- **Current state:** ✅ **done** — components + pure economy rules (`NeuronCore/Economy.h`) +
+  the build-queue system & fleet spawning on `ServerUniverse`; balance is the cooked `EconomyTuning`.
 - **Work:**
-  - [ ] New components (`NeuronCore/sim/Components.h`, stable IDs — they're wire contract):
-        `ResourceNodeTag` (resource type + remaining yield), `Cargo`/`Storage` (itemized,
-        capacity), `BuildQueue` (recipe id + progress), `Fuel`, `OwnerId` (player → entity),
-        `FleetMember`/control-group tag, `Sensor` (range). Keep them snapshot-friendly for M5.
-  - [ ] **Fleet spawning & ownership:** a player owns base + up to **data-driven fleet cap**
-        (💡 8) ships; `OwnerId` ties entities to the owning player/session.
-  - [ ] **Shared sim rules** (pure functions, §7.2) for: harvest rate/yield, refine/build
-        cost & progress, fuel consumption, sensor/scan range. One dataset drives server +
-        client + bots (§12.6) — **no balance constants in code**.
-  - [ ] **Build queue system:** consume stored resources → advance build → spawn a new ship
-        at the base (the M3 *Done* "build a ship"). Emits a "build complete" sim event
-        (client-side feedback hook for M2 audio; **not** persisted until M5).
-- **Tests (`NeuronCoreTest`, §16.1):**
-  - [ ] Harvest rule: node yield decrements, cargo fills, capacity clamps.
-  - [ ] Build rule: insufficient/sufficient resources; progress over N ticks; ship spawns.
-  - [ ] Fuel consumption math; sensor-range queries.
-  - [ ] Platform-independent rule cases mirrored in `NeuronTools/testrunner/` (§16.2).
+  - [x] New components (`Components.h`, stable IDs — wire contract): `OwnerId`(10),
+        `ResourceNodeTag`(11), `Cargo`(12)/`Storage`(13) (itemised by `ResourceType` + capacity),
+        `BuildQueue`(14), `FleetMember`(15), `Sensor`(16); `Fuel`(7) from area D. Bound in
+        `SimComponents.cpp` + the test TU; snapshot-friendly for M5.
+  - [x] **Fleet spawning & ownership:** `ServerUniverse::SpawnFleetShip` enforces the
+        **data-driven fleet cap** (`EconomyTuning.fleetCap`, default 8); `OwnerId` ties base +
+        ships to a player (≈ their base net id); `OwnedShipCount` counts per owner.
+  - [x] **Shared sim rules** (pure, §7.2, `Economy.h`): `HarvestStep`, `DepositAll`,
+        `CanAfford`/`BuildStep`, `ConsumeFuel`, `SensorDetect` — all read `EconomyTuning`
+        (cooked `economy {}` block), **no balance constants in code**.
+  - [x] **Build queue system:** `ServerUniverse::BuildSystem` consumes `Storage` → advances →
+        spawns a ship at the base (`EnqueueBuild` enqueues; `DrainBuildCompleted` is the
+        "build complete" feedback hook; in-memory until M5).
+- **Tests (mirrored in `NeuronTools/testrunner/`, §16.1/§16.2):**
+  - [x] Harvest: node yield decrements, cargo fills, capacity clamps (`EconomyTests`).
+  - [x] Build: insufficient vs sufficient resources; progress over ticks; ship spawns +
+        fleet-cap enforced (`EconomyTests`).
+  - [x] Fuel consumption + sensor-range queries (`EconomyTests`).
 - **Depends on:** nothing (server-side). **Blocks:** B, C, D, F.
 
 ### B. Fleet command — intents & validation (§8.4 / §23.4)
@@ -149,32 +151,33 @@
 - **Masterplan refs:** §13.12 (full navigation spec), §6.3 (sectors/interest), §8.4
   (validated), §13.6 (beacons are a `TerritoryStructure` type — but **non-claimable** in M3),
   R21 (interest prefetch). **Game data:** §12.6 (beacon graph + region layout via `datacook`).
-- **Current state:** sublight movement only.
+- **Current state:** ✅ **done** — `NeuronCore/Navigation.h` (warp/jump rules + `NavigationSystem`);
+  `ServerUniverse` loads the cooked beacon graph and exposes `BeginWarpTo`/`BeginJumpTo`/`Interdict`,
+  server-authoritative; balance is the cooked `NavTuning`.
 - **Work:**
-  - [ ] **Warp:** *align → warp* to a scanned/bracketed destination at high sublight along a
-        path; **travel time ∝ distance**; **not instant** → **interdictable** by tackle/
-        warp-disruptors (basic interdiction check; full EWAR is M6). Sim-stepped each tick.
-  - [ ] **Jump drive + fuel:** `JumpBeacon` entities (a `TerritoryStructure` type, but plain
-        public beacons in M3); jump between **linked** beacons consuming `Fuel`, with
-        **spool-up** (vulnerability window) + post-jump **cooldown**. Running dry strands the
-        fleet (hazard).
-  - [ ] **Mobile-base travel:** base warps slowly / jumps via beacons (larger fuel + longer
-        spool) — how the "mobile home" relocates.
-  - [~] **Beacon graph + balance as game data** (§12.6): **tooling done** — `datacook` cooks
-        authored text → packed binary (codec in `NeuronCore/UniverseData.h`); `datacheck`
-        verifies region refs, reciprocal jump links, public-graph connectivity, claimable-tier
-        and weight rules (`NeuronTools/datacook/`; schema = `docs/design/universe-worldgen.md`
-        §4; first dataset `Config/universe/sol-frontier.universe`). **Remaining:** load the
-        cooked blob in `ServerUniverse` and spawn beacons/fields from it.
-  - [ ] **Interest prefetch (R21):** on warp/jump start, prefetch the destination sector's
-        interest set so fast cross-sector travel doesn't stall replication. (Lightweight at
-        M3; full interest mgmt is M4.)
+  - [x] **Warp:** *align → warp* to a destination at high sublight; **travel time ∝ distance**;
+        **not instant** → **interdictable** (`NavState.interdicted` drops it out; full EWAR is
+        M6). Sim-stepped each tick (`Navigation.h` `StepNav`/`NavigationSystem`).
+  - [x] **Jump drive + fuel:** beacons load as `Structure` entities (`BeaconTag`); jump between
+        **linked** beacons consuming `Fuel`, with **spool-up** (vulnerability window) + post-jump
+        **cooldown**; running dry / unlinked / busy are rejected (`BeginJumpTo` → `JumpReject`).
+  - [x] **Mobile-base travel:** the base carries `Fuel` + `NavState` and warps/jumps with
+        base-specific tuning (slower warp, larger fuel + longer spool).
+  - [x] **Beacon graph + balance as game data** (§12.6): `datacook` cooks authored text → packed
+        binary (codec/rules in `NeuronCore/UniverseData.h`); `datacheck` gates region refs,
+        reciprocal links, public-graph connectivity, claimable-tier & weights; nav balance is a
+        cooked `tuning {}` block (`NavTuning`). `ServerUniverse::LoadUniverse` spawns the beacons.
+        Schema = `docs/design/universe-worldgen.md` §4; dataset =
+        `Config/universe/sol-frontier.universe`. *(Resource fields stay in the dataset for area C.)*
+  - [x] **Interest prefetch (R21):** `OnTravelStart` records the destination sector on warp/jump
+        start (lightweight hook; M3 keeps the full-snapshot path, full interest mgmt is M4).
 - **Tests:**
-  - [ ] `NeuronCoreTest`: warp travel-time ∝ distance; arrival within tolerance; fuel
-        decrement on jump; spool/cooldown timing; jump rejected when beacons unlinked / out
-        of fuel.
-  - [ ] `ERServerTest`: interdiction interrupts an in-progress warp; jump validation
-        (ownership, fuel, link, cooldown).
+  - [x] Warp travel-time ∝ distance; arrival exact; fuel decrement on jump; spool→cooldown
+        timing; jump rejected when unlinked / out of fuel — `NavigationTests` (testrunner;
+        mirrors `NeuronCoreTest`).
+  - [x] Interdiction drops a unit out of an in-progress warp; jump validation (fuel, link,
+        not-at-beacon, busy) — `NavigationTests` (mirrors `ERServerTest`; **ownership** rides on
+        the area-B intent layer).
   - [x] `NeuronTools` `datacheck`: beacon-graph referential integrity — parse/validate/
         round-trip covered by `UniverseDataTests` (testrunner); `make check` gates
         `Config/universe/*.universe`.
@@ -293,8 +296,8 @@ ships + HUD/overview basics), both done.
 ## Done gate (mirrors §17 "Done")
 
 - [ ] **Harvest → return → build a ship**, server-authoritative (A, C).
-- [ ] **Warp and jump across beacons** (fuel, spool/cooldown, interdiction), server-
-      authoritative (D).
+- [x] **Warp and jump across beacons** (fuel, spool/cooldown, interdiction), server-
+      authoritative (D) — *the bot-driven end-to-end run is area H.*
 - [ ] **Command a multi-ship fleet** (6–12 ships + base) via overview/command bar +
       control groups (B, G).
 - [ ] **Clear a basic NPC site** with that fleet (F).

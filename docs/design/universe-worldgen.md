@@ -191,9 +191,10 @@ transferring the universe as a bulk artifact.
 - **M3 (now):** the **static-data slice** + the first dynamic loop. `datacook`/`datacheck`
   are **built** — the §4.1–4.3 schema is realized in `NeuronCore/UniverseData.h`, the first
   **region set + public beacon graph** is authored in `Config/universe/sol-frontier.universe`,
-  and integrity is gated by `make check`. **Remaining:** load the cooked blob in
-  `ServerUniverse` and spawn **resource fields** (the harvest loop, area C) + one **hand-placed
-  NPC site** (area F). Non-procedural, non-claimable.
+  and integrity is gated by `make check`. **Navigation (area D) is done:** `ServerUniverse`
+  loads the cooked blob and spawns the jump beacons; bases warp/jump across them server-
+  authoritatively (`Navigation.h`, cooked `NavTuning`). **Remaining:** spawn **resource fields**
+  (the harvest loop, area C) + one **hand-placed NPC site** (area F). Non-procedural, non-claimable.
 - **M4:** sector-subscription interest + warp/jump prefetch — universe content becomes
   interest-scoped instead of full-snapshot.
 - **M5:** persistence — ResourceNode depletion, cleared sites, and player/territory beacons

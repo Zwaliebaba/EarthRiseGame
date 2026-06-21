@@ -102,11 +102,47 @@ struct ResourceFieldDef
     uint32_t                      respawnSeconds{ 0 };
 };
 
+// Navigation balance (§13.12). First-pass numbers, tunable as game data and
+// validated with bots (§12.6/§19) — kept here, NOT hard-coded in the nav rules.
+// Cooked from an optional `tuning { ... }` block; these defaults apply if absent.
+struct NavTuning
+{
+    float warpSpeedShip{ 6000.0f };     // m/s, high sublight (ship)
+    float warpSpeedBase{ 2000.0f };     // the mobile base warps slower
+    float warpAlignSeconds{ 3.0f };     // align time before warp engages
+    float jumpFuelShip{ 20.0f };        // fuel per jump (ship)
+    float jumpFuelBase{ 60.0f };        // the base costs more
+    float jumpSpoolShip{ 5.0f };        // vulnerability window before a ship jump fires
+    float jumpSpoolBase{ 12.0f };       // longer for the base
+    float jumpCooldownSeconds{ 10.0f }; // post-jump cooldown
+    float beaconUseRange{ 2000.0f };    // must be within this of a beacon to jump from it
+    float shipFuelMax{ 100.0f };
+    float baseFuelMax{ 300.0f };
+};
+
+// Economy & fleet balance (§13.1, §13.4). First-pass, data-driven (§12.6) — cooked
+// from an optional `economy { ... }` block; these defaults apply if absent.
+struct EconomyTuning
+{
+    uint16_t fleetCap{ 8 };               // max ships a player commands (§13.1)
+    float    cargoCapacity{ 1000.0f };    // per harvester
+    float    storageCapacity{ 50000.0f }; // per base
+    float    harvestRate{ 50.0f };        // units/sec into cargo
+    float    sensorRangeShip{ 5000.0f };
+    float    sensorRangeBase{ 12000.0f };
+    float    buildOreCost{ 500.0f };      // the basic-ship recipe (§13.4)
+    float    buildIceCost{ 200.0f };
+    float    buildSeconds{ 20.0f };
+    uint8_t  buildShipType{ 1 };
+};
+
 struct UniverseDataset
 {
     std::vector<RegionDef>        regions;
     std::vector<BeaconDef>        beacons;
     std::vector<ResourceFieldDef> fields;
+    NavTuning                     nav{};
+    EconomyTuning                 economy{};
 
     [[nodiscard]] const RegionDef* FindRegion(std::string_view n) const noexcept
     {
@@ -190,6 +226,22 @@ namespace detail
         wb.WriteUint32(f.respawnSeconds);
     }
 
+    // Navigation tuning (§13.12).
+    wb.WriteFloat(d.nav.warpSpeedShip);     wb.WriteFloat(d.nav.warpSpeedBase);
+    wb.WriteFloat(d.nav.warpAlignSeconds);  wb.WriteFloat(d.nav.jumpFuelShip);
+    wb.WriteFloat(d.nav.jumpFuelBase);      wb.WriteFloat(d.nav.jumpSpoolShip);
+    wb.WriteFloat(d.nav.jumpSpoolBase);     wb.WriteFloat(d.nav.jumpCooldownSeconds);
+    wb.WriteFloat(d.nav.beaconUseRange);    wb.WriteFloat(d.nav.shipFuelMax);
+    wb.WriteFloat(d.nav.baseFuelMax);
+
+    // Economy & fleet tuning (§13.4).
+    wb.WriteUint16(d.economy.fleetCap);
+    wb.WriteFloat(d.economy.cargoCapacity);   wb.WriteFloat(d.economy.storageCapacity);
+    wb.WriteFloat(d.economy.harvestRate);     wb.WriteFloat(d.economy.sensorRangeShip);
+    wb.WriteFloat(d.economy.sensorRangeBase); wb.WriteFloat(d.economy.buildOreCost);
+    wb.WriteFloat(d.economy.buildIceCost);    wb.WriteFloat(d.economy.buildSeconds);
+    wb.WriteUint8(d.economy.buildShipType);
+
     wb.Finalise();
     const auto bytes = wb.Data();
     return { bytes.begin(), bytes.end() };
@@ -251,6 +303,20 @@ namespace detail
         f.respawnSeconds = rb.ReadUint32();
         d.fields.push_back(std::move(f));
     }
+
+    d.nav.warpSpeedShip     = rb.ReadFloat(); d.nav.warpSpeedBase    = rb.ReadFloat();
+    d.nav.warpAlignSeconds  = rb.ReadFloat(); d.nav.jumpFuelShip     = rb.ReadFloat();
+    d.nav.jumpFuelBase      = rb.ReadFloat(); d.nav.jumpSpoolShip    = rb.ReadFloat();
+    d.nav.jumpSpoolBase     = rb.ReadFloat(); d.nav.jumpCooldownSeconds = rb.ReadFloat();
+    d.nav.beaconUseRange    = rb.ReadFloat(); d.nav.shipFuelMax      = rb.ReadFloat();
+    d.nav.baseFuelMax       = rb.ReadFloat();
+
+    d.economy.fleetCap        = rb.ReadUint16();
+    d.economy.cargoCapacity   = rb.ReadFloat(); d.economy.storageCapacity = rb.ReadFloat();
+    d.economy.harvestRate     = rb.ReadFloat(); d.economy.sensorRangeShip = rb.ReadFloat();
+    d.economy.sensorRangeBase = rb.ReadFloat(); d.economy.buildOreCost    = rb.ReadFloat();
+    d.economy.buildIceCost    = rb.ReadFloat(); d.economy.buildSeconds    = rb.ReadFloat();
+    d.economy.buildShipType   = rb.ReadUint8();
 
     if (!rb.IsGood()) return std::nullopt;
     return d;
@@ -344,6 +410,22 @@ namespace detail
         if (f.countMin > f.countMax) err("field '" + f.name + "' has countMin > countMax");
         if (f.yieldMin > f.yieldMax) err("field '" + f.name + "' has yieldMin > yieldMax");
     }
+
+    // Navigation tuning (§13.12) ---------------------------------------------
+    if (d.nav.warpSpeedShip <= 0.0f || d.nav.warpSpeedBase <= 0.0f) err("nav warp speed must be > 0");
+    if (d.nav.beaconUseRange <= 0.0f) err("nav beacon_range must be > 0");
+    if (d.nav.shipFuelMax <= 0.0f || d.nav.baseFuelMax <= 0.0f) err("nav fuel_max must be > 0");
+    if (d.nav.warpAlignSeconds < 0.0f || d.nav.jumpSpoolShip < 0.0f || d.nav.jumpSpoolBase < 0.0f ||
+        d.nav.jumpCooldownSeconds < 0.0f || d.nav.jumpFuelShip < 0.0f || d.nav.jumpFuelBase < 0.0f)
+        err("nav timings/costs must be ≥ 0");
+
+    // Economy & fleet tuning (§13.4) ----------------------------------------
+    if (d.economy.fleetCap == 0 || d.economy.fleetCap > 64) err("economy fleet_cap must be 1..64");
+    if (d.economy.cargoCapacity <= 0.0f || d.economy.storageCapacity <= 0.0f) err("economy capacities must be > 0");
+    if (d.economy.harvestRate <= 0.0f) err("economy harvest_rate must be > 0");
+    if (d.economy.buildSeconds <= 0.0f) err("economy build_seconds must be > 0");
+    if (d.economy.buildOreCost < 0.0f || d.economy.buildIceCost < 0.0f) err("economy build costs must be ≥ 0");
+    if (d.economy.sensorRangeShip < 0.0f || d.economy.sensorRangeBase < 0.0f) err("economy sensor ranges must be ≥ 0");
 
     return errors.size() == before;
 }

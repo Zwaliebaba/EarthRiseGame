@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace Neuron::Tools
@@ -103,7 +104,8 @@ namespace detail
     // Apply one `key = values` assignment to whichever block is open.
     auto apply = [&](std::string_view kind, const std::string& key, size_t line,
                      const std::vector<std::string>& v,
-                     RegionDef& region, BeaconDef& beacon, ResourceFieldDef& field)
+                     RegionDef& region, BeaconDef& beacon, ResourceFieldDef& field,
+                     NavTuning& tuning, EconomyTuning& economy)
     {
         auto needN = [&](size_t n, const char* what) -> bool {
             if (v.size() != n) { err(line, "'" + key + "' expects " + std::to_string(n) + " " + what); return false; }
@@ -143,7 +145,7 @@ namespace detail
                 else err(line, "unknown beacon kind '" + v[0] + "'");
             } else err(line, "unknown beacon key '" + key + "'");
         }
-        else { // field
+        else if (kind == "field") {
             if (key == "region") {
                 if (needN(1, "name")) field.region = v[0];
             } else if (key == "center") {
@@ -184,30 +186,63 @@ namespace detail
                 else if (v.size() == 1) err(line, "respawn is not an integer");
             } else err(line, "unknown field key '" + key + "'");
         }
+        else if (kind == "tuning") {
+            auto setF = [&](float& dst) { if (needN(1, "float") && !detail::ParseFloat(v[0], dst)) err(line, "'" + key + "' is not a number"); };
+            if      (key == "warp_speed_ship") setF(tuning.warpSpeedShip);
+            else if (key == "warp_speed_base") setF(tuning.warpSpeedBase);
+            else if (key == "warp_align")      setF(tuning.warpAlignSeconds);
+            else if (key == "jump_fuel_ship")  setF(tuning.jumpFuelShip);
+            else if (key == "jump_fuel_base")  setF(tuning.jumpFuelBase);
+            else if (key == "jump_spool_ship") setF(tuning.jumpSpoolShip);
+            else if (key == "jump_spool_base") setF(tuning.jumpSpoolBase);
+            else if (key == "jump_cooldown")   setF(tuning.jumpCooldownSeconds);
+            else if (key == "beacon_range")    setF(tuning.beaconUseRange);
+            else if (key == "ship_fuel_max")   setF(tuning.shipFuelMax);
+            else if (key == "base_fuel_max")   setF(tuning.baseFuelMax);
+            else err(line, "unknown tuning key '" + key + "'");
+        }
+        else if (kind == "economy") {
+            auto setF = [&](float& dst) { if (needN(1, "value") && !detail::ParseFloat(v[0], dst)) err(line, "'" + key + "' is not a number"); };
+            auto setU = [&](auto& dst) { int64_t n; if (needN(1, "integer") && detail::ParseI64(v[0], n)) dst = static_cast<std::remove_reference_t<decltype(dst)>>(n); };
+            if      (key == "fleet_cap")         setU(economy.fleetCap);
+            else if (key == "cargo_capacity")    setF(economy.cargoCapacity);
+            else if (key == "storage_capacity")  setF(economy.storageCapacity);
+            else if (key == "harvest_rate")      setF(economy.harvestRate);
+            else if (key == "sensor_range_ship") setF(economy.sensorRangeShip);
+            else if (key == "sensor_range_base") setF(economy.sensorRangeBase);
+            else if (key == "build_ore")         setF(economy.buildOreCost);
+            else if (key == "build_ice")         setF(economy.buildIceCost);
+            else if (key == "build_seconds")     setF(economy.buildSeconds);
+            else if (key == "build_ship_type")   setU(economy.buildShipType);
+            else err(line, "unknown economy key '" + key + "'");
+        }
     };
 
     while (i < toks.size()) {
         const std::string kind = toks[i].text;
         const size_t kindLine = toks[i].line;
-        if (kind != "region" && kind != "beacon" && kind != "field") {
-            err(kindLine, "expected 'region|beacon|field', got '" + kind + "'");
+        if (kind != "region" && kind != "beacon" && kind != "field" && kind != "tuning" && kind != "economy") {
+            err(kindLine, "expected 'region|beacon|field|tuning|economy', got '" + kind + "'");
             ++i; continue;
         }
         ++i;
-        const detail::Token* nameTok = peek();
-        if (!nameTok || nameTok->text == "{" || nameTok->text == "}" || nameTok->text == "=") {
-            err(kindLine, kind + " is missing a name"); continue;
+        std::string name;
+        if (kind != "tuning" && kind != "economy") { // these are nameless singleton blocks
+            const detail::Token* nameTok = peek();
+            if (!nameTok || nameTok->text == "{" || nameTok->text == "}" || nameTok->text == "=") {
+                err(kindLine, kind + " is missing a name"); continue;
+            }
+            name = nameTok->text;
+            ++i;
         }
-        const std::string name = nameTok->text;
-        ++i;
         const detail::Token* brace = peek();
-        if (!brace || brace->text != "{") { err(nameTok->line, "expected '{' after " + kind + " " + name); continue; }
+        if (!brace || brace->text != "{") { err(kindLine, "expected '{' after " + kind + (name.empty() ? "" : " " + name)); continue; }
         ++i;
 
-        RegionDef region; BeaconDef beacon; ResourceFieldDef field;
+        RegionDef region; BeaconDef beacon; ResourceFieldDef field; NavTuning tuning; EconomyTuning economy;
         if      (kind == "region") region.name = name;
         else if (kind == "beacon") beacon.name = name;
-        else                       field.name  = name;
+        else if (kind == "field")  field.name  = name;
 
         bool closed = false;
         while (i < toks.size()) {
@@ -227,13 +262,15 @@ namespace detail
                 values.push_back(toks[i].text);
                 ++i;
             }
-            apply(kind, key, keyLine, values, region, beacon, field);
+            apply(kind, key, keyLine, values, region, beacon, field, tuning, economy);
         }
 
-        if (!closed) { err(kindLine, kind + " " + name + " is missing a closing '}'"); continue; }
-        if      (kind == "region") out.regions.push_back(std::move(region));
-        else if (kind == "beacon") out.beacons.push_back(std::move(beacon));
-        else                       out.fields.push_back(std::move(field));
+        if (!closed) { err(kindLine, kind + (name.empty() ? "" : " " + name) + " is missing a closing '}'"); continue; }
+        if      (kind == "region")  out.regions.push_back(std::move(region));
+        else if (kind == "beacon")  out.beacons.push_back(std::move(beacon));
+        else if (kind == "field")   out.fields.push_back(std::move(field));
+        else if (kind == "tuning")  out.nav = tuning;        // last-wins
+        else                        out.economy = economy;   // economy (last-wins)
     }
 
     return errors.size() == before;

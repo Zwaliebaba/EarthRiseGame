@@ -145,3 +145,28 @@ ER_TEST(UniverseData, ReportsSyntaxErrorWithLine)
     // Error should mention the offending line (line 2).
     ER_CHECK(errs[0].find("line 2") != std::string::npos);
 }
+
+ER_TEST(UniverseData, ParsesTuningBlockAndKeepsDefaults)
+{
+    auto ds = ParseOk(
+        "region R { security = low bounds = 0 9 0 9 0 9 yield_mult = 1 }\n"
+        "tuning { warp_speed_ship = 7000  jump_fuel_base = 50  base_fuel_max = 250 }\n");
+    ER_CHECK(ds.nav.warpSpeedShip == 7000.0f);
+    ER_CHECK(ds.nav.jumpFuelBase == 50.0f);
+    ER_CHECK(ds.nav.baseFuelMax == 250.0f);
+    ER_CHECK(ds.nav.warpSpeedBase == 2000.0f); // untouched key keeps its default
+    std::vector<std::string> errs;
+    ER_CHECK(ValidateUniverseDataset(ds, errs));
+    // The tuning survives a binary round-trip.
+    auto rt = DecodeUniverseDataset(EncodeUniverseDataset(ds));
+    ER_CHECK(rt.has_value() && rt->nav.warpSpeedShip == 7000.0f && rt->nav.baseFuelMax == 250.0f);
+}
+
+ER_TEST(UniverseData, RejectsBadTuning)
+{
+    auto ds = ParseOk(
+        "region R { security = low bounds = 0 9 0 9 0 9 yield_mult = 1 }\n"
+        "tuning { warp_speed_ship = 0 }\n"); // warp speed must be > 0
+    std::vector<std::string> errs;
+    ER_CHECK(!ValidateUniverseDataset(ds, errs));
+}
