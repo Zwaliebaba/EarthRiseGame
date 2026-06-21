@@ -290,7 +290,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   //   highlighted = blue vertex gradient (title colours) + dark caption
   void DrawButton(float x, float y, float w, float h, const char* caption, float s, bool selected)
   {
-    const float ts = s * 0.9f;
+    const float ts = s * 1.0f;
     const float tw = m_canvas.TextWidth(caption, ts);
     const float th = m_canvas.TextHeight(ts);
     const float cx = x + (w - tw) * 0.5f, cy = y + (h - th) * 0.5f;
@@ -373,7 +373,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_canvas.DrawRect(gx + w + o - s, gy - o, s, totalH + 2 * o, dbR, dbG, dbB, 1.f);
 
     // 5) Title: centred, with a dark drop shadow for readability (warm-pale text).
-    const float tts = s * 0.85f;
+    const float tts = s * 0.9f;
     const char* title = "MAIN MENU";
     const float tx = gx + (w - m_canvas.TextWidth(title, tts)) * 0.5f;
     const float ty = gy + (titleH - m_canvas.TextHeight(tts)) * 0.5f;

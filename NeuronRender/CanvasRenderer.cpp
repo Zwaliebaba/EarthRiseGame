@@ -231,29 +231,52 @@ void CanvasRenderer::DrawTexturedQuad(float x, float y, float w, float h,
 void CanvasRenderer::DrawText(float x, float y, const char* text, float r, float g, float b, float scale)
 {
     if (!text || !m_font.valid()) return;
-    const float cell = static_cast<float>(m_fontCfg.cellPx) * scale;
+
+    // Faithful to Darwinia's TextRenderer: glyphs are CONDENSED (width = 0.6 ×
+    // height, advance = width), sampled from a TRIMMED sub-rect of each cell (so
+    // the cell's transparent padding is cropped and the glyph fills the quad),
+    // and drawn with LINEAR filtering for smooth edges.
+    constexpr float kHoriz   = 0.6f;             // HORIZONTAL_SIZE
+    constexpr float kMargin  = 0.003f;           // TEX_MARGIN
+    constexpr float kStretch = 1.0f - 26.0f * kMargin; // TEX_STRETCH (~0.922)
+
+    const float H  = static_cast<float>(m_fontCfg.cellPx) * scale; // glyph box height
+    const float gw = H * kHoriz;                                    // width = advance
+    const float cellU = (m_fontCfg.cols ? 1.0f / static_cast<float>(m_fontCfg.cols) : 0.f);
+    const float cellV = (m_fontCfg.rows ? 1.0f / static_cast<float>(m_fontCfg.rows) : 0.f);
+    const float texW = cellU * kStretch * 0.9f; // TEX_WIDTH
+    const float texH = cellV * kStretch;        // TEX_HEIGHT
+
     float cx = x;
     for (const unsigned char* p = reinterpret_cast<const unsigned char*>(text); *p; ++p)
     {
-        if (*p != ' ')
+        const unsigned char c = *p;
+        if (c > 32 && m_fontCfg.inRange(c))
         {
-            const auto uv = er::format::glyphUv(m_fontCfg, *p);
-            Prim(Mode::TexPoint, m_fontSrv);
-            Vtx(cx,        y,        uv.u0, uv.v0, r, g, b, 1.f);
-            Vtx(cx + cell, y,        uv.u1, uv.v0, r, g, b, 1.f);
-            Vtx(cx + cell, y + cell, uv.u1, uv.v1, r, g, b, 1.f);
-            Vtx(cx,        y,        uv.u0, uv.v0, r, g, b, 1.f);
-            Vtx(cx + cell, y + cell, uv.u1, uv.v1, r, g, b, 1.f);
-            Vtx(cx,        y + cell, uv.u0, uv.v1, r, g, b, 1.f);
+            const uint32_t idx = c - m_fontCfg.firstCodepoint;
+            const uint32_t col = m_fontCfg.cols ? idx % m_fontCfg.cols : 0;
+            const uint32_t row = m_fontCfg.cols ? idx / m_fontCfg.cols : 0;
+            const float u0 = static_cast<float>(col) * cellU + kMargin + 0.002f;
+            const float v0 = static_cast<float>(row) * cellV + kMargin + 0.001f;
+            const float u1 = u0 + texW, v1 = v0 + texH;
+
+            Prim(Mode::TexLinear, m_fontSrv); // smooth glyphs (Darwinia GL_LINEAR)
+            Vtx(cx,      y,     u0, v0, r, g, b, 1.f);
+            Vtx(cx + gw, y,     u1, v0, r, g, b, 1.f);
+            Vtx(cx + gw, y + H, u1, v1, r, g, b, 1.f);
+            Vtx(cx,      y,     u0, v0, r, g, b, 1.f);
+            Vtx(cx + gw, y + H, u1, v1, r, g, b, 1.f);
+            Vtx(cx,      y + H, u0, v1, r, g, b, 1.f);
         }
-        cx += cell;
+        cx += gw;
     }
 }
 
 float CanvasRenderer::TextWidth(const char* text, float scale) const
 {
     if (!text) return 0.f;
-    return static_cast<float>(std::strlen(text)) * static_cast<float>(m_fontCfg.cellPx) * scale;
+    // Condensed advance: width = 0.6 × cell height.
+    return static_cast<float>(std::strlen(text)) * static_cast<float>(m_fontCfg.cellPx) * scale * 0.6f;
 }
 
 float CanvasRenderer::TextHeight(float scale) const
