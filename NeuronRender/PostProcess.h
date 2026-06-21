@@ -25,10 +25,10 @@
 #include <array>
 #include <cstdint>
 
-#include "DeviceResources.h"
-
 namespace Neuron::Render
 {
+  class DeviceResources;
+
   class PostProcess
   {
   public:

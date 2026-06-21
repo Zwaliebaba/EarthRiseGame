@@ -1,5 +1,5 @@
 // ServerHost — accepts clients, runs the stateless cookie phase, owns the
-// per-connection map, and bridges the network to the authoritative ServerWorld
+// per-connection map, and bridges the network to the authoritative ServerUniverse
 // (§8.5, §9). Platform-independent: the host loop (ERServer / the integration
 // test) supplies datagrams and ferries the produced datagrams to the socket.
 #pragma once
@@ -10,7 +10,7 @@
 #include "ISocket.h"
 #include "Protocol.h"
 #include "Command.h"
-#include "ServerWorld.h"
+#include "ServerUniverse.h"
 
 #include <cstdint>
 #include <memory>
@@ -34,12 +34,12 @@ public:
     ServerHost(ICrypto* crypto,
                std::vector<uint8_t> staticPriv,
                std::vector<uint8_t> serverSecret,
-               Neuron::Sim::ServerWorld* world,
+               Neuron::Sim::ServerUniverse* universe,
                uint64_t serverTimeMicros = 0)
         : m_crypto(crypto)
         , m_staticPriv(std::move(staticPriv))
         , m_serverSecret(std::move(serverSecret))
-        , m_world(world)
+        , m_universe(universe)
         , m_serverTime(serverTimeMicros)
         , m_stateless{ crypto, m_serverSecret }
     {
@@ -86,12 +86,12 @@ public:
             auto conn = std::make_unique<ServerConnection>(m_crypto, m_staticPriv, token, m_serverTime);
 
             // Each base starts just inside sector 0 (separated on Y) at the
-            // centre of the catalog scenery cluster (ServerWorld::SpawnScenery).
+            // centre of the catalog scenery cluster (ServerUniverse::SpawnScenery).
             // Stationary at spawn so the props stay in frame; movement comes from
             // client intents (SetBaseVelocity).
-            const int64_t startX = Neuron::World::kSectorSize - 200;
+            const int64_t startX = Neuron::Universe::kSectorSize - 200;
             const int64_t startY = static_cast<int64_t>(m_conns.size()) * 2000;
-            const uint32_t netId = m_world->SpawnBase(
+            const uint32_t netId = m_universe->SpawnBase(
                 { startX, startY, 0 }, { 0.0f, 0.0f, 0.0f });
             conn->SetPlayerNetId(netId);
 
@@ -108,7 +108,7 @@ public:
     // Build and queue a snapshot for every connected client.
     void BroadcastSnapshots(std::vector<OutDatagram>& out)
     {
-        const auto snap = m_world->BuildSnapshot();
+        const auto snap = m_universe->BuildSnapshot();
         const auto body = Neuron::Sim::EncodeSnapshot(snap);
         for (auto& [key, conn] : m_conns) {
             if (!conn->IsConnected()) continue;
@@ -154,7 +154,7 @@ public:
             }
             if (disconnected || timedOut) {
                 const uint32_t netId = it->second->PlayerNetId();
-                if (m_world) m_world->DespawnBase(netId);
+                if (m_universe) m_universe->DespawnBase(netId);
                 closed.push_back({ it->first, netId, timedOut });
                 m_lastSeenMs.erase(it->first);
                 it = m_conns.erase(it);
@@ -171,7 +171,7 @@ private:
     {
         auto it = m_conns.find(key);
         if (it == m_conns.end()) return;
-        if (m_world) m_world->DespawnBase(it->second->PlayerNetId());
+        if (m_universe) m_universe->DespawnBase(it->second->PlayerNetId());
         m_conns.erase(it);
         m_lastSeenMs.erase(key);
     }
@@ -195,12 +195,12 @@ private:
         conn.OnDatagram(dg, appOut, sendOut);
         for (auto& d : sendOut) out.push_back({ from, std::move(d) });
 
-        // Apply received commands (move intents) to the authoritative world.
+        // Apply received commands (move intents) to the authoritative universe.
         for (const auto& m : appOut) {
             if (m.type == MsgType::Command) {
                 Neuron::Sim::MoveCommand cmd;
                 if (Neuron::Sim::DecodeMoveCommand(m.body, cmd))
-                    m_world->SetBaseVelocity(conn.PlayerNetId(),
+                    m_universe->SetBaseVelocity(conn.PlayerNetId(),
                                              { cmd.velX, cmd.velY, cmd.velZ });
             }
         }
@@ -229,7 +229,7 @@ private:
     ICrypto*                  m_crypto{ nullptr };
     std::vector<uint8_t>      m_staticPriv;
     std::vector<uint8_t>      m_serverSecret;
-    Neuron::Sim::ServerWorld* m_world{ nullptr };
+    Neuron::Sim::ServerUniverse* m_universe{ nullptr };
     uint64_t                  m_serverTime{ 0 };
     HandshakeServerStateless  m_stateless;
     std::unordered_map<std::string, std::unique_ptr<ServerConnection>> m_conns;

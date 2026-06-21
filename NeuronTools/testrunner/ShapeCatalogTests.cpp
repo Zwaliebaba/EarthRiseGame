@@ -1,12 +1,12 @@
 // ShapeCatalog + ECS/snapshot integration tests (ShapeCatalog.h, Components.h,
-// Snapshot.h, ServerWorld.h). Platform-independent: the catalog data, the ECS
+// Snapshot.h, ServerUniverse.h). Platform-independent: the catalog data, the ECS
 // spawn path, and the snapshot wire format all run identically on server and
 // client, so the Linux runner can verify them (a tiny DirectXMath shim supplies
 // XMFLOAT3 — see dxmath_shim/). Mirrors the wire contract the Windows client
 // relies on to pick a mesh per entity.
 
 #include "ShapeCatalog.h"
-#include "ServerWorld.h"
+#include "ServerUniverse.h"
 #include "Snapshot.h"
 #include "TestRunner.h"
 
@@ -22,6 +22,17 @@ NEURON_DEFINE_COMPONENT(Neuron::Sim::ShipTag, Neuron::Sim::Slot_ShipTag);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::NetId, Neuron::Sim::Slot_NetId);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::Health, Neuron::Sim::Slot_Health);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::ShapeId, Neuron::Sim::Slot_ShapeId);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::Fuel, Neuron::Sim::Slot_Fuel);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::NavState, Neuron::Sim::Slot_NavState);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::BeaconTag, Neuron::Sim::Slot_BeaconTag);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::OwnerId, Neuron::Sim::Slot_OwnerId);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::ResourceNodeTag, Neuron::Sim::Slot_ResourceNodeTag);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::Cargo, Neuron::Sim::Slot_Cargo);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::Storage, Neuron::Sim::Slot_Storage);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::BuildQueue, Neuron::Sim::Slot_BuildQueue);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::FleetMember, Neuron::Sim::Slot_FleetMember);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::Sensor, Neuron::Sim::Slot_Sensor);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::HarvestOrder, Neuron::Sim::Slot_HarvestOrder);
 
 ER_TEST(ShapeCatalog, CountAndSequentialIds)
 {
@@ -62,9 +73,9 @@ ER_TEST(ShapeCatalog, EveryCategoryHasAtLeastOneShape)
     ER_CHECK(FirstShapeOfCategory(static_cast<ShapeCategory>(c)) != kInvalidShapeId);
 }
 
-ER_TEST(ServerWorld, ScenerySpawnedWithShapeAndKind)
+ER_TEST(ServerUniverse, ScenerySpawnedWithShapeAndKind)
 {
-  ServerWorld w;
+  ServerUniverse w;
   const Snapshot snap = w.BuildSnapshot();
   ER_CHECK(!snap.entities.empty());
 
@@ -83,9 +94,9 @@ ER_TEST(ServerWorld, ScenerySpawnedWithShapeAndKind)
   ER_CHECK(sawGate);
 }
 
-ER_TEST(ServerWorld, SpawnedBaseCarriesBaseKind)
+ER_TEST(ServerUniverse, SpawnedBaseCarriesBaseKind)
 {
-  ServerWorld w;
+  ServerUniverse w;
   const uint32_t net = w.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
   const Snapshot snap = w.BuildSnapshot();
   bool sawBase = false;
@@ -94,14 +105,14 @@ ER_TEST(ServerWorld, SpawnedBaseCarriesBaseKind)
     {
       sawBase = true;
       ER_CHECK(e.kind == EntityKind::Base);
-      ER_CHECK(e.shapeId == ServerWorld::BaseShapeId());
+      ER_CHECK(e.shapeId == ServerUniverse::BaseShapeId());
     }
   ER_CHECK(sawBase);
 }
 
 ER_TEST(Snapshot, RoundTripPreservesShapeIdAndKind)
 {
-  ServerWorld w;
+  ServerUniverse w;
   w.SpawnBase({ 100, 0, 0 }, { 0, 0, 0 });
   const Snapshot snap = w.BuildSnapshot();
 

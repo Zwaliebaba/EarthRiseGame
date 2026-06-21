@@ -4,7 +4,7 @@
 EarthRiseGame is a multi-project Visual Studio C++ solution (`EarthRise.slnx`) centered on a shared simulation/networking core.
 
 Current top-level projects in the solution:
-- `NeuronCore/` - shared core for platform, ECS, world math, serialization, networking, and simulation. Packaged as a **shared items project** (`NeuronCore.vcxitems`); its sources compile directly into each consumer rather than building a standalone `.lib`.
+- `NeuronCore/` - shared core for platform, ECS, universe math, serialization, networking, and simulation. Packaged as a **shared items project** (`NeuronCore.vcxitems`); its sources compile directly into each consumer rather than building a standalone `.lib`.
 - `NeuronClient/` - client-side session, replica, interpolation, and controller code (static library).
 - `NeuronRender/` - rendering library with D3D12 device, scene, and canvas/HUD systems (static library).
 - `NeuronAudio/` - **client-only** audio library: XAudio2 (2.9) voice graph + four submix buses, custom WAV/PCM-16 reader, X3DAudio 3D (static library). Links `NeuronCore`, **not** `NeuronRender`. ERHeadless/NeuronClient do **not** link it.
@@ -29,10 +29,10 @@ All projects keep their source and header files **flat** in the project director
 `NeuronCore.vcxitems` is a shared items project consumed by `EarthRise`, `NeuronClient`, and `ERServer`; its sources are compiled into each consumer rather than into a separate library. `NeuronCore/NeuronCore.cpp` is the translation unit that includes the subsystem headers so the header-only subsystems are validated; platform-backed subsystems carry their own `.cpp` files (`CngCrypto.cpp`, `WinsockSocket.cpp`, `SimComponents.cpp`). The headers group into:
 - Platform: `Debug.h`, `TimerCore.h`, `Allocators.h`
 - ECS: `Ecs.h`
-- World/math: `WorldPos.h`, `GameMath.h`, `MathCommon.h`
+- Universe/math: `UniversePos.h`, `GameMath.h`, `MathCommon.h`
 - Serialization: `BitStream.h`, `Serde.h`
 - Networking: protocol, sequencing, replay, reliability, packet codec, crypto/socket abstractions, secure channel, handshake, connection
-- Simulation/server: components, fixed-step accumulation, movement, snapshot, command, server world/host
+- Simulation/server: components, fixed-step accumulation, movement, navigation (warp/jump), economy (harvest/build), universe-data (cooked regions/beacons/fields + nav/economy tuning), snapshot, command, server universe/host
 
 ### Client
 `NeuronClient/` (static library) holds the client library. Files are flat, grouped by VS Filters:

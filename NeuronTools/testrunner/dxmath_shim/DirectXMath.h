@@ -1,7 +1,7 @@
 #pragma once
 // Minimal DirectXMath shim — JUST enough of DirectX::XMFLOAT3/XMFLOAT4X4 for the
-// platform-independent sim headers (Components.h / WorldPos.h / Snapshot.h /
-// ServerWorld.h) to compile under the Linux test runner. The real DirectXMath
+// platform-independent sim headers (Components.h / UniversePos.h / Snapshot.h /
+// ServerUniverse.h) to compile under the Linux test runner. The real DirectXMath
 // is used on Windows; these tests exercise only the integer/struct sim logic
 // (catalog, snapshot wire, ECS spawn), none of the SIMD math, so the field
 // layout is all that matters here.

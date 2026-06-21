@@ -2,7 +2,7 @@
 // Client → server command encoding (§8.4 — intents, not state).
 //
 // M1a carries a single MoveCommand: a desired base velocity. The server
-// validates and clamps it (ServerWorld::SetBaseVelocity → ClampSpeed) — clients
+// validates and clamps it (ServerUniverse::SetBaseVelocity → ClampSpeed) — clients
 // never set authoritative state directly. Built on the serde primitives.
 
 #include "Serde.h"

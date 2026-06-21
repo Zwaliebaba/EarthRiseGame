@@ -8,7 +8,7 @@
 ---
 
 ## 1. Design principles
-1. **Overview-driven, not world-dragging.** The **overview list + radar (§22.3)** is the
+1. **Overview-driven, not universe-dragging.** The **overview list + radar (§22.3)** is the
    primary selection/command surface; the 3D view is **camera-first**. This is the core
    reason touch works for EarthRise.
 2. **The camera never lives on one finger.** One finger = select/command; **two fingers
@@ -33,8 +33,8 @@
 | --- | --- |
 | **One-finger tap** on overview row / bracket / radar blip | **Select** that contact (replaces current selection) |
 | One-finger tap on **selected** + tap another | Additive select (or use multi-select toggle) |
-| **One-finger tap on the world** | **Smart action** for current selection (§4) |
-| **One-finger tap-and-hold** (on target or world) | **Radial context menu** (recovers "right-click" — full command list) |
+| **One-finger tap on the universe** | **Smart action** for current selection (§4) |
+| **One-finger tap-and-hold** (on target or universe) | **Radial context menu** (recovers "right-click" — full command list) |
 | One-finger tap on empty space (nothing selected) | Deselect / dismiss menus |
 | **Two-finger drag** | **Pan camera** |
 | **Pinch** | **Zoom camera** (ship-detail ⇄ tactical) |

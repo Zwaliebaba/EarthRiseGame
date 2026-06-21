@@ -20,11 +20,7 @@
 //   - BCryptGenRandom (BCRYPT_USE_SYSTEM_PREFERRED_RNG)
 #include "pch.h"
 #include "CngCrypto.h"
-
 #include <bcrypt.h>
-#include <ntstatus.h>
-
-#include <cstring>
 
 #pragma comment(lib, "bcrypt.lib")
 

@@ -30,7 +30,7 @@
 --   prerequisites*, anomaly/invasion *definitions* are GAME DATA (versioned with
 --   the build, loaded by NeuronCore) — NOT stored here. SQL keeps only the
 --   canonical item-id space (ItemDefs) so player-owned state has referential
---   integrity, plus the mutable player/economy/world state itself.
+--   integrity, plus the mutable player/economy/universe state itself.
 -- =============================================================================
 
 
@@ -122,7 +122,7 @@ CREATE INDEX IX_ItemDefs_Category ON ItemDefs (Category);
 
 
 -- ============================================================
--- §13.5  World structure — tiered-security regions (high → low → null)
+-- §13.5  Universe structure — tiered-security regions (high → low → null)
 -- A region is a spatial volume with a security tier. Sectors (§6.3) fall into a
 -- region by position. Base safe-zone bubbles (§13.6) are derived at runtime from
 -- Bases.SafeZoneRadius, not stored here.

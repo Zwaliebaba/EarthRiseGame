@@ -82,7 +82,7 @@ All interface/font DDS are **uncompressed 32-bit BGRA** — i.e. `DXGI_FORMAT_B8
 ### 2.2 Font atlas — `EarthRise/Assets/Fonts/`
 
 `EditorFont-ENG.dds` (the clean monospace used by the menus). `SpeccyFont-*` is the
-retro ZX variant — same dimensions/layout, reserved for in-world retro text.
+retro ZX variant — same dimensions/layout, reserved for in-universe retro text.
 
 | Property | Value (measured & verified) |
 | --- | --- |

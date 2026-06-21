@@ -41,7 +41,7 @@
   **30 Hz** simulation; clients send **intents**, never authoritative state.
 - **Encrypted reliable-UDP** transport: CNG **ECDH** handshake with a **pinned server key**,
   **AES-GCM** AEAD, replay protection, and a stateless-cookie DoS guard.
-- **Interest-scoped, delta-compressed replication** with no bulk world sync — a new client
+- **Interest-scoped, delta-compressed replication** with no bulk universe sync — a new client
   converges from an empty baseline over the ordinary snapshot loop.
 - **One contiguous universe** in signed `int64` metre coordinates with floating-origin
   rendering, designed to **scale to hundreds of players** (cell pub/sub interest,
@@ -66,7 +66,7 @@ EarthRise is a real-time 4X built on a few pillars (full design in
 - **Depth through fitting & economy.** Role + module **fitting** with **damage-type
   counters**; a **player-driven crafting economy** where destruction creates demand; hybrid
   tech-tree progression.
-- **A living world.** Dynamic NPC **faction invasions** and procedural
+- **A living universe.** Dynamic NPC **faction invasions** and procedural
   **anomalies/expeditions** give PvE a pulse.
 - **Travel.** Sublight combat movement, **interdictable warp** to scanned points, and a
   long-haul **jump-beacon network** (fuel + cooldown) whose owned beacons are chokepoints.
@@ -96,7 +96,7 @@ Studio Filters**, not on-disk subdirectories.
 ```
 EarthRiseGame/
 ├── EarthRise.slnx          Solution (XML format), x64
-├── NeuronCore/             Shared items (.vcxitems): math · ECS · world/sector · serde · net · sim
+├── NeuronCore/             Shared items (.vcxitems): math · ECS · universe/sector · serde · net · sim
 ├── NeuronClient/           Static lib: session · replica · interpolation · control
 ├── NeuronRender/           Static lib [UWP/DX12]: DeviceResources · SceneRenderer · CanvasRenderer
 │   └── shaders/            .hlsl → dxc (SM6/DXIL) → generated headers (untracked)
@@ -131,7 +131,7 @@ EarthRiseGame/
   │  no rendering, no audio       │                ┌──────────────────────────────┐
   └──────────────────────────────┘                │ SQL Server (external network) │
         shared by all: NeuronCore (math · ECS ·    │ self-hosted now → Azure SQL   │
-        world int64 · sectors · net protocol · sim)└──────────────────────────────┘
+     universe int64 · sectors · net protocol · sim)└──────────────────────────────┘
 ```
 
 - **Server-authoritative:** clients send validated **intents/commands**; the server owns
@@ -192,7 +192,7 @@ exercise:
    against the server and is the supported way to validate connection flow, the server
    loop, and snapshot behavior.
 3. **Run the UWP client:** deploy and launch `EarthRise` from Visual Studio to render the
-   world with mouse+keyboard input.
+   universe with mouse+keyboard input.
 
 > **UWP loopback:** for local client↔server testing on one machine, UWP is sandboxed off
 > loopback by default. Visual Studio adds a loopback exemption in Debug; test the

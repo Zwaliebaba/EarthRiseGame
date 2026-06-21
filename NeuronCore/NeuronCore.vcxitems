@@ -28,6 +28,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Connection.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Debug.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Ecs.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Economy.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)FakeCrypto.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)FixedStepAccumulator.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)GameMath.h" />
@@ -38,6 +39,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)LoopbackNetwork.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)MathCommon.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Movement.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Navigation.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)NeuronCore.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)PacketCodec.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)pch.h" />
@@ -48,11 +50,12 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)SequenceMath.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Serde.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ServerHost.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)ServerWorld.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ServerUniverse.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ShapeCatalog.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Snapshot.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)TimerCore.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)WinsockSocket.h" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)WorldPos.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)UniverseData.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)UniversePos.h" />
   </ItemGroup>
 </Project>

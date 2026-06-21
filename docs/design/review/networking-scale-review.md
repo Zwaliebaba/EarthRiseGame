@@ -6,7 +6,7 @@
 > `ERServer/`, `NeuronClient/`.
 > **Lens:** the masterplan commits to **~100 players, single shard** at launch but
 > states throughout that the design must **grow well past that**. This review treats
-> **"hundreds of concurrent players, single contiguous world"** as the real target and
+> **"hundreds of concurrent players, single contiguous universe"** as the real target and
 > grades the plan + code against it.
 
 ---
@@ -49,9 +49,9 @@ which is where the plan must become much more specific, plus a few things to fix
 
 These are non-trivial and should be preserved as-is:
 
-- **No bulk world sync; cold start = empty baseline (§8.4).** Treating a new client as a
+- **No bulk universe sync; cold start = empty baseline (§8.4).** Treating a new client as a
   client whose acked baseline is ∅ and converging it through the ordinary interest+delta
-  loop is exactly right and sidesteps the classic "join storm / world download" problem.
+  loop is exactly right and sidesteps the classic "join storm / universe download" problem.
 - **Snapshots as idempotent, per-`netId` last-writer-wins facts on the Unreliable channel
   (§8.4, `Snapshot.h`).** Decoupling state replication from the reliable-ordering
   machinery removes head-of-line blocking on the hot path and makes loss cost
@@ -132,7 +132,7 @@ identically," §7.2) makes naïve threading hard.
 
 ### Wall 3 — Single contiguous shard, no graceful degradation
 
-One world + EVE-style go-anywhere **guarantees** an occasional single-sector pileup. The
+One universe + EVE-style go-anywhere **guarantees** an occasional single-sector pileup. The
 plan's interest budget caps what each *client* sees, but the **server still simulates
 every entity in that sector on one thread** — and there is no mechanism to shed load when
 it can't keep 30 Hz. Multi-shard is deferred to post-launch (§19), which is a reasonable
@@ -200,7 +200,7 @@ optional lever** — at hundreds it is mandatory.
 The "everything fits one ~1200 B datagram, no fragmentation" invariant (§8.2/§8.4) holds
 for snapshots and intents, but some **reliable gameplay payloads can exceed MTU**: a full
 ship fit, a large cargo/inventory listing, a market order book page, mail, a territory
-state blob. §8.4 routes *assets* out-of-band and *world state* through interest-deltas,
+state blob. §8.4 routes *assets* out-of-band and *universe state* through interest-deltas,
 but these structured UI/reliable payloads fit neither bucket cleanly.
 
 **Recommendation:** state the escape hatch explicitly — either (a) an **application-level
@@ -223,11 +223,11 @@ enum is a versioned wire change later.
 ## 4. Implementation-level notes (current M1a — mostly "correct for a slice")
 
 The code does **not** overreach, and the comments honestly mark the deferrals
-(`ServerWorld.h:4`, `Snapshot.h:15`, `IocpUdpListener.h:17`). The items below are flagged
+(`ServerUniverse.h:4`, `Snapshot.h:15`, `IocpUdpListener.h:17`). The items below are flagged
 so they are tracked toward M4, **not** as defects in M1a:
 
 - **`ServerHost::BroadcastSnapshots` builds one full snapshot and sends identical bytes to
-  every connection** (`ServerHost.h`), and `ServerWorld::BuildSnapshot` iterates **all**
+  every connection** (`ServerHost.h`), and `ServerUniverse::BuildSnapshot` iterates **all**
   entities with no culling. This is the documented M1a behavior; at scale it is the
   `O(players × entities)` broadcast that Wall 1 replaces with per-client interest diffs.
   *Track: M4.*

@@ -41,7 +41,7 @@ players at launch and designed to grow well past that.
 3. **Depth through fitting & economy, not just numbers.** Role + module **fitting**
    with **damage-type counters** (§13.2); a **player-driven crafting economy**
    where destruction creates demand (§13.4); hybrid tech-tree progression (§13.3).
-4. **A living world.** Dynamic NPC **faction invasions** and procedural
+4. **A living universe.** Dynamic NPC **faction invasions** and procedural
    **anomalies/expeditions** give PvE a pulse (§13.7).
 5. **The Darwinia look** — dark void, neon glow, bloom, additive particles,
    minimalist bitmap-font HUD.
@@ -73,7 +73,7 @@ players at launch and designed to grow well past that.
 | Client prediction | **Deferred past M1** — interpolation + snap-on-ack first; predict/reconcile later. |
 | **Core fantasy** | **_Homeworld × EVE_** — RTS **fleet command** from a **mobile mothership-base** in a persistent contested sandbox (§13.1). |
 | **Combat** | **PvE + territorial PvP**; **role + fitting + damage-type counters** (§13.2); **loot-on-kill** (ships); **base = capital, disable-not-destroy** (§13.1). |
-| **World / PvP zones** | **Tiered security high→low→null**; **claimable nullsec territory** (§13.5–13.6). |
+| **Universe / PvP zones** | **Tiered security high→low→null**; **claimable nullsec territory** (§13.5–13.6). |
 | **Progression** | **Hybrid tech-tree + fitting**, with catch-up flattening (§13.3). |
 | **Economy** | **Player-driven crafting** (raw→refine→components→ships) + regional markets + sinks (§13.4). |
 | **PvE anchor** | **Dynamic faction invasions** + **procedural anomalies/expeditions** (§13.7). |
@@ -98,7 +98,7 @@ players at launch and designed to grow well past that.
 
 ### 🔒 Hard constraints (brief)
 
-C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open world,
+C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open universe,
 **`int64_t` x/y/z**; one **movable base**/player; ~**100 players**; textures
 **`.dds`**; fonts **bitmap** (you provide).
 
@@ -168,7 +168,7 @@ C++23 (MSVC, `/std:c++latest`); client **UWP + C++/WinRT + DX12**; one open worl
                  ▼                                       TCP 1433 (ODBC,  │
    ┌──────────────────────────────────────┐              Encrypt=yes)    ▼
    │ NeuronCore (shared by ALL):          │  ┌───────────────────────────────────┐
-   │ math(DirectXMath)·ECS·world(int64)·  │  │ Microsoft SQL Server (EXTERNAL,   │
+   │ math(DirectXMath)·ECS·universe(int64)│  │ Microsoft SQL Server (EXTERNAL,   │
    │ sectors·net protocol·serde·sim rules │  │ NETWORK SERVICE — not a container)│
    └──────────────────────────────────────┘  │ self-hosted now → Azure SQL later │
                                               └───────────────────────────────────┘
@@ -192,7 +192,7 @@ below are those logical groupings, not directories.
 /EarthRiseGame
 ├── EarthRise.slnx          solution (XML format)   ·   agents.md   ·   CODE_STANDARDS.md
 ├── docs/                   masterplan.md (this plan) · design/ · implementation/
-├── NeuronCore/             shared items (.vcxitems): math · ECS · world/sector · serde · net · sim
+├── NeuronCore/             shared items (.vcxitems): math · ECS · universe/sector · serde · net · sim
 ├── NeuronClient/           static lib: Session · Replica · Interpolator · Control
 ├── NeuronRender/           static lib [UWP/DX12]: DeviceResources · SceneRenderer · CanvasRenderer
 │   └── shaders/            .hlsl → dxc (SM6/DXIL) → CompiledShaders/*.h (embedded, untracked)
@@ -205,17 +205,17 @@ below are those logical groupings, not directories.
     ├── db/                 SQL schema + ordered, forward-only migrations
     └── deploy/             ERServer Dockerfile (Server Core) · docker-compose.dev.yml
 ```
-**In progress (M2):** `NeuronAudio/` (XAudio2/X3DAudio client lib + `NeuronAudioTest`, §11.3) is scaffolded — voice graph / mixer / spatializer / WAV reader landed; buffer-queue streaming, cue catalog and the Windows device smoke test still pending. The platform-independent asset parsers live in their **owning** libraries (`WavParse.h` in `NeuronAudio/`; `DdsParse.h`/`CmoParse.h`/`FontAtlasLayout.h` in `NeuronRender/`), kept dependency-free. `NeuronTools/` currently holds only a Linux `testrunner` that includes those parser headers — **a leaf with no dependents**, intended to be removed once asset checking runs natively on Windows; the `datacook`/`datacheck` + asset-cooker executables (§12.6) are still to come. All follow the flat-files + VS Filters convention.
+**Status (M2 complete; M3 active):** `NeuronAudio/` (XAudio2/X3DAudio client lib + `NeuronAudioTest`, §11.3) landed — voice graph / mixer / spatializer / WAV reader done; buffer-queue streaming, cue catalog and the Windows device smoke test **carried over** to M3 bring-up. The platform-independent asset parsers live in their **owning** libraries (`WavParse.h` in `NeuronAudio/`; `DdsParse.h`/`CmoParse.h`/`FontAtlasLayout.h` in `NeuronRender/`), kept dependency-free. `NeuronTools/` currently holds only a Linux `testrunner` that includes those parser headers — **a leaf with no dependents**, intended to be removed once asset checking runs natively on Windows; the `datacook`/`datacheck` executables for **universe-layout game data** (§12.6) are **now built** under `NeuronTools/datacook/` (model/codec/rules in `NeuronCore/UniverseData.h`); the remaining asset-cooker executables (`meshcook`/`ddscheck`/`wavcheck`/`fontpack`) are still to come. All follow the flat-files + VS Filters convention.
 > Generated `CompiledShaders/` headers live under each project that compiles shaders
 > (per `$(ProjectDir)`), so they're picked up by `#include` at build time.
 
 ---
 
-## 6. Coordinate System & World Model
+## 6. Coordinate System & Universe Model
 
 ### 6.1 Absolute position — `int64_t` per axis, **1 unit = 1 metre** 🔒
 ```cpp
-struct WorldPos { int64_t x, y, z; };   // absolute metres, signed, origin at 0
+struct UniversePos { int64_t x, y, z; };   // absolute metres, signed, origin at 0
 ```
 - Extent ≈ **±2⁶³ m ≈ ±975 light-years** per axis — far beyond any gameplay need;
   the meaningful constraint is sector size vs. float precision (§6.3), not range.
@@ -260,7 +260,7 @@ sector-offset representation from §6.1, so no separate render-space conversion 
 
 ### 7.1 Math — DirectXMath 🔒
 Compute in `XMVECTOR`/`XMMATRIX`; store `XMFLOAT*` for tight ECS packing. **💡**
-row-major, row-vector, right-handed (`*RH`). A `WorldPos` fixed-point layer bridges
+row-major, row-vector, right-handed (`*RH`). A `UniversePos` fixed-point layer bridges
 `int64` sector ↔ sector-local `float`.
 
 `XMVECTOR`/`XMMATRIX` are also used as **call parameters**, passed **by value with the
@@ -325,8 +325,8 @@ compiles correctly across x64/ARM64/x86. Math-heavy helpers in NeuronCore theref
 > ordered *within* a stream, independent *across* streams. The channel enum is a
 > versioned wire change (App. A), so this is fixed **now**, before the format freezes.
 
-There is **no `Bulk`/world-sync channel and no on-wire fragmentation** (§8.4): the
-world is never shipped as one large artifact, so no realtime datagram ever exceeds
+There is **no `Bulk`/universe-sync channel and no on-wire fragmentation** (§8.4): the
+universe is never shipped as one large artifact, so no realtime datagram ever exceeds
 the safe MTU and nothing on the gameplay path requires fragment sequencing/reassembly.
 
 **Large reliable payloads (true last-resort exception) 🔒.** A few *reliable* payloads
@@ -337,7 +337,7 @@ convenience for "this message is a bit big." In priority order, a payload that l
 large must first be:
 1. **Kept small by design.** Reference data by **id**, not by value (send a fit/template
    id the client already has, not the expanded fit); send **diffs**, not whole objects.
-2. **Streamed as interest-deltas** if it is world state at all — it belongs on the §8.4
+2. **Streamed as interest-deltas** if it is universe state at all — it belongs on the §8.4
    snapshot loop, decomposed into per-entity records, not sent as one blob.
 3. **Paginated** if it is a list/book (markets, inventory): request one MTU-bounded page
    at a time, each its own ordinary reliable message.
@@ -377,10 +377,10 @@ entities (~100 ms back). **Own-unit prediction/reconciliation is deferred past M
 (§10.1) — until then own units are server-confirmed and **snap-corrected on ack**.
 Input is **intents/commands**; the server validates everything (speed/rate checks).
 
-**No bulk world sync (cold-start = empty baseline).** A freshly connected client is
-not a special "download the world first" case — it is simply a client whose acked
+**No bulk universe sync (cold-start = empty baseline).** A freshly connected client is
+not a special "download the universe first" case — it is simply a client whose acked
 baseline is **∅**. The same interest+delta snapshot loop fills it in, so there is no
-separate transfer phase, no `Bulk` channel, and no fragmentation. The world is never
+separate transfer phase, no `Bulk` channel, and no fragmentation. The universe is never
 sent as one large artifact because it is decomposed into three kinds of data, none of
 which is ever "big" on the realtime socket:
 - **Content (assets) → out-of-band, hash-addressed.** Meshes/CMOs, sector geometry,
@@ -481,7 +481,7 @@ hundreds of players (R24). The model is made concrete, not prose:
    dilated.
 5. **Login** (§14, custom username/password) over the encrypted channel → verify vs
    SQL → expiring **session token**.
-6. Enter the tick/snapshot loop directly (baseline **∅**) — no separate world-sync
+6. Enter the tick/snapshot loop directly (baseline **∅**) — no separate universe-sync
    phase; interest-scoped delta snapshots converge the client progressively (§8.4).
 
 ---
@@ -549,7 +549,7 @@ controller → step NeuronClient → hand state to NeuronRender. DX12 swap chain
 ### 10.3 ERHeadless (parallel clients & bots) 🔒
 Win32 host running **many NeuronClient sessions in one process** (each own UDP
 port), bot/scripted-driven, **no rendering** → integration tests, **record/replay
-determinism** runs, load tests (~100+ bots, §17 M4), and in-world bots.
+determinism** runs, load tests (~100+ bots, §17 M4), and in-universe bots.
 > **Bots ≠ PvE NPCs.** Bots are *client* sessions; PvE NPCs are *server* AI.
 
 ---
@@ -851,7 +851,7 @@ Destruction must create **demand**, or conquest and loot are hollow.
 - **Persistence:** all trades/currency/loot/build-completion are **economy events**
   → **write-through / outbox, zero-loss** (§15).
 
-### 13.5 World structure — tiered security (high → low → null) 🔒
+### 13.5 Universe structure — tiered security (high → low → null) 🔒
 The universe is a **risk→reward gradient**, replacing v0.8's "safe-zone bubbles
 only" model (which doesn't support conquest):
 
@@ -894,16 +894,16 @@ PvE is a **first-class anchor**, not just ambient AI.
 - **Dynamic faction invasions/events 🔒:** NPC factions launch **escalating
   incursions** into sectors — server-driven events that **degrade local
   yields/safety until repelled**, pulling players (even rivals) into temporary
-  cooperation. Tie escalation to the world clock and to how heavily a region is
+  cooperation. Tie escalation to the universe clock and to how heavily a region is
   exploited (a built-in coupling of PvE pressure to the 4X loop).
 - **Procedural anomalies / expeditions 🔒:** **scannable sites** (combat /
-  exploration / salvage) that spawn across the world with **scaling difficulty and
+  exploration / salvage) that spawn across the universe with **scaling difficulty and
   loot**, gated by sensor/scan skill — repeatable PvE income, research-data source
   (§13.3), and the main exploration gameplay. Harder/richer sites cluster in
   low/null (risk→reward, §13.5).
 - **NPC AI** stays server ECS (`ERServer/ai/`): patrol/aggro/flee/defend/escalate;
   invasions and site guardians are scripted on top.
-- **❓ World bosses / capital threats** and **escalating-territory-heat** were
+- **❓ Universe bosses / capital threats** and **escalating-territory-heat** were
   considered and **deferred** (not selected) — tracked in §19 as natural post-launch
   PvE expansions that fit this frame.
 
@@ -1040,7 +1040,7 @@ all but the longest are sim-stepped so they can be **interdicted** — core PvP)
   **Catalog/balance boundary:** item/hull/module *stats*, crafting *recipes*,
   research *costs/prereqs*, and anomaly/invasion *definitions* are **game data**
   (versioned with the build, loaded by NeuronCore) — **not** SQL; SQL keeps only the
-  canonical item ids + mutable player/economy/world state.
+  canonical item ids + mutable player/economy/universe state.
   **Transient sim state** (NPC units, projectiles, anomaly sites, invasion events,
   live parties) is **never normalized** — it lives only in the warm-restart
   `SimSnapshots` blob (§9, §13.7). Avoid features absent in Azure SQL DB (cross-DB
@@ -1062,7 +1062,7 @@ all but the longest are sim-stepped so they can be **interdicted** — core PvP)
 
 | Project under test | Test project | Scope |
 | --- | --- | --- |
-| **NeuronCore** | **NeuronCoreTest** | ECS, WorldPos/sectors, serde, sim rules, fixed-step timer, allocators |
+| **NeuronCore** | **NeuronCoreTest** | ECS, UniversePos/sectors, serde, sim rules, fixed-step timer, allocators |
 | **NeuronClient** | **NeuronClientTest** | Session, ReplicaManager, InterpBuffer, controller logic |
 | **NeuronRender** | **NeuronRenderTest** | DeviceResources init/teardown, SceneRenderer/CanvasRenderer unit logic |
 | **NeuronAudio** | **NeuronAudioTest** | WAV/RIFF parser (valid/invalid/edge), bus/volume logic, X3DAudio emitter math, XAudio2 device init/teardown |
@@ -1103,7 +1103,7 @@ all but the longest are sim-stepped so they can be **interdicted** — core PvP)
 ## 17. Milestone Roadmap
 
 **M0 — Foundations** *(S–M)* — `EarthRise.slnx`; NeuronCore skeleton (DirectXMath,
-ECS w/ generation handles, world [`int64`/sector], serde, **fixed-step time**,
+ECS w/ generation handles, universe [`int64`/sector], serde, **fixed-step time**,
 allocators, logging); NeuronClient + ERHeadless skeletons; test runner; `dxc`
 shader-header build wired. **Done:** all targets build; NeuronCore tests pass;
 fixed-step accumulator unit-tested.
@@ -1120,7 +1120,7 @@ within budget (App. B).
 Scene + 2D Canvas HUD** as separate passes; **DX12 engine foundation** (FL 12_1,
 triple-buffered flip-model + fences, descriptor heaps, PSO cache, barriers — §11.1);
 **space-RTS camera** + basic **mouse+keyboard** input; snap-on-ack correction.
-**Done:** 1 UWP + ≥3 bots share the world; no `int64_t` reaches the GPU; 3D/2D split
+**Done:** 1 UWP + ≥3 bots share the universe; no `int64_t` reaches the GPU; 3D/2D split
 verified; camera pan/zoom + select/move work; loopback path tested **and** a
 non-exempt run validated before Store.
 
@@ -1155,7 +1155,7 @@ PBKDF2 + pepper + rate-limit); ODBC persist layer + schema/migrations + **outbox
 (write-through) + write-behind + snapshot/log warm-restart**; **SQL Server over the
 network (self-hosted)**; ERServer stateless; **24/7 rolling-restart drill** (warm-restart
 as an uptime SLA) + **client reconnect with backoff/jitter** (§26, R22). **Done:**
-register/login works; kill & restart the ERServer container → world + bases + economy
+register/login works; kill & restart the ERServer container → universe + bases + economy
 restore with **zero economy loss**, and connected clients reconnect cleanly.
 
 **M6 — Combat model & deployment** *(L)* — **role + fitting + damage-type combat**
@@ -1226,7 +1226,7 @@ localization-ready; accessibility = scalable UI + audio cues at launch.
 
 **Resolved earlier (v0.9 — gameplay):** core fantasy = Homeworld × EVE fleet
 command; combat = role + fitting + damage-type counters; progression = hybrid
-tech-tree + fitting; economy = player-driven crafting; world = tiered security
+tech-tree + fitting; economy = player-driven crafting; universe = tiered security
 high→low→null with claimable nullsec territory; PvE = invasions + procedural
 anomalies; social = light parties/fleets w/ individual ownership; base = capital,
 disable-not-destroy; launch fleet cap 6–12.
@@ -1266,7 +1266,7 @@ SM6/DXIL via `dxc`; M1 split M1a/M1b; crypto hardening.
 - **Persistent corporations / alliances + diplomacy & shared wallet** (launch = light
   fleets) — see R18; may be pulled forward.
 - **Time-gated skill training** as a progression axis (§13.3).
-- **World bosses / capital-class PvE threats** and **escalating-territory-heat** PvE
+- **Universe bosses / capital-class PvE threats** and **escalating-territory-heat** PvE
   (§13.7).
 - **Active combat abilities** (overheat/EWAR bursts) where feel/prediction allow (§13.2).
 - **Seasons / leaderboards** and other meta-retention (§13.10).
@@ -1418,7 +1418,7 @@ abstraction → either UI events or **fleet commands → intents** (server-valid
 ### 23.1 Primary model — overview-driven command (shared by desktop & touch) 🔒
 Following **EVE Echoes** (which proved this genre on touch), the **primary control
 surface is the §22.3 overview list + radar + smart-select buttons — not box-dragging
-in the 3D world.** Selection and commands route through the **same intent layer** on
+in the 3D universe.** Selection and commands route through the **same intent layer** on
 both desktop and touch; only the *input affordances* differ. This keeps required APM
 and precision low (suits "fleet **commander**", not "unit micromanager"), and makes the
 two platforms one game, not two.
@@ -1444,7 +1444,7 @@ modules/abilities and warp/jump.
 ### 23.3 Touch (tablets) affordances
 Same overview model with touch affordances; **the camera never lives on one finger**, so
 the select-vs-pan ambiguity (R20) is designed out:
-- **One finger:** tap = select (overview blip/bracket); tap world = smart action;
+- **One finger:** tap = select (overview blip/bracket); tap universe = smart action;
   **tap-and-hold = radial context menu** (recovers "right-click").
 - **Two fingers (camera only):** pan, **pinch-zoom**, twist-rotate.
 - **On-screen:** smart-select bar, contextual command bar, control-group bar, module
@@ -1488,18 +1488,18 @@ respect formations/stance. All commands become validated **intents** (§8.4).
 
 ---
 
-## 26. World Clock & Live-Ops 🔒
+## 26. Universe Clock & Live-Ops 🔒
 - **24/7, no scheduled downtime 🔒:** rely on the **warm-restart** (snapshot + outbox,
   §15) for **rolling restarts/deploys** — k8s restarts the shard pod and clients
   **reconnect** (session token + one-session rule, §14; backoff/jitter to avoid a
   reconnect storm — R22). A brief reconnect blip is acceptable; **warm-restart
   correctness is now an uptime SLA**, drilled at M5.
-- **Authoritative world clock:** the server maps the monotonic sim tick → UTC and is the
+- **Authoritative universe clock:** the server maps the monotonic sim tick → UTC and is the
   single time source (clients align via clock-sync, §8.5). Drives **invasion scheduling,
   anomaly spawn/despawn, market-order expiry, structure upkeep ticks, insurance
   expiry**, and daily/weekly cadences.
 - **Event director:** a lightweight server system schedules invasions/anomalies on the
-  world clock + region exploitation (§13.7), within the sim/bandwidth budget.
+  universe clock + region exploitation (§13.7), within the sim/bandwidth budget.
 - **Live-ops levers:** server tunables (spawn/faucet/sink rates, fleet cap) are **game
   data** with **hot-reload** (§12.6) → economy/PvE pacing adjustable **without a
   redeploy**, guided by telemetry (§21).
@@ -1580,7 +1580,7 @@ Large reliable (last-resort, §8.2): body carries { msgId u32, partIdx u16, part
 >   dropping ticks. Multi-shard (§19) is the separate capacity lever beyond one shard.
 
 ## Appendix C — Glossary
-- **Shard** — one server process / one contiguous world.
+- **Shard** — one server process / one contiguous universe.
 - **Bot** — automated *client* session (NeuronClient), render-free.
 - **PvE NPC** — *server-side* AI entity.
 - **Safe zone** — radius around a base where PvP damage is off (high/low-sec defensive bubble).
@@ -1598,7 +1598,7 @@ Large reliable (last-resort, §8.2): body carries { msgId u32, partIdx u16, part
   new client starts from the **empty (∅) baseline** (§8.4).
 - **No-bulk sync** — cold-start uses the ordinary interest+delta snapshot loop from an
   empty baseline; content is fetched out-of-band and procedural state is reconstructed
-  from a seed, so the world is never transferred as one large artifact (§8.4).
+  from a seed, so the universe is never transferred as one large artifact (§8.4).
 - **Floating origin** — per-frame render origin near the camera.
 - **Sector** — fixed cubic cell for spatial queries & interest (keyed by `SectorId`).
 - **Outbox** — durable, ordered queue of economy events drained to SQL (write-through).
@@ -1624,7 +1624,7 @@ Large reliable (last-resort, §8.2): body carries { msgId u32, partIdx u16, part
 - **HDR forward** — forward rendering into a float HDR target, then bloom + tone-map (the Darwinia look).
 - **Trim** — `IDXGIDevice3::Trim()`, releases GPU memory on UWP suspend.
 - **String table** — id→text indirection enabling localization without code changes.
-- **Event director** — server system that schedules invasions/anomalies on the world clock.
+- **Event director** — server system that schedules invasions/anomalies on the universe clock.
 
 ---
 
@@ -1647,4 +1647,4 @@ EVE-Echoes-style; shared by desktop & touch; box-select demoted; touch ambiguity
 out; R20 Med→Low; spec in `docs/design/touch-controls.md`), v0.11 completeness pass (DX12
 §11.1, camera/VFX §11.2, navigation §13.12, UI/HUD/radar §22, input §23, comms §24,
 platform services §25, game-data §12.6, live-ops §26), v0.10 audio (NeuronAudio), v0.9
-gameplay (§13). M0, M1a, M1b complete; M2 is next on the engineering track.*
+gameplay (§13). M0, M1a, M1b, M2 complete; M3 is next on the engineering track.*
