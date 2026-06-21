@@ -51,6 +51,10 @@ namespace Neuron::Render
     };
     void SetEmitters(const EmitterDesc* emitters, int count);
 
+    // Settings (area G): 0 = off, 1 = full. Scales how much of the ambient dust
+    // field is drawn (emitter rate is scaled by the caller).
+    void SetDensity(float d) noexcept { m_density = d < 0.f ? 0.f : (d > 1.f ? 1.f : d); }
+
     // Advance the drifting field + emitter particles. focus centres the ambient
     // dust field; emitters spawn at their own render-space positions.
     void Update(float dt, float focusX, float focusY, float focusZ);
@@ -101,6 +105,7 @@ namespace Neuron::Render
     std::vector<EmitterDesc> m_emitters;  // this frame's emitters
     uint32_t                m_spawnCursor{ 0 };
     uint32_t                m_rng{ 0x9e3779b9u };
+    float                   m_density{ 1.f }; // ambient-field draw fraction (settings)
 
     static constexpr float kFieldHalf = 600.f; // field box half-extent (m)
   };

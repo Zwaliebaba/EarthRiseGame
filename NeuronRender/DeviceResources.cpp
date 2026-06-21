@@ -236,7 +236,7 @@ void DeviceResources::EndFrame()
     ID3D12CommandList* lists[] = { m_cmdList.get() };
     m_cmdQueue->ExecuteCommandLists(1, lists);
 
-    winrt::check_hresult(m_swapChain->Present(1, 0));
+    winrt::check_hresult(m_swapChain->Present(m_vsync ? 1u : 0u, 0));
 
     // Signal fence for this frame and advance to next back buffer.
     m_fenceValues[m_frameIndex] = m_nextFenceValue;

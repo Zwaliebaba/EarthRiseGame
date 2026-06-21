@@ -275,9 +275,13 @@ namespace Neuron::Render
       v[n++] = { brX, brY, brZ, 1.f, 1.f, r, g, b, a };
     };
 
-    // Ambient dust (offsets around the camera focus).
-    for (const auto& p : m_particles)
+    // Ambient dust (offsets around the camera focus); density scales the count.
+    const size_t ambientN = static_cast<size_t>(m_particles.size() * m_density);
+    for (size_t i = 0; i < ambientN; ++i)
+    {
+      const auto& p = m_particles[i];
       billboard(m_fx + p.ox, m_fy + p.oy, m_fz + p.oz, p.size, p.r, p.g, p.b, p.a);
+    }
 
     // Emitter glow (absolute render-space; alpha fades over the particle's life).
     for (const auto& e : m_emit)

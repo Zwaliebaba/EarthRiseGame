@@ -51,6 +51,11 @@ namespace Neuron::Render
     // buffer (+ depth) bound so the HUD can draw over it. Call after the scene.
     void Resolve(ID3D12GraphicsCommandList* cl);
 
+    // Settings (area G). Bloom add strength (0 = off); pixel effect toggles the
+    // composite vignette + scanlines.
+    void SetBloomIntensity(float i) noexcept { m_bloomIntensity = i; }
+    void SetPixelEffect(bool on) noexcept { m_pixelEffect = on; }
+
     [[nodiscard]] bool ready() const noexcept { return m_ready; }
 
   private:
@@ -97,5 +102,8 @@ namespace Neuron::Render
     UINT m_height{ 0 };
     UINT m_halfW{ 0 };
     UINT m_halfH{ 0 };
+
+    float m_bloomIntensity{ 1.10f }; // settings: composite bloom add strength
+    bool  m_pixelEffect{ true };     // settings: vignette + scanlines
   };
 } // namespace Neuron::Render

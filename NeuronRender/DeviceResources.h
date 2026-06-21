@@ -57,6 +57,9 @@ public:
     // be reading from an in-flight frame.
     [[nodiscard]] UINT FrameIndex() const noexcept { return m_frameIndex; }
 
+    // VSync toggle (settings). On = present synced to vblank; off = uncapped.
+    void SetVSync(bool on) noexcept { m_vsync = on; }
+
 private:
     void CreateRenderTargetViews();
     void CreateDepthStencil();
@@ -85,6 +88,7 @@ private:
     UINT    m_frameIndex{ 0 };
     UINT    m_width{ 1280 };
     UINT    m_height{ 720 };
+    bool    m_vsync{ true };
 };
 
 } // namespace Neuron::Render

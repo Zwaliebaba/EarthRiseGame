@@ -26,6 +26,7 @@
 #include <winrt/Windows.Storage.h>          // StorageFolder::Path
 #include <winrt/Windows.UI.Core.h>          // CoreWindow, PointerEventArgs
 #include <winrt/Windows.UI.Input.h>         // PointerPoint / button state
+#include <winrt/Windows.Foundation.Collections.h> // LocalSettings IPropertySet
 
 // NeuronRender
 #include "DeviceResources.h"
@@ -130,6 +131,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   int   m_sel[Win_Count][16]{};           // dropdown selection per panel row
   int   m_zorder[Win_Count]{ Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other }; // back→front
   float m_fps{0.f};
+  // Live-applied settings state (area G).
+  float m_particleDensity{1.0f}; // scales emitter rate + ambient field
+  float m_uiScaleMul{1.0f};      // "Large Menus" HUD scale multiplier
 
   // ---- network ----
   Neuron::Net::CngCrypto m_crypto;
@@ -239,6 +243,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     check_bool(m_canvas.Initialize(&m_dr));
     LoadUiAssets(); // bitmap font + menu chrome (fail-safe: HUD falls back to blocks)
     LoadAudio();    // XAudio2 engine + clips + ambient bed (fail-safe: silent)
+    InitSettings(); // default selections, then restore any persisted ones
+    LoadSettings();
     {
       const long long initMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                    std::chrono::steady_clock::now() - initStart)
@@ -423,9 +429,78 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   using Rect = Neuron::Render::Ui::Rect;
   struct UiRow { const char* label; const char* const* opts; int optCount; };
 
-  static float MenuScale(UINT screenH) noexcept
+  float MenuScale(UINT screenH) const noexcept
   {
-    return (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
+    return (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f * m_uiScaleMul;
+  }
+
+  // ── Settings (area G) ─────────────────────────────────────────────────────
+  // Sensible default selections so the wired knobs start in a good state.
+  void InitSettings()
+  {
+    // Graphics: FOV 75, Bloom High, Particles Medium, RenderScale 100%,
+    //           Shadow High, Entity High, Pixel Effect On.
+    const int g[] = { 1, 3, 2, 2, 2, 2, 1 };
+    for (int i = 0; i < 7; ++i) m_sel[Win_Graphics][i] = g[i];
+    // Screen: 1920x1080, Borderless, VSync On, Limit Off, Aniso 8x, FXAA On, Tex High, Brightness Normal.
+    const int sc[] = { 1, 1, 1, 0, 3, 1, 2, 1 };
+    for (int i = 0; i < 8; ++i) m_sel[Win_Screen][i] = sc[i];
+    // Other: Help On, Controller Off, Intro On, English, Normal, Large Off, Auto Camera On.
+    const int ot[] = { 1, 0, 1, 0, 1, 0, 1 };
+    for (int i = 0; i < 7; ++i) m_sel[Win_Other][i] = ot[i];
+  }
+
+  static int Clamp(int v, int n) { return v < 0 ? 0 : (v >= n ? n - 1 : v); }
+  float SettingFovRadians() const
+  {
+    static const float deg[4] = { 60.f, 75.f, 90.f, 110.f };
+    return deg[Clamp(m_sel[Win_Graphics][0], 4)] * 0.01745329f;
+  }
+
+  // Push the current selections to the live engine knobs (called each frame).
+  void ApplySettings()
+  {
+    m_dr.SetVSync(m_sel[Win_Screen][2] != 0);
+
+    static const float bloom[4] = { 0.f, 0.6f, 1.1f, 1.7f };
+    m_post.SetBloomIntensity(bloom[Clamp(m_sel[Win_Graphics][1], 4)]);
+    m_post.SetPixelEffect(m_sel[Win_Graphics][6] != 0);
+
+    static const float dens[4] = { 0.f, 0.33f, 0.66f, 1.0f };
+    m_particleDensity = dens[Clamp(m_sel[Win_Graphics][2], 4)];
+    m_particles.SetDensity(m_particleDensity);
+
+    m_uiScaleMul = (m_sel[Win_Other][5] != 0) ? 1.3f : 1.0f; // Large Menus
+  }
+
+  // Persist / restore selections in UWP local settings (best-effort).
+  void SaveSettings()
+  {
+    try
+    {
+      auto vals = Windows::Storage::ApplicationData::Current().LocalSettings().Values();
+      for (int win = Win_Screen; win <= Win_Other; ++win)
+        for (int row = 0; row < 16; ++row)
+        {
+          const winrt::hstring key{ L"set." + std::to_wstring(win) + L"." + std::to_wstring(row) };
+          vals.Insert(key, winrt::box_value(m_sel[win][row]));
+        }
+    }
+    catch (...) {}
+  }
+  void LoadSettings()
+  {
+    try
+    {
+      auto vals = Windows::Storage::ApplicationData::Current().LocalSettings().Values();
+      for (int win = Win_Screen; win <= Win_Other; ++win)
+        for (int row = 0; row < 16; ++row)
+        {
+          const winrt::hstring key{ L"set." + std::to_wstring(win) + L"." + std::to_wstring(row) };
+          if (vals.HasKey(key)) m_sel[win][row] = winrt::unbox_value<int>(vals.Lookup(key));
+        }
+    }
+    catch (...) {}
   }
   static bool WinIsPanel(int win) { return win == Win_Screen || win == Win_Graphics || win == Win_Other; }
   static float PanelWidth(float s) { return 460.f * s; }
@@ -598,7 +673,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         {
           if (L.closeBox.Contains(m_ptrX, m_ptrY)) { m_winOpen[win] = false; PlayUi(m_clipClick); }
           else if (L.footerClose.Contains(m_ptrX, m_ptrY)) { m_winOpen[win] = false; PlayUi(m_clipClick); }
-          else if (L.footerApply.Contains(m_ptrX, m_ptrY)) { OutputDebugStringA("[EarthRise] settings applied\n"); PlayUi(m_clipClick); }
+          else if (L.footerApply.Contains(m_ptrX, m_ptrY)) { SaveSettings(); PlayUi(m_clipClick); }
           else if (m_hoverItem >= 0) { m_ddWin = win; m_ddRow = m_hoverItem; PlayUi(m_clipSelect); }
           else if (L.titleBar.Contains(m_ptrX, m_ptrY)) { m_dragWin = win; m_dragDX = m_ptrX - m_winX[win]; m_dragDY = m_ptrY - m_winY[win]; }
         }
@@ -942,6 +1017,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   // ── Game tick ────────────────────────────────────────────────────────────
   void Tick()
   {
+    // Push current settings selections to the live engine knobs.
+    ApplySettings();
+
     // 1. Network I/O.
     m_session->Tick();
 
@@ -994,7 +1072,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const XMVECTOR eye = XMVectorSet(cx, cy + 140.f, cz - 340.f, 0.f);
     const XMVECTOR at = XMVectorSet(cx, cy + 20.f, cz + 120.f, 0.f);
     const XMVECTOR up = XMVectorSet(0.f, 1.f, 0.f, 0.f);
-    constexpr float fov = XM_PIDIV4;
+    const float fov = SettingFovRadians();
     const float asp = (h > 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.f;
 
     XMMATRIX view = XMMatrixLookAtRH(eye, at, up);
@@ -1116,7 +1194,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         e.x = se.x; e.y = se.y; e.z = se.z;
         e.r = gr; e.g = gg; e.b = gb;
         e.size = TargetMetresForKind(se.kind) * 0.30f;
-        e.rate = 16.f;
+        e.rate = 16.f * m_particleDensity;
       }
       m_particles.SetEmitters(ems, emCount);
       m_particles.Update(dt, cx, cy, cz);

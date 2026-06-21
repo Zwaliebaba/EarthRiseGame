@@ -314,7 +314,9 @@ namespace Neuron::Render
     cl->RSSetViewports(1, &vp);
     cl->RSSetScissorRects(1, &sr);
 
-    const float pComp[4] = {kExposure, kIntensity, kVignette, kScanline};
+    const float pComp[4] = {kExposure, m_bloomIntensity,
+                            m_pixelEffect ? kVignette : 0.f,
+                            m_pixelEffect ? kScanline : 0.f};
     cl->SetPipelineState(m_psoComposite.get());
     cl->SetGraphicsRoot32BitConstants(0, 4, pComp, 0);
     cl->SetGraphicsRootDescriptorTable(1, SrvGpu(m_hdr.srvIndex));
