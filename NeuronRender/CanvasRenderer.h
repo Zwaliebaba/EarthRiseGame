@@ -21,17 +21,17 @@
 #include <d3d12.h>
 #include <winrt/base.h>
 
+#include <array>
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
 
+#include "DeviceResources.h"
 #include "FontAtlasLayout.h"
 #include "TextureGpu.h"
 
 namespace Neuron::Render
 {
-
-class DeviceResources;
 
 class CanvasRenderer
 {
@@ -83,11 +83,17 @@ private:
     void  Prim(Mode mode, UINT srvIndex);   // begin/extend the current batch
     void  Vtx(float x, float y, float u, float v, float r, float g, float b, float a);
 
+    DeviceResources*                    m_dr{ nullptr };
     ID3D12Device*                       m_device{ nullptr };
     winrt::com_ptr<ID3D12RootSignature> m_rootSig;
     winrt::com_ptr<ID3D12PipelineState> m_pso;
-    winrt::com_ptr<ID3D12Resource>      m_vtxBuf; // upload heap, persistent map
-    CanvasVertex*                       m_vtxPtr{ nullptr };
+
+    // One CPU-mapped vertex buffer PER in-flight frame — a single shared buffer
+    // races the GPU still reading the previous frame (flicker / garbage flashes
+    // when the content changes, e.g. menu hover).
+    std::array<winrt::com_ptr<ID3D12Resource>, DeviceResources::kFrameCount> m_vtxBuf;
+    std::array<CanvasVertex*, DeviceResources::kFrameCount>                  m_vtxPtr{};
+    UINT                                m_frame{ 0 }; // selected in Reset()
     UINT                                m_vtxCount{ 0 };
 
     winrt::com_ptr<ID3D12DescriptorHeap> m_srvHeap; // shader-visible, kMaxTextures

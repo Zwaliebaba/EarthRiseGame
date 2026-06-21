@@ -17,6 +17,7 @@ namespace Neuron::Render
 
 bool CanvasRenderer::Initialize(DeviceResources* dr)
 {
+    m_dr = dr;
     m_device = dr->Device();
 
     // --- Root signature: b0 root constants (invScreenSize + mode) + SRV table t0
@@ -108,7 +109,7 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
     winrt::check_hresult(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(m_srvHeap.put())));
     m_srvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    // --- Dynamic vertex buffer (upload heap, persistently CPU-mapped) ---
+    // --- Dynamic vertex buffers (one per in-flight frame, CPU-mapped) ---
     constexpr UINT64 vtxBufSize = kMaxVerts * sizeof(CanvasVertex);
     D3D12_HEAP_PROPERTIES hpUpload{};
     hpUpload.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -118,18 +119,22 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
     rd.Height = rd.DepthOrArraySize = rd.MipLevels = 1;
     rd.SampleDesc.Count = 1;
     rd.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    winrt::check_hresult(m_device->CreateCommittedResource(
-        &hpUpload, D3D12_HEAP_FLAG_NONE, &rd,
-        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(m_vtxBuf.put())));
-    D3D12_RANGE readRange{};
-    winrt::check_hresult(m_vtxBuf->Map(0, &readRange, reinterpret_cast<void**>(&m_vtxPtr)));
+    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    {
+        winrt::check_hresult(m_device->CreateCommittedResource(
+            &hpUpload, D3D12_HEAP_FLAG_NONE, &rd,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(m_vtxBuf[i].put())));
+        D3D12_RANGE readRange{};
+        winrt::check_hresult(m_vtxBuf[i]->Map(0, &readRange, reinterpret_cast<void**>(&m_vtxPtr[i])));
+    }
 
     return true;
 }
 
 void CanvasRenderer::Uninitialize()
 {
-    if (m_vtxBuf && m_vtxPtr) { m_vtxBuf->Unmap(0, nullptr); m_vtxPtr = nullptr; }
+    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+        if (m_vtxBuf[i] && m_vtxPtr[i]) { m_vtxBuf[i]->Unmap(0, nullptr); m_vtxPtr[i] = nullptr; }
 }
 
 void CanvasRenderer::SetFont(TextureGpu font, er::format::FontAtlasConfig cfg)
@@ -163,6 +168,9 @@ UINT CanvasRenderer::EnsureSrv(const TextureGpu& tex)
 
 void CanvasRenderer::Reset()
 {
+    // Write into this in-flight frame's buffer (the GPU may still be reading the
+    // other one from the previous frame).
+    m_frame = m_dr ? m_dr->FrameIndex() : 0;
     m_vtxCount = 0;
     m_batches.clear();
 }
@@ -175,8 +183,8 @@ void CanvasRenderer::Prim(Mode mode, UINT srvIndex)
 
 void CanvasRenderer::Vtx(float x, float y, float u, float v, float r, float g, float b, float a)
 {
-    if (m_vtxCount >= kMaxVerts) return;
-    m_vtxPtr[m_vtxCount++] = { x, y, u, v, r, g, b, a };
+    if (m_vtxCount >= kMaxVerts || !m_vtxPtr[m_frame]) return;
+    m_vtxPtr[m_frame][m_vtxCount++] = { x, y, u, v, r, g, b, a };
     if (!m_batches.empty()) ++m_batches.back().count;
 }
 
@@ -299,7 +307,7 @@ void CanvasRenderer::Render(ID3D12GraphicsCommandList* cl, UINT screenWidth, UIN
     cl->SetDescriptorHeaps(1, heaps);
 
     D3D12_VERTEX_BUFFER_VIEW vbView{
-        m_vtxBuf->GetGPUVirtualAddress(),
+        m_vtxBuf[m_frame]->GetGPUVirtualAddress(),
         m_vtxCount * static_cast<UINT>(sizeof(CanvasVertex)),
         static_cast<UINT>(sizeof(CanvasVertex))
     };
