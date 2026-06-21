@@ -13,7 +13,17 @@ balance/design drafts**, tuned against ERHeadless bot fights — not final value
 | [`ui-hud-layout.md`](ui-hud-layout.md) | **HUD layout & screen flow** — in-space HUD wireframe (anchor zones), screen-flow map, per-screen layout notes | §22, §23 |
 | [`neuronrender-architecture.md`](neuronrender-architecture.md) | **NeuronRender DX12 architecture** — device/frame model, descriptor & binding model, resources/PSO, HDR forward pass graph, particles, Canvas, class layout | §11, §12.4 |
 | [`darwinia-menu-ui.md`](darwinia-menu-ui.md) | **Darwinia windowed menu/options UI** — reusable Canvas window toolkit (Window/Button/DropDown/Label), InterfaceGrey/InterfaceRed skin model, EditorFont atlas metrics, per-window layout, input + string-table wiring, M2 work breakdown | §11, §22.6, §22.4 |
-| [`networking-scale-review.md`](networking-scale-review.md) | **MMO networking review for scaling to hundreds of players** — assessment of the §8/§9 design + current M1a code; the three scaling walls (per-client snapshot pipeline, single-thread sim, single-sector pileup), eviction self-healing fix, time-dilation, delta encoding, prioritized recommendations toward M4 | §8, §9, §17, App. A–B |
 
 These docs are mutually consistent: damage types (K/T/E), ship roles, hull tiers,
 tiered-security scarcity, and the 6–12 fleet cap match across docs and the masterplan.
+
+## Reviews
+
+Architecture/code reviews live under [`review/`](review/) to keep the design list above
+clean. Reviews assess existing design + code and feed decisions **back into the
+masterplan** (a review's accepted recommendations are folded into `masterplan.md` and the
+review is kept as the record).
+
+| Review | Covers | Folded into |
+| --- | --- | --- |
+| [`review/networking-scale-review.md`](review/networking-scale-review.md) | **MMO networking review for scaling to hundreds of players** — the §8/§9 design + current M1a code; the three scaling walls (per-client snapshot pipeline, single-thread sim, single-sector pileup), the eviction self-healing fix, time dilation, delta encoding, and prioritized recommendations toward M4 | masterplan **v0.15** (§7.2, §8.2, §8.4, §8.5, §9, §17, App. A–B, R23/R24) |
