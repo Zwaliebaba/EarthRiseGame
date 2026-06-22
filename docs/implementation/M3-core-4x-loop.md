@@ -155,6 +155,15 @@
   - [x] Ownership rejection (`Fleet.CommandRejectedForUnownedUnit`); invalid-target rejection
         (`Fleet.AttackIntentRejectsDeadTarget`); valid intent mutates sim (`Fleet.MoveIntentSteersOwnedShipToPoint`,
         `Fleet.BuildIntentEnqueuesAtBase`).
+- **Deferred cleanup (tracked, ~M6): retire the legacy `MoveCommand`.** M3 left the M1a
+  base-velocity path (`MoveCommand` / `MsgType::Command` 41 → `ServerUniverse::SetBaseVelocity`)
+  in place because the **base is not yet a `FleetOrder` unit** (`PushOrder` rejects entities
+  without a `FleetOrder`), so continuous sublight base-drive still rides the legacy path while
+  warp/jump already go through `FleetCommand`. Remove it once base steering is unified into the
+  `FleetOrder` machine: give the base a `FleetOrder`, route `Move`/`Retreat` through it, then
+  delete `MoveCommand`, `Encode/DecodeMoveCommand`, `SetBaseVelocity`, the `MsgType::Command`
+  branch in `ServerHost`, and migrate the M1a sector-crossing test to a `FleetCommand` `Move`.
+  Natural fit for **M6** (movement/own-unit-prediction decision, §10.1); not required by M3.
 - **Depends on:** A (entities to command). **Blocks:** C, D, F, G.
 
 ### C. eXploit loop — harvest → return → build
