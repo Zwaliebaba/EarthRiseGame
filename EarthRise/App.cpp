@@ -138,7 +138,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
   // ---- windowed UI (docs/design/darwinia-menu-ui.md) ----
   enum Win { Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other, Win_Count };
-  bool  m_winOpen[Win_Count]{ true, false, false, false, false };
+  bool  m_winOpen[Win_Count]{ false, false, false, false, false };
   float m_winX[Win_Count]{}, m_winY[Win_Count]{};
   bool  m_uiPlaced{false};
   int   m_dragWin{-1};
