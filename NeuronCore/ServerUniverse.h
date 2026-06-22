@@ -472,7 +472,7 @@ public:
         if (it == m_netIdToEntity.end()) return false;
         m_world.DestroyEntity(it->second);
         m_netIdToEntity.erase(it);
-        m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
+        m_interest.Remove(netId); // drop residency (area A); TombstonesFor evicts it per client (area D)
         m_repl.Remove(netId);     // drop replication version (area B)
         return true;
     }
@@ -550,6 +550,42 @@ public:
 
     // Advance a client's acked baseline to 'tick' (its §8.3 snapshot ack).
     void AckBaseline(uint32_t clientId, uint32_t tick) { m_baselines[clientId].Ack(tick); }
+
+    // The tombstone (pending-removal) netIds for a client (M4 area D, §8.4): every
+    // entity the client had acked that is no longer in its interest set — it left a
+    // cell (area A) or was destroyed (removed from the grid). Reconciled against the
+    // live interest set each call, so an entity that re-entered before its removal
+    // acked is un-tombstoned (its normal version diff resends it). The scheduler
+    // (area E) emits one DeltaTomb record per returned netId and reports them via
+    // RecordTombstonesSent so the client's ack clears them. netId order.
+    [[nodiscard]] std::vector<uint32_t> TombstonesFor(uint32_t clientId)
+    {
+        std::vector<uint32_t> visible;
+        m_interest.VisibleTo(clientId, visible); // sorted/deduped
+        Neuron::Sim::ClientBaseline& base = m_baselines[clientId];
+
+        std::vector<uint32_t> acked;
+        base.CollectAcked(acked);
+        // acked and visible are both sorted: an acked entry absent from visible has
+        // left interest → tombstone it.
+        size_t vi = 0;
+        for (uint32_t n : acked) {
+            while (vi < visible.size() && visible[vi] < n) ++vi;
+            if (vi >= visible.size() || visible[vi] != n) base.Tombstone(n);
+        }
+        for (uint32_t n : visible) base.Untombstone(n); // came back → cancel
+
+        std::vector<uint32_t> out;
+        base.CollectTombstones(out);
+        return out;
+    }
+
+    // Record that 'clientId's snapshot for 'tick' carried tombstone records for
+    // 'netIds' (area D), so acking 'tick' clears them.
+    void RecordTombstonesSent(uint32_t clientId, uint32_t tick, const std::vector<uint32_t>& netIds)
+    {
+        m_baselines[clientId].RecordTombstonesSent(tick, netIds);
+    }
 
     // Per-client / total baseline RAM (App. B gate; area I telemetry reads these).
     [[nodiscard]] size_t BaselineBytes(uint32_t clientId) { return m_baselines[clientId].ApproxBytes(); }
@@ -865,7 +901,7 @@ private:
         }
         if (m_world.IsAlive(e)) m_world.DestroyEntity(e);
         m_netIdToEntity.erase(netId);
-        m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
+        m_interest.Remove(netId); // drop residency (area A); TombstonesFor evicts it per client (area D)
         m_repl.Remove(netId);     // drop replication version (area B)
     }
 

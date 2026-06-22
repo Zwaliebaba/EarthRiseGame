@@ -442,6 +442,86 @@ namespace NeuronCoreTest
     }
   };
 
+  // --- Tombstone eviction (M4 area D; §8.4 / App. A) --------------------------
+
+  TEST_CLASS(TombstoneTests)
+  {
+  public:
+    TEST_METHOD(ReEmitsUntilAckedThenClears)
+    {
+      ClientBaseline base;
+      base.RecordSent(1, { { 10, 1 } });
+      base.Ack(1);
+      Assert::AreEqual(size_t{ 1 }, base.AckedCount());
+
+      base.Tombstone(10); // entity 10 leaves interest
+      Assert::IsTrue(base.IsTombstoned(10));
+      Assert::AreEqual(size_t{ 0 }, base.AckedCount());
+
+      std::vector<uint32_t> tombs;
+      base.CollectTombstones(tombs);
+      Assert::AreEqual(size_t{ 1 }, tombs.size());
+      Assert::AreEqual(uint32_t{ 10 }, tombs[0]);
+      base.RecordTombstonesSent(5, tombs); // snapshot 5 SENT
+      Assert::IsTrue(base.IsTombstoned(10)); // but not acked → still pending
+
+      tombs.clear();
+      base.CollectTombstones(tombs);
+      base.RecordTombstonesSent(6, tombs);
+      base.Ack(6);
+      Assert::IsTrue(!base.IsTombstoned(10)); // ack of a carrying tick clears it
+      Assert::AreEqual(size_t{ 0 }, base.TombstoneCount());
+    }
+
+    TEST_METHOD(StaleAckBeforeCarryingTickDoesNotClear)
+    {
+      ClientBaseline base;
+      base.Tombstone(10);
+      base.RecordTombstonesSent(5, { 10 });
+      base.Ack(4);
+      Assert::IsTrue(base.IsTombstoned(10)); // tick 4 predates the leave
+      base.Ack(5);
+      Assert::IsTrue(!base.IsTombstoned(10));
+    }
+
+    TEST_METHOD(ReEnteredEntityIsUntombstoned)
+    {
+      ClientBaseline base;
+      base.Tombstone(10);
+      Assert::IsTrue(base.IsTombstoned(10));
+      base.Untombstone(10);
+      Assert::IsTrue(!base.IsTombstoned(10));
+    }
+
+    TEST_METHOD(ServerUniverseEvictsEntityThatLeftInterest)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint32_t prop = su.SpawnProp(0, { 100, 0, 0 });
+      su.Step(0.1f);
+
+      auto changed = su.ChangedFor(base);
+      Assert::IsTrue(std::find(changed.begin(), changed.end(), prop) != changed.end());
+      su.RecordSent(base, su.Tick(), changed);
+      su.AckBaseline(base, su.Tick());
+      Assert::IsTrue(su.TombstonesFor(base).empty());
+
+      Assert::IsTrue(su.DespawnBase(prop)); // leaves the grid → leaves interest
+      su.Step(0.1f);
+      const auto tombs1 = su.TombstonesFor(base);
+      Assert::IsTrue(std::find(tombs1.begin(), tombs1.end(), prop) != tombs1.end());
+      su.RecordTombstonesSent(base, su.Tick(), tombs1); // sent but ack lost
+      su.Step(0.1f);
+      const auto tombs2 = su.TombstonesFor(base);
+      Assert::IsTrue(std::find(tombs2.begin(), tombs2.end(), prop) != tombs2.end());
+
+      su.RecordTombstonesSent(base, su.Tick(), tombs2);
+      su.AckBaseline(base, su.Tick());
+      su.Step(0.1f);
+      Assert::IsTrue(su.TombstonesFor(base).empty());
+    }
+  };
+
   // --- Navigation -------------------------------------------------------------
 
   TEST_CLASS(NavigationTests)

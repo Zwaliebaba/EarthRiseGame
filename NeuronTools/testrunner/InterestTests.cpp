@@ -258,3 +258,90 @@ ER_TEST(Replication, BaselineRamAccountsForAckedEntities)
     ER_CHECK_EQ(base.AckedCount(), size_t{ 3 });
     ER_CHECK(base.ApproxBytes() > 0); // App. B baseline-RAM gauge is non-empty
 }
+
+// --- tombstone eviction (M4 area D, §8.4 / App. A) --------------------------
+
+ER_TEST(Tombstone, ReEmitsUntilAckedThenClears)
+{
+    ClientBaseline base;
+    base.RecordSent(1, { { 10, 1 } });
+    base.Ack(1); // client holds entity 10
+    ER_CHECK_EQ(base.AckedCount(), size_t{ 1 });
+
+    // Entity 10 leaves interest → tombstone; it drops from the acked baseline.
+    base.Tombstone(10);
+    ER_CHECK(base.IsTombstoned(10));
+    ER_CHECK_EQ(base.AckedCount(), size_t{ 0 });
+
+    // The leave record rides snapshot tick 5 — but it is DROPPED (no ack). It must
+    // still be pending and re-emitted next tick (no ghost).
+    std::vector<uint32_t> tombs;
+    base.CollectTombstones(tombs);
+    ER_CHECK_EQ(tombs.size(), size_t{ 1 });
+    ER_CHECK_EQ(tombs[0], uint32_t{ 10 });
+    base.RecordTombstonesSent(5, tombs);
+    ER_CHECK(base.IsTombstoned(10)); // still pending — snapshot 5 not acked
+
+    // Re-emitted on tick 6; the client acks 6 → the tombstone clears for good.
+    tombs.clear();
+    base.CollectTombstones(tombs);
+    base.RecordTombstonesSent(6, tombs); // earliest carrying tick (5) is kept
+    base.Ack(6);
+    ER_CHECK(!base.IsTombstoned(10));
+    ER_CHECK_EQ(base.TombstoneCount(), size_t{ 0 });
+}
+
+ER_TEST(Tombstone, StaleAckBeforeCarryingTickDoesNotClear)
+{
+    ClientBaseline base;
+    base.Tombstone(10);
+    base.RecordTombstonesSent(5, { 10 }); // first carried on tick 5
+    base.Ack(4);                          // an older ack (tick 4 predates the leave)
+    ER_CHECK(base.IsTombstoned(10));      // not cleared — tick 4 never carried it
+    base.Ack(5);
+    ER_CHECK(!base.IsTombstoned(10));     // ack of the carrying tick clears it
+}
+
+ER_TEST(Tombstone, ReEnteredEntityIsUntombstoned)
+{
+    ClientBaseline base;
+    base.Tombstone(10);
+    ER_CHECK(base.IsTombstoned(10));
+    base.Untombstone(10); // came back into interest before the removal acked
+    ER_CHECK(!base.IsTombstoned(10));
+}
+
+ER_TEST(Tombstone, ServerUniverseEvictsEntityThatLeftInterest)
+{
+    ServerUniverse su(false);
+    const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+    // A scenery prop in the base's own sector, visible to it.
+    const uint32_t prop = su.SpawnProp(0, { 100, 0, 0 });
+    su.Step(0.1f);
+
+    // The base sees the prop; record + ack so its baseline holds it.
+    auto changed = su.ChangedFor(base);
+    ER_CHECK(std::find(changed.begin(), changed.end(), prop) != changed.end());
+    su.RecordSent(base, su.Tick(), changed);
+    su.AckBaseline(base, su.Tick());
+    ER_CHECK(su.TombstonesFor(base).empty()); // nothing has left yet
+
+    // Destroy the prop: it leaves the grid, so it leaves the base's interest set.
+    ER_CHECK(su.DespawnBase(prop)); // removes any netId from world+interest+repl
+    su.Step(0.1f);
+
+    // The base is now told the prop despawned (tombstone), and it keeps being told
+    // until the ack — a dropped leave never leaves a ghost.
+    const auto tombs1 = su.TombstonesFor(base);
+    ER_CHECK(std::find(tombs1.begin(), tombs1.end(), prop) != tombs1.end());
+    su.RecordTombstonesSent(base, su.Tick(), tombs1); // snapshot SENT but ack LOST
+    su.Step(0.1f);
+    const auto tombs2 = su.TombstonesFor(base);
+    ER_CHECK(std::find(tombs2.begin(), tombs2.end(), prop) != tombs2.end()); // re-emit
+
+    // Ack clears it; the prop never re-appears as a tombstone.
+    su.RecordTombstonesSent(base, su.Tick(), tombs2);
+    su.AckBaseline(base, su.Tick());
+    su.Step(0.1f);
+    ER_CHECK(su.TombstonesFor(base).empty());
+}
