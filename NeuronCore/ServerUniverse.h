@@ -599,6 +599,19 @@ public:
         return snap;
     }
 
+    // Current replicated projection of an entity (the area-C delta codec / area-E
+    // encoder reads this). False if the netId has no replicated components.
+    [[nodiscard]] bool SnapshotEntityOf(uint32_t netId, SnapshotEntity& out)
+    {
+        const auto e = EntityOf(netId);
+        NetId*     id = m_world.GetComponent<NetId>(e);
+        Transform* t  = m_world.GetComponent<Transform>(e);
+        ShapeId*   s  = m_world.GetComponent<ShapeId>(e);
+        if (!id || !t || !s) return false;
+        out = MakeSnapshotEntity(*id, *t, *s);
+        return true;
+    }
+
     [[nodiscard]] uint32_t Tick() const noexcept { return m_tick; }
     [[nodiscard]] Neuron::ECS::World& World() noexcept { return m_world; }
 

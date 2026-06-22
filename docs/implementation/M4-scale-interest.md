@@ -1,10 +1,11 @@
 # M4 — Scale & Interest (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M4**).
-> **Status:** 🔨 In progress — **areas A (cell pub/sub interest) and B (version stamping +
-> per-client baselines) implemented** with their `NeuronCoreTest` cases + Linux `testrunner`
-> mirror (§16.2); areas C–J not started. (M0/M1a/M1b/M2 complete; M3 active.) Drafted from
-> `_template.md` as the next milestone after M3, per [`README.md`](README.md).
+> **Status:** 🔨 In progress — **areas A (cell pub/sub interest), B (version stamping +
+> per-client baselines) and C (quantized sector-local delta codec) implemented** with their
+> `NeuronCoreTest` cases + Linux `testrunner` mirror (§16.2); areas D–J not started.
+> (M0/M1a/M1b/M2 complete; M3 active.) Drafted from `_template.md` as the next milestone
+> after M3, per [`README.md`](README.md).
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 > **Verification:** M4's gates are **real, enforceable** — the contested-sector perf/load run
 > (areas I/J) executes on the **Windows build agent** (§16.3) at the target player count; the
@@ -184,28 +185,34 @@
 - **Current state:** replaces `Snapshot.h`'s fixed-width absolute-`int64` record. `BitStream.h` /
   `Serde.h` bit-packing already exist.
 - **Work:**
-  - [ ] **New snapshot record codec** (rework `Snapshot.h` to the App. A layout): `netId` + a
-        **changed-field-mask flags byte** (+ tombstone bit, area D); only changed fields follow.
-        Position as a **quantized sector-local delta** (the entity's sector is known because it is in
-        the client's interest set), HP/owner/shape as masked optional fields.
-  - [ ] **Quantization step** (the §19 open question): bits-per-axis chosen against ~1 mm sector
-        precision (§6.3) and the ~16 B target; quantization error must stay under the ~100 ms
-        interpolation delay (§8.4) so it's invisible. Author as a tunable constant, not a literal.
-  - [ ] **Per-tick MTU byte budget + spillover:** the scheduler (area E) fills a snapshot to the
-        **safe-MTU budget** in descending priority; overflow spills to later ticks (bounded
-        staleness on least-relevant entities). Holds the "never larger than MTU, never fragmented"
-        invariant even in dense fights (§8.2/§8.4).
-  - [ ] **Client decode:** `NeuronClient` replica applies masked deltas onto the last-known
-        per-`netId` state, last-writer-wins by `tick` (the existing idempotent rule). Reconstruct
-        absolute position from sector + decoded local delta.
-- **Tests (`NeuronCoreTest`/`NeuronClientTest`; testrunner mirror):**
-  - [ ] Encode→decode round-trip reconstructs position within the quantization bound; changed-field
-        mask omits unchanged fields (a 1-field change costs the mask + 1 field).
-  - [ ] A stationary entity in interest costs ≈0 bytes (mask only / no record).
-  - [ ] A full MTU-budgeted snapshot never exceeds the safe payload; overflow entities appear in a
-        later tick (spillover), none dropped.
-  - [ ] Reordered/duplicate snapshots converge (LWW by tick) — extends the existing idempotency
-        test to the delta format.
+  - [x] **New snapshot record codec** (`Snapshot.h`, additive `DeltaRecord`/`DeltaSnapshot` +
+        `Encode/DecodeDeltaSnapshot`): `netId` + a **changed-field-mask flags byte** (`DeltaFlag`,
+        incl. the `DeltaTomb` bit reserved for area D); only changed fields follow. Position is a
+        **quantized sector-local value** (`DeltaPos`) with the sector sent only on first sight /
+        crossing (`DeltaSector`), HP/owner/shape/kind as masked optional fields. `MakeDeltaRecord
+        (cur, base)` computes the minimal mask vs the client's last-known state. The M3 full codec
+        is **untouched** — the live path swaps over at area E.
+  - [x] **Quantization step** (`kPosQuantBitsPerAxis = 20` → ~1.6 cm/axis): a named **tunable**, well
+        under the ~100 ms interpolation jitter (§8.4) while reaching the App. B ~16 B/delta target;
+        `Quantize/DequantizeSectorLocal` round-trip within one step (area J sweeps the constant).
+  - [x] **Per-tick MTU byte budget + spillover primitive:** `BuildBudgetedSnapshot(ordered, budget,
+        overflow)` keeps the priority-ordered prefix that fits the **safe-MTU budget** and spills the
+        rest to `overflow` (re-scheduled next tick by area E — area B keeps their version > acked, so
+        none are dropped). Holds the "never larger than MTU, never fragmented" invariant (§8.2/§8.4).
+        *The priority ordering + cross-tick spillover state is the area-E scheduler; C owns the codec
+        + the budget primitive.*
+  - [x] **Client decode:** `DeltaDecodeState` (NeuronCore, shared/testable) applies masked deltas
+        onto the last-known per-`netId` state, **last-writer-wins by `tick`** (reordered/duplicate
+        snapshots idempotent), reconstructing absolute position from sector + decoded local delta.
+        The `NeuronClient` replica adopts it when the live path swaps at area E.
+- **Tests (`NeuronCoreTest`; `NeuronTools/testrunner/SnapshotDeltaTests.cpp` mirror):**
+  - [x] Encode→decode round-trip reconstructs position within the quantization bound; the mask omits
+        unchanged fields (a 1-field change costs mask + 1 field) — `FirstSightRoundTripWithinQuantBound`,
+        `MaskOmitsUnchangedFields`, `SectorCrossingReAnchorsPosition`, `EncodesLiveServerEntityRoundTrip`.
+  - [x] A stationary entity costs ≈0 bytes (mask 0 / no record) — `StationaryEntityCostsNothing`.
+  - [x] A budgeted snapshot never exceeds the safe payload; overflow entities spill (none dropped) —
+        `BudgetedSnapshotNeverExceedsAndSpillsTheRest`.
+  - [x] Reordered/duplicate snapshots converge (LWW by tick) — `ReorderedAndDuplicateSnapshotsConvergeByTick`.
 - **Depends on:** A, B. **Blocks:** E, J (the bandwidth gate measures this format).
 
 ### D. Tombstone eviction — self-healing leave/despawn (§8.4)

@@ -2,6 +2,7 @@
 #include "CppUnitTest.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -219,6 +220,98 @@ namespace NeuronCoreTest
         Assert::IsTrue(decoded.entities[i].kind == snap.entities[i].kind);
         Assert::IsTrue(decoded.entities[i].netId == snap.entities[i].netId);
       }
+    }
+  };
+
+  // --- Quantized sector-local delta codec (M4 area C; §8.4, App. A) -----------
+
+  TEST_CLASS(SnapshotDeltaTests)
+  {
+    static SnapshotEntity Ent(uint32_t netId, UniversePos pos, DirectX::XMFLOAT3 local,
+                              int32_t hp, uint16_t shape, EntityKind kind, uint32_t owner)
+    {
+      SnapshotEntity e;
+      e.netId = netId; e.pos = pos; e.localOffset = local; e.hp = hp;
+      e.shapeId = shape; e.kind = kind; e.ownerPlayer = owner;
+      return e;
+    }
+    static double Abs(int64_t pos, float local) { return static_cast<double>(pos) + local; }
+    static double Step()
+    {
+      return static_cast<double>(Neuron::Universe::kSectorSize) /
+             static_cast<double>(uint64_t(1) << kPosQuantBitsPerAxis);
+    }
+
+  public:
+    TEST_METHOD(FirstSightRoundTripWithinQuantBound)
+    {
+      const SnapshotEntity src = Ent(7, { 1000, 2000, 3000 }, { 0.25f, 0.5f, 0.75f },
+                                     640, 5, EntityKind::Ship, 42);
+      DeltaSnapshot snap; snap.tick = 11;
+      snap.records.push_back(MakeDeltaRecord(src, nullptr));
+      DeltaDecodeState dec;
+      Assert::IsTrue(dec.Apply(EncodeDeltaSnapshot(snap)));
+      const SnapshotEntity* got = dec.Find(7);
+      Assert::IsTrue(got != nullptr);
+      Assert::IsTrue(std::fabs(Abs(got->pos.x, got->localOffset.x) - 1000.25) <= Step());
+      Assert::IsTrue(std::fabs(Abs(got->pos.z, got->localOffset.z) - 3000.75) <= Step());
+      Assert::AreEqual(int32_t{ 640 }, got->hp);
+      Assert::AreEqual(uint16_t{ 5 }, got->shapeId);
+      Assert::AreEqual(uint32_t{ 42 }, got->ownerPlayer);
+    }
+
+    TEST_METHOD(MaskOmitsUnchangedFields)
+    {
+      const SnapshotEntity base = Ent(7, { 1000, 0, 0 }, { 0, 0, 0 }, 640, 5, EntityKind::Ship, 42);
+      SnapshotEntity cur = base; cur.hp = 600;
+      const DeltaRecord r = MakeDeltaRecord(cur, &base);
+      Assert::AreEqual(uint8_t{ DeltaHp }, r.mask);
+      Assert::IsTrue(DeltaRecordBits(r) < DeltaRecordBits(MakeDeltaRecord(cur, nullptr)));
+    }
+
+    TEST_METHOD(StationaryEntityCostsNothing)
+    {
+      const SnapshotEntity base = Ent(7, { 1234, 5678, 9012 }, { 0.1f, 0.2f, 0.3f },
+                                      640, 5, EntityKind::Ship, 42);
+      Assert::AreEqual(uint8_t{ 0 }, MakeDeltaRecord(base, &base).mask);
+    }
+
+    TEST_METHOD(BudgetedSnapshotNeverExceedsAndSpillsTheRest)
+    {
+      std::vector<DeltaRecord> recs;
+      for (uint32_t i = 1; i <= 20; ++i)
+        recs.push_back(MakeDeltaRecord(
+            Ent(i, { 1000 * i, 0, 0 }, { 0, 0, 0 }, 100, 5, EntityKind::Ship, 1), nullptr));
+      std::vector<uint32_t> overflow;
+      const size_t budget = 60;
+      const DeltaSnapshot snap = BuildBudgetedSnapshot(1, recs, budget, overflow);
+      Assert::IsTrue(EncodeDeltaSnapshot(snap).size() <= budget);
+      Assert::IsTrue(!overflow.empty());
+      Assert::AreEqual(size_t{ 20 }, snap.records.size() + overflow.size());
+    }
+
+    TEST_METHOD(ReorderedAndDuplicateSnapshotsConvergeByTick)
+    {
+      const SnapshotEntity a = Ent(1, { 0, 0, 0 }, { 0, 0, 0 }, 100, 5, EntityKind::Ship, 7);
+      DeltaDecodeState dec;
+      DeltaSnapshot s5; s5.tick = 5; s5.records.push_back(MakeDeltaRecord(a, nullptr));
+      dec.Apply(EncodeDeltaSnapshot(s5));
+      Assert::AreEqual(int32_t{ 100 }, dec.Find(1)->hp);
+
+      SnapshotEntity a4 = a; a4.hp = 50;
+      DeltaSnapshot s4; s4.tick = 4; s4.records.push_back(MakeDeltaRecord(a4, &a));
+      dec.Apply(EncodeDeltaSnapshot(s4));
+      Assert::AreEqual(int32_t{ 100 }, dec.Find(1)->hp); // stale ignored
+
+      SnapshotEntity a6 = a; a6.hp = 80;
+      DeltaSnapshot s6; s6.tick = 6; s6.records.push_back(MakeDeltaRecord(a6, &a));
+      dec.Apply(EncodeDeltaSnapshot(s6));
+      Assert::AreEqual(int32_t{ 80 }, dec.Find(1)->hp);
+
+      SnapshotEntity a6b = a; a6b.hp = 10;
+      DeltaSnapshot s6b; s6b.tick = 6; s6b.records.push_back(MakeDeltaRecord(a6b, &a));
+      dec.Apply(EncodeDeltaSnapshot(s6b));
+      Assert::AreEqual(int32_t{ 80 }, dec.Find(1)->hp); // duplicate tick ignored
     }
   };
 
