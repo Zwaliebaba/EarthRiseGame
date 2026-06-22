@@ -12,8 +12,10 @@
 // exactly one TU per executable: SimComponents.cpp for ERServer/ERHeadless, and
 // the test TU for the test runner.
 
+#include "Command.h"
 #include "Components.h"
 #include "Economy.h"
+#include "Fleet.h"
 #include "Movement.h"
 #include "Navigation.h"
 #include "ShapeCatalog.h"
@@ -24,10 +26,12 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -60,6 +64,9 @@ public:
         m_world.RegisterComponent<FleetMember>();
         m_world.RegisterComponent<Sensor>();
         m_world.RegisterComponent<HarvestOrder>();
+        m_world.RegisterComponent<FleetOrder>();
+        m_world.RegisterComponent<Weapon>();
+        m_world.RegisterComponent<NpcAi>();
         if (seedDemoContent) {
             SpawnScenery();
             SpawnDemoSeed();
@@ -271,6 +278,9 @@ public:
         m_world.AddComponent<NavState>(e);
         m_world.AddComponent<Sensor>(e).range     = m_economy.sensorRangeShip;
         m_world.AddComponent<FleetMember>(e);
+        m_world.AddComponent<Health>(e)  = { kShipHp, kShipHp };
+        m_world.AddComponent<FleetOrder>(e);
+        m_world.AddComponent<Weapon>(e)  = { kShipWeaponRange, kShipWeaponDps }; // placeholder (M6)
         m_netIdToEntity[netId] = e;
         return netId;
     }
@@ -324,6 +334,133 @@ public:
     [[nodiscard]] HarvestOrder*     HarvestOrderOf(uint32_t netId) { return m_world.GetComponent<HarvestOrder>(EntityOf(netId)); }
     [[nodiscard]] ResourceNodeTag*  ResourceNodeOf(uint32_t netId) { return m_world.GetComponent<ResourceNodeTag>(EntityOf(netId)); }
 
+    // --- fleet command — RTS intents (§8.4 / §23.4; area B) ------------------
+
+    // Apply a validated fleet command for 'player'. Every targeted unit is
+    // ownership-checked (you only command your own); intents with a bad target are
+    // rejected. Returns the number of units the command actually affected (0 = the
+    // whole command was rejected). Server-authoritative — never trusts the client.
+    uint32_t ApplyFleetCommand(uint32_t player, const FleetCommand& cmd)
+    {
+        uint32_t affected = 0;
+        for (const uint32_t unitNet : cmd.units) {
+            const auto unit = EntityOf(unitNet);
+            const OwnerId* owner = m_world.GetComponent<OwnerId>(unit);
+            if (!owner || owner->player != player) continue;  // ownership check (§8.4)
+            if (ApplyIntentToUnit(unitNet, cmd)) ++affected;
+        }
+        return affected;
+    }
+
+    [[nodiscard]] FleetOrder* FleetOrderOf(uint32_t netId) { return m_world.GetComponent<FleetOrder>(EntityOf(netId)); }
+    [[nodiscard]] Health*     HealthOf(uint32_t netId)     { return m_world.GetComponent<Health>(EntityOf(netId)); }
+    [[nodiscard]] NpcAi*      NpcAiOf(uint32_t netId)      { return m_world.GetComponent<NpcAi>(EntityOf(netId)); }
+    [[nodiscard]] Weapon*     WeaponOf(uint32_t netId)     { return m_world.GetComponent<Weapon>(EntityOf(netId)); }
+
+    // --- basic PvE NPC site (§13.7; area F) ----------------------------------
+
+    // Spawn a hand-placed guardian site: 'count' NPC units in a deterministic ring
+    // of 'radius' around 'center', each defending the site. Returns a site id; the
+    // site is "cleared" once every guardian is destroyed (DrainClearedSites). NPCs
+    // are server ECS entities (OwnerId.player == 0), distinct from ERHeadless bots.
+    uint16_t SpawnNpcSite(Neuron::Universe::UniversePos center, int count, float radius = 1200.0f)
+    {
+        const uint16_t siteId = m_nextSiteId++;
+        int& alive = m_siteAlive[siteId];
+        alive = 0;
+        const int n = std::clamp(count, 1, 32);
+        for (int i = 0; i < n; ++i) {
+            const double ang = (2.0 * 3.14159265358979323846 * static_cast<double>(i)) / static_cast<double>(n);
+            const int64_t ox = static_cast<int64_t>(std::llround(std::cos(ang) * static_cast<double>(radius)));
+            const int64_t oz = static_cast<int64_t>(std::llround(std::sin(ang) * static_cast<double>(radius)));
+            const Neuron::Universe::UniversePos pos{ center.x + ox, center.y, center.z + oz };
+            SpawnNpcGuardian(pos, siteId);
+            ++alive;
+        }
+        return siteId;
+    }
+
+    [[nodiscard]] int  NpcSiteAlive(uint16_t siteId) const
+    {
+        auto it = m_siteAlive.find(siteId);
+        return it == m_siteAlive.end() ? 0 : it->second;
+    }
+    [[nodiscard]] bool IsNpcSiteCleared(uint16_t siteId) const { return NpcSiteAlive(siteId) == 0; }
+    // Net ids of a site's surviving guardians (overview / targeting / tests).
+    [[nodiscard]] std::vector<uint32_t> NpcSiteMembers(uint16_t siteId)
+    {
+        std::vector<uint32_t> out;
+        m_world.ForEach<NpcAi, NetId>([&](NpcAi& ai, NetId& id) { if (ai.siteId == siteId) out.push_back(id.value); });
+        return out;
+    }
+    // Drain (and clear) the ids of sites cleared since the last call — fires once
+    // per site (the "site cleared" feedback hook; client SFX/notification is M7).
+    [[nodiscard]] std::vector<uint16_t> DrainClearedSites() { return std::exchange(m_clearedSites, {}); }
+
+    // --- eXplore — sensor range & fog of war (§13.0; area E) ------------------
+
+    // The set of net ids a player can currently see: their own entities, anything
+    // within sensor range of one of their units/base, the beacon graph (map
+    // infrastructure is always known, §13.12), and anything they have scanned.
+    // M3 keeps this interest-light — a visibility filter on the full snapshot path
+    // (full sector-subscription interest is M4).
+    [[nodiscard]] std::unordered_set<uint32_t> DetectedSet(uint32_t player)
+    {
+        // Gather the player's sensor sources (pos + range).
+        struct Eye { Neuron::Universe::UniversePos pos; float range; };
+        std::vector<Eye> eyes;
+        m_world.ForEach<OwnerId, Sensor, Transform>([&](OwnerId& o, Sensor& s, Transform& t) {
+            if (o.player == player) eyes.push_back({ t.pos, s.range });
+        });
+
+        std::unordered_set<uint32_t> seen;
+        const auto& revealed = m_revealed[player];
+        m_world.ForEach<NetId, Transform, ShapeId>([&](NetId& id, Transform& t, ShapeId& sh) {
+            // Own entities + always-known beacons are unconditionally visible.
+            const OwnerId* o = m_world.GetComponent<OwnerId>(EntityOf(id.value));
+            if ((o && o->player == player) || sh.kind == EntityKind::Structure) {
+                seen.insert(id.value);
+                return;
+            }
+            if (revealed.count(id.value)) { seen.insert(id.value); return; }
+            for (const Eye& e : eyes)
+                if (SensorDetect(e.pos, t.pos, e.range)) { seen.insert(id.value); return; }
+        });
+        return seen;
+    }
+
+    // Progress a timed scan of 'targetNetId' by 'player'; once dwell ≥ scanSeconds
+    // the target is permanently revealed to that player (feeds warp/jump target +
+    // the site, §13.7). Returns true when the scan completes this call.
+    bool OrderScan(uint32_t player, uint32_t targetNetId, float dt, float scanSeconds = kScanSeconds)
+    {
+        if (!m_world.IsAlive(EntityOf(targetNetId))) return false;
+        if (m_revealed[player].count(targetNetId)) return true; // already known
+        float& dwell = m_scanDwell[(static_cast<uint64_t>(player) << 32) | targetNetId];
+        dwell += dt;
+        if (dwell >= scanSeconds) { m_revealed[player].insert(targetNetId); return true; }
+        return false;
+    }
+
+    [[nodiscard]] bool IsRevealedTo(uint32_t player, uint32_t targetNetId)
+    {
+        return m_revealed[player].count(targetNetId) != 0;
+    }
+
+    // Full snapshot filtered to what 'player' can detect (area E fog). Own/beacon/
+    // scanned/in-range entities only; the M5 per-client snapshot will build on this.
+    [[nodiscard]] Snapshot BuildSnapshotFor(uint32_t player)
+    {
+        const auto seen = DetectedSet(player);
+        Snapshot snap;
+        snap.tick = m_tick;
+        m_world.ForEach<NetId, Transform, ShapeId>([&](NetId& id, Transform& t, ShapeId& s) {
+            if (!seen.count(id.value)) return;
+            snap.entities.push_back(MakeSnapshotEntity(id, t, s));
+        });
+        return snap;
+    }
+
     // Remove a player's base from the universe (on disconnect/timeout). Returns
     // true if a base for that net id existed.
     bool DespawnBase(uint32_t netId)
@@ -335,9 +472,14 @@ public:
         return true;
     }
 
-    // Advance the simulation one fixed step (movement, then navigation).
+    // Advance the simulation one fixed step. Order is fixed for determinism (§7.2):
+    // AI sets NPC orders, fleet orders steer, combat applies damage + removes the
+    // dead, then movement/navigation/economy integrate.
     void Step(float dtSeconds)
     {
+        AiSystem(dtSeconds);
+        FleetOrderSystem(dtSeconds);
+        CombatSystem(dtSeconds);
         MovementSystem(m_world, dtSeconds);
         NavigationSystem(m_world, m_nav, dtSeconds);
         HarvestSystem(dtSeconds);
@@ -345,26 +487,55 @@ public:
         ++m_tick;
     }
 
-    // Build the full snapshot for this tick (interest = everything until M4).
+    // Build the full snapshot for this tick (interest = everything until M4; the
+    // per-player fog-filtered variant is BuildSnapshotFor, area E).
     [[nodiscard]] Snapshot BuildSnapshot()
     {
         Snapshot snap;
         snap.tick = m_tick;
-        m_world.ForEach<NetId, Transform, ShapeId>([&snap](NetId& id, Transform& t, ShapeId& s) {
-            SnapshotEntity e;
-            e.netId       = id.value;
-            e.kind        = s.kind;
-            e.pos         = t.pos;
-            e.localOffset = t.localOffset;
-            e.hp          = 1000;
-            e.shapeId     = s.value;
-            snap.entities.push_back(e);
+        m_world.ForEach<NetId, Transform, ShapeId>([&](NetId& id, Transform& t, ShapeId& s) {
+            snap.entities.push_back(MakeSnapshotEntity(id, t, s));
         });
         return snap;
     }
 
     [[nodiscard]] uint32_t Tick() const noexcept { return m_tick; }
     [[nodiscard]] Neuron::ECS::World& World() noexcept { return m_world; }
+
+    // Deterministic 64-bit fingerprint of the authoritative sim state (§16.1/§16.2
+    // record/replay): hash every entity's key fields in netId order so two runs of
+    // the same input log produce identical hashes. Order-independent of ECS storage
+    // layout (sorted by netId first), so it's a stable cross-run determinism gate.
+    [[nodiscard]] uint64_t SimHash()
+    {
+        struct Row { uint32_t netId; int64_t x, y, z; int32_t hp; uint8_t kind, phase; uint32_t fuelBits; };
+        std::vector<Row> rows;
+        m_world.ForEach<NetId, Transform, ShapeId>([&](NetId& id, Transform& t, ShapeId& s) {
+            Row r{ id.value, t.pos.x, t.pos.y, t.pos.z, 0,
+                   static_cast<uint8_t>(s.kind), 0u, 0u };
+            if (const Health* h   = m_world.GetComponent<Health>(EntityOf(id.value)))   r.hp = h->hp;
+            if (const NavState* n = m_world.GetComponent<NavState>(EntityOf(id.value)))  r.phase = static_cast<uint8_t>(n->phase);
+            if (const Fuel* f     = m_world.GetComponent<Fuel>(EntityOf(id.value))) {
+                float v = f->current; std::memcpy(&r.fuelBits, &v, sizeof(v));
+            }
+            rows.push_back(r);
+        });
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.netId < b.netId; });
+
+        uint64_t h = 1469598103934665603ull; // FNV-1a offset basis
+        auto mix = [&h](const void* p, size_t n) {
+            const auto* b = static_cast<const uint8_t*>(p);
+            for (size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; }
+        };
+        mix(&m_tick, sizeof(m_tick));
+        for (const Row& r : rows) { // field-by-field (avoid struct padding in the hash)
+            mix(&r.netId, sizeof(r.netId)); mix(&r.x, sizeof(r.x));
+            mix(&r.y, sizeof(r.y)); mix(&r.z, sizeof(r.z)); mix(&r.hp, sizeof(r.hp));
+            mix(&r.kind, sizeof(r.kind)); mix(&r.phase, sizeof(r.phase));
+            mix(&r.fuelBits, sizeof(r.fuelBits));
+        }
+        return h;
+    }
 
     // Read a base's authoritative position (for tests / diagnostics).
     [[nodiscard]] bool GetBasePos(uint32_t netId, Neuron::Universe::UniversePos& out)
@@ -374,6 +545,20 @@ public:
     }
 
     static constexpr float kMaxBaseSpeed = 50.0f; // m/s cap (server validates intents)
+
+    // Placeholder fleet/combat balance (§13.7) — flat damage to Health, no fitting/
+    // resists; the real model + data-driven tuning land at M6. Kept as named code
+    // constants on purpose: M3 only needs "a fleet can clear a basic NPC site".
+    static constexpr float   kFleetMoveSpeed  = 2000.0f; // m/s commanded-ship sublight
+    static constexpr int32_t kShipHp          = 500;
+    static constexpr float   kShipWeaponRange = 1500.0f;
+    static constexpr float   kShipWeaponDps   = 60.0f;
+    static constexpr int32_t kNpcHp           = 300;
+    static constexpr float   kNpcWeaponRange  = 1400.0f;
+    static constexpr float   kNpcWeaponDps    = 20.0f;
+    static constexpr float   kNpcAggroRange   = 6000.0f;
+    static constexpr float   kNpcFleeHpFrac   = 0.15f;
+    static constexpr float   kScanSeconds     = 3.0f; // dwell to reveal a contact (area E)
 
 private:
     [[nodiscard]] Neuron::ECS::EntityHandle EntityOf(uint32_t netId) const
@@ -385,6 +570,254 @@ private:
     void StopMotion(uint32_t netId)
     {
         if (auto* v = m_world.GetComponent<Velocity>(EntityOf(netId))) v->metresPerSecond = { 0, 0, 0 };
+    }
+
+    // Build one snapshot record, reading real Health where present (combat needs
+    // live HP for the client's selected/target panels; scenery has no Health).
+    [[nodiscard]] SnapshotEntity MakeSnapshotEntity(const NetId& id, const Transform& t, const ShapeId& s)
+    {
+        SnapshotEntity e;
+        e.netId       = id.value;
+        e.kind        = s.kind;
+        e.pos         = t.pos;
+        e.localOffset = t.localOffset;
+        const Health* h = m_world.GetComponent<Health>(EntityOf(id.value));
+        e.hp          = h ? h->hp : 1000;
+        e.shapeId     = s.value;
+        const OwnerId* o = m_world.GetComponent<OwnerId>(EntityOf(id.value));
+        e.ownerPlayer = o ? o->player : 0;
+        return e;
+    }
+
+    // --- fleet command routing (area B) -------------------------------------
+
+    // Route one validated intent to a single owned unit. Move/Attack/Guard/Orbit/
+    // KeepRange/Retreat become FleetOrders (steered by FleetOrderSystem); Harvest/
+    // Warp/Jump dispatch to their own systems; Stop clears all orders. Returns
+    // false if the intent's target is invalid for this unit (rejected, §8.4).
+    bool ApplyIntentToUnit(uint32_t unitNet, const FleetCommand& cmd)
+    {
+        switch (cmd.intent) {
+        case IntentType::Stop:
+            ClearOrders(unitNet);
+            return true;
+        case IntentType::Harvest:
+            return OrderHarvest(unitNet, cmd.targetNetId);
+        case IntentType::Warp:
+            return BeginWarpTo(unitNet, cmd.targetPoint);
+        case IntentType::Jump:
+            return BeginJumpTo(unitNet, cmd.beacon) == JumpReject::Accepted;
+        case IntentType::Build:
+            return EnqueueBuild(unitNet); // 'unit' is the player's base
+
+        case IntentType::Move:
+            return PushOrder(unitNet, { OrderType::Move, 0, cmd.targetPoint, 0.0f }, cmd.queue);
+        case IntentType::Retreat: {
+            // Fall back to the owner's base position (player ≈ base net id).
+            const OwnerId* o = m_world.GetComponent<OwnerId>(EntityOf(unitNet));
+            Neuron::Universe::UniversePos home{};
+            if (!o || !GetBasePos(o->player, home)) return false;
+            return PushOrder(unitNet, { OrderType::Retreat, 0, home, 0.0f }, cmd.queue);
+        }
+        case IntentType::Attack:
+        case IntentType::Guard:
+        case IntentType::Orbit:
+        case IntentType::KeepRange: {
+            if (!m_world.IsAlive(EntityOf(cmd.targetNetId))) return false; // need a live target
+            const OrderType ot = (cmd.intent == IntentType::Attack)    ? OrderType::Attack
+                               : (cmd.intent == IntentType::Guard)     ? OrderType::Guard
+                               : (cmd.intent == IntentType::Orbit)     ? OrderType::Orbit
+                                                                       : OrderType::KeepRange;
+            return PushOrder(unitNet, { ot, cmd.targetNetId, {}, cmd.range }, cmd.queue);
+        }
+        }
+        return false;
+    }
+
+    // Set or queue (shift-chain) a unit's fleet order. Units without a FleetOrder
+    // (e.g. the base) can't take steering orders → rejected.
+    bool PushOrder(uint32_t unitNet, const FleetOrderEntry& entry, bool queue)
+    {
+        FleetOrder* fo = m_world.GetComponent<FleetOrder>(EntityOf(unitNet));
+        if (!fo) return false;
+        if (queue && fo->current.type != OrderType::Idle) {
+            fo->queue.push_back(entry);
+        } else {
+            fo->current = entry;
+            fo->queue.clear();
+            // A direct order pre-empts the harvest auto-pilot (area C).
+            if (HarvestOrder* ho = m_world.GetComponent<HarvestOrder>(EntityOf(unitNet)))
+                ho->phase = HarvestPhase::Idle;
+        }
+        return true;
+    }
+
+    void ClearOrders(uint32_t unitNet)
+    {
+        if (FleetOrder* fo = m_world.GetComponent<FleetOrder>(EntityOf(unitNet))) {
+            fo->current = {}; fo->queue.clear();
+        }
+        if (HarvestOrder* ho = m_world.GetComponent<HarvestOrder>(EntityOf(unitNet)))
+            ho->phase = HarvestPhase::Idle;
+        StopMotion(unitNet);
+    }
+
+    // Advance to the next queued order (or Idle) when the current one completes.
+    static void AdvanceOrder(FleetOrder& fo) noexcept
+    {
+        if (!fo.queue.empty()) { fo.current = fo.queue.front(); fo.queue.erase(fo.queue.begin()); }
+        else fo.current = {};
+    }
+
+    // Drive every unit's current FleetOrder one tick: steer toward Move/Retreat
+    // points and Guard/Orbit/KeepRange/Attack targets (Attack damage is the combat
+    // system's job; this just closes to weapon range). Pure-rule steering lives in
+    // Fleet.h; this sequences it across targets looked up by net id.
+    void FleetOrderSystem(float dt)
+    {
+        const double maxStep = static_cast<double>(kFleetMoveSpeed) * static_cast<double>(dt);
+        m_world.ForEach<FleetOrder, Transform, NetId>([&](FleetOrder& fo, Transform& tr, NetId& selfId) {
+            FleetOrderEntry& o = fo.current;
+            switch (o.type) {
+            case OrderType::Idle:
+                return;
+            case OrderType::Move:
+            case OrderType::Retreat:
+                if (StepStandoff(tr, o.targetPoint, maxStep, 0.0)) AdvanceOrder(fo);
+                return;
+            case OrderType::Attack:
+            case OrderType::Guard:
+            case OrderType::Orbit:
+            case OrderType::KeepRange: {
+                Transform* tgt = m_world.GetComponent<Transform>(EntityOf(o.targetNetId));
+                if (!tgt || !m_world.IsAlive(EntityOf(o.targetNetId))) { AdvanceOrder(fo); return; }
+                // Attack closes to *this unit's own* weapon range so it stops and fires;
+                // the other stances hold at the order's requested stand-off.
+                const double standoff = (o.type == OrderType::Attack)
+                                        ? static_cast<double>(AttackStandoff(EntityOf(selfId.value)))
+                                        : static_cast<double>(o.range);
+                StepStandoff(tr, tgt->pos, maxStep, standoff);
+                return;
+            }
+            }
+        });
+    }
+
+    // Keep an attacker just inside its own weapon range (so it stops and fires).
+    [[nodiscard]] float AttackStandoff(Neuron::ECS::EntityHandle attacker)
+    {
+        const Weapon* w = m_world.GetComponent<Weapon>(attacker);
+        return w ? w->range * 0.9f : 0.0f;
+    }
+
+    // Apply weapon damage from every unit whose current order is Attack to its
+    // target (if a live target is within weapon range). Dead targets are removed
+    // after the pass (so the ECS isn't mutated mid-ForEach); NPC deaths decrement
+    // their site's alive count and fire the "cleared" hook.
+    void CombatSystem(float dt)
+    {
+        struct Hit { uint32_t target; int32_t dmg; };
+        std::vector<Hit> hits;
+        m_world.ForEach<FleetOrder, Weapon, Transform, NetId>(
+            [&](FleetOrder& fo, Weapon& w, Transform& tr, NetId&) {
+                if (fo.current.type != OrderType::Attack) return;
+                const auto tgt = EntityOf(fo.current.targetNetId);
+                Transform* tt = m_world.GetComponent<Transform>(tgt);
+                Health*    th = m_world.GetComponent<Health>(tgt);
+                if (!tt || !th || !m_world.IsAlive(tgt)) return;
+                if (!InWeaponRange(w, tr.pos, tt->pos)) return;
+                const int32_t dmg = WeaponDamage(w, dt); // advances fractional 'pending'
+                if (dmg > 0) hits.push_back({ fo.current.targetNetId, dmg });
+            });
+
+        std::vector<uint32_t> killed;
+        for (const Hit& h : hits) {
+            Health* th = m_world.GetComponent<Health>(EntityOf(h.target));
+            if (th && th->hp > 0 && ApplyDamage(*th, h.dmg)) killed.push_back(h.target);
+        }
+        for (uint32_t netId : killed) DestroyUnit(netId);
+    }
+
+    // Remove a destroyed unit; if it was an NPC guardian, decrement its site and
+    // record the site as cleared once its last guardian dies. (Loot-on-kill is M6.)
+    void DestroyUnit(uint32_t netId)
+    {
+        const auto e = EntityOf(netId);
+        if (NpcAi* ai = m_world.GetComponent<NpcAi>(e)) {
+            auto it = m_siteAlive.find(ai->siteId);
+            if (it != m_siteAlive.end() && --it->second <= 0) {
+                it->second = 0;
+                m_clearedSites.push_back(ai->siteId);
+            }
+        }
+        if (m_world.IsAlive(e)) m_world.DestroyEntity(e);
+        m_netIdToEntity.erase(netId);
+    }
+
+    // --- NPC AI (area F) -----------------------------------------------------
+
+    uint32_t SpawnNpcGuardian(Neuron::Universe::UniversePos pos, uint16_t siteId)
+    {
+        const uint32_t netId = m_nextNetId++;
+        auto e = m_world.CreateEntity();
+        m_world.AddComponent<Transform>(e).pos = pos;
+        m_world.AddComponent<Velocity>(e);
+        m_world.AddComponent<NetId>(e).value = netId;
+        m_world.AddComponent<ShipTag>(e).shipType = 0;
+        m_world.AddComponent<ShapeId>(e) = { ShipShapeId(), EntityKind::NpcUnit };
+        m_world.AddComponent<OwnerId>(e).player = 0; // unowned = NPC
+        m_world.AddComponent<Health>(e)  = { kNpcHp, kNpcHp };
+        m_world.AddComponent<FleetOrder>(e);
+        m_world.AddComponent<Weapon>(e)  = { kNpcWeaponRange, kNpcWeaponDps };
+        auto& ai = m_world.AddComponent<NpcAi>(e);
+        ai.state      = AiState::Defend;
+        ai.home       = pos;
+        ai.aggroRange = kNpcAggroRange;
+        ai.fleeHpFrac = kNpcFleeHpFrac;
+        ai.siteId     = siteId;
+        m_netIdToEntity[netId] = e;
+        return netId;
+    }
+
+    // Drive every NPC: pick the nearest hostile (player-owned) unit, update the
+    // patrol/aggro/flee/defend state (pure NextAiState), and write the NPC's
+    // FleetOrder so the shared movement + combat systems carry it out.
+    void AiSystem(float dt)
+    {
+        (void)dt;
+        // Snapshot all player-owned combat targets (pos by net id).
+        struct Target { uint32_t netId; Neuron::Universe::UniversePos pos; };
+        std::vector<Target> targets;
+        m_world.ForEach<OwnerId, Transform, NetId, Health>(
+            [&](OwnerId& o, Transform& t, NetId& id, Health& h) {
+                if (o.player != 0 && h.hp > 0) targets.push_back({ id.value, t.pos });
+            });
+
+        m_world.ForEach<NpcAi, Transform, Health, FleetOrder>(
+            [&](NpcAi& ai, Transform& tr, Health& hp, FleetOrder& fo) {
+                // Nearest hostile.
+                uint32_t bestId = 0; double bestDist = 0.0;
+                for (const Target& t : targets) {
+                    const double d = UniverseDistance(tr.pos, t.pos);
+                    if (bestId == 0 || d < bestDist) { bestId = t.netId; bestDist = d; }
+                }
+                const bool hasTarget    = bestId != 0;
+                const bool targetInAggro = hasTarget && bestDist <= static_cast<double>(ai.aggroRange);
+                const float hpFrac = hp.maxHp > 0 ? static_cast<float>(hp.hp) / static_cast<float>(hp.maxHp) : 0.0f;
+
+                ai.state = NextAiState(ai, hasTarget, targetInAggro, hpFrac);
+                ai.targetNetId = targetInAggro ? bestId : 0;
+                switch (ai.state) {
+                case AiState::Aggro:
+                    fo.current = { OrderType::Attack, bestId, {}, 0.0f };
+                    break;
+                case AiState::Flee:
+                case AiState::Defend:
+                case AiState::Patrol:
+                    fo.current = { OrderType::Move, 0, ai.home, 0.0f }; // hold/return home
+                    break;
+                }
+            });
     }
 
     // Nearest beacon to 'pos'; returns its dataset index if within 'range' metres, else -1.
@@ -533,6 +966,11 @@ private:
         const uint32_t harv     = SpawnFleetShip(demoBase, ShipShapeId(), { bx + 220, -1500, 360 });
         OrderHarvest(harv, node);
         EnqueueBuild(demoBase);
+
+        // A basic guardian site a connecting player can warp their fleet to and
+        // clear (§13.7; area F). Placed well clear of the demo economy (> NPC aggro
+        // range) so it doesn't molest the autonomous harvester.
+        SpawnNpcSite({ bx, -1500, 16000 }, 3, 1500.0f);
     }
 
     // Populate the universe with a spread of static catalog props clustered around
@@ -572,6 +1010,13 @@ private:
     std::unordered_map<uint16_t, uint32_t>     m_beaconEntity; // beaconIndex → netId
     std::unordered_map<std::string, uint16_t>  m_beaconName;   // beacon name → beaconIndex
     Neuron::Universe::SectorId                 m_lastTravelSector{};
+    // NPC sites (area F): site id → guardians still alive; cleared sites pending drain.
+    std::unordered_map<uint16_t, int>          m_siteAlive;
+    std::vector<uint16_t>                      m_clearedSites;
+    uint16_t                                   m_nextSiteId{ 1 };
+    // Fog (area E): per-player permanently-revealed contacts + in-progress scan dwell.
+    std::unordered_map<uint32_t, std::unordered_set<uint32_t>> m_revealed;
+    std::unordered_map<uint64_t, float>        m_scanDwell; // (player<<32 | target) → seconds
     uint32_t m_nextNetId{ 1 };
     uint32_t m_tick{ 0 };
 };

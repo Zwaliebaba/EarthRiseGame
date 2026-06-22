@@ -119,6 +119,13 @@ public:
             m_socket->SendTo(m_serverEp, *dg);
     }
 
+    void SendFleetCommand(std::span<const uint8_t> body) override
+    {
+        if (!m_conn) return;
+        if (auto dg = m_conn->SendFleetCommand(body))
+            m_socket->SendTo(m_serverEp, *dg);
+    }
+
     bool PollSnapshot(std::span<uint8_t> outBuf, size_t& outSize) override
     {
         if (m_snapQueue.empty()) return false;

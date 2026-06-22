@@ -14,6 +14,8 @@ struct ReplicaEntity
     float    x{ 0 }, y{ 0 }, z{ 0 }; // sector-local position from last snapshot
     uint8_t  entityType{ 0 };
     uint16_t shapeId{ 0xFFFF }; // ShapeCatalog index (selects the mesh); kInvalidShapeId
+    int32_t  hp{ 0 };            // last-snapshot health (selected/target panel, §22.2)
+    uint32_t ownerPlayer{ 0 };   // owning player net id (0 = NPC/unowned); drives IFF
     bool     valid{ false };
 };
 

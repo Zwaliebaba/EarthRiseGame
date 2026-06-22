@@ -122,9 +122,21 @@ public:
     // Queue a command to the server (ReliableOrdered). Returns the datagram, if ready.
     std::optional<std::vector<uint8_t>> SendCommand(std::span<const uint8_t> body)
     {
+        return SendTyped(MsgType::Command, body);
+    }
+
+    // Queue an RTS fleet intent (§23.4; M3 area B). Same reliable path, distinct
+    // message type so the server routes it to ApplyFleetCommand.
+    std::optional<std::vector<uint8_t>> SendFleetCommand(std::span<const uint8_t> body)
+    {
+        return SendTyped(MsgType::FleetCommand, body);
+    }
+
+    std::optional<std::vector<uint8_t>> SendTyped(MsgType type, std::span<const uint8_t> body)
+    {
         if (!IsConnected() || !m_channel) return std::nullopt;
         std::vector<uint8_t> payload;
-        WriteMessage(payload, Channel::ReliableOrdered, MsgType::Command, body);
+        WriteMessage(payload, Channel::ReliableOrdered, type, body);
         std::vector<uint8_t> dg;
         if (!SealEncrypted(payload, dg)) return std::nullopt;
         return dg;

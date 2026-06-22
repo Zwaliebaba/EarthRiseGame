@@ -24,3 +24,6 @@ NEURON_DEFINE_COMPONENT(Neuron::Sim::BuildQueue,      Neuron::Sim::Slot_BuildQue
 NEURON_DEFINE_COMPONENT(Neuron::Sim::FleetMember,     Neuron::Sim::Slot_FleetMember);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::Sensor,          Neuron::Sim::Slot_Sensor);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::HarvestOrder,    Neuron::Sim::Slot_HarvestOrder);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::FleetOrder,      Neuron::Sim::Slot_FleetOrder);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::Weapon,          Neuron::Sim::Slot_Weapon);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::NpcAi,           Neuron::Sim::Slot_NpcAi);

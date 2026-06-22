@@ -5,7 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "Command.h"
 #include "Economy.h"
+#include "Fleet.h"
 #include "Navigation.h"
 #include "ServerUniverse.h"
 #include "ShapeCatalog.h"
@@ -45,6 +47,9 @@ NEURON_DEFINE_COMPONENT(Neuron::Sim::BuildQueue, Neuron::Sim::Slot_BuildQueue);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::FleetMember, Neuron::Sim::Slot_FleetMember);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::Sensor, Neuron::Sim::Slot_Sensor);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::HarvestOrder, Neuron::Sim::Slot_HarvestOrder);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::FleetOrder, Neuron::Sim::Slot_FleetOrder);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::Weapon, Neuron::Sim::Slot_Weapon);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::NpcAi, Neuron::Sim::Slot_NpcAi);
 
 namespace
 {
@@ -738,6 +743,216 @@ namespace NeuronCoreTest
           "tuning { warp_speed_ship = 0 }\n"); // warp speed must be > 0
       std::vector<std::string> errs;
       Assert::IsTrue(!ValidateUniverseDataset(ds, errs));
+    }
+  };
+
+  // --- fleet command / fog / PvE (M3 areas B, E, F) ---------------------------
+  // Mirrors NeuronTools/testrunner/FleetTests.cpp.
+
+  const char* kFleetSrc =
+      "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
+      "economy { fleet_cap = 8  cargo_capacity = 500  storage_capacity = 2000  harvest_rate = 100\n"
+      "          sensor_range_ship = 8000  sensor_range_base = 20000  build_ore = 100  build_ice = 0\n"
+      "          build_seconds = 1  build_ship_type = 1  harvester_speed = 4000  harvest_range = 600 }\n";
+
+  TEST_CLASS(FleetCommandTests)
+  {
+  public:
+    TEST_METHOD(CommandRoundTrips)
+    {
+      FleetCommand c;
+      c.clientTick = 42; c.intent = IntentType::Attack; c.queue = true;
+      c.units = { 7, 9, 11 }; c.targetNetId = 1234; c.targetPoint = { 100, -200, 300 };
+      c.range = 750.0f; c.beacon = "RIM";
+      FleetCommand d;
+      Assert::IsTrue(DecodeFleetCommand(EncodeFleetCommand(c), d));
+      Assert::IsTrue(d.intent == IntentType::Attack && d.queue && d.units.size() == 3);
+      Assert::IsTrue(d.units[2] == 11 && d.targetNetId == 1234 && d.range == 750.0f);
+      Assert::IsTrue(d.targetPoint == UniversePos({ 100, -200, 300 }) && d.beacon == "RIM");
+    }
+
+    TEST_METHOD(DecodeRejectsWrongVersion)
+    {
+      auto bytes = EncodeFleetCommand({});
+      bytes[0] = 0xEE;
+      FleetCommand d;
+      Assert::IsTrue(!DecodeFleetCommand(bytes, d));
+    }
+
+    TEST_METHOD(MoveIntentSteersOwnedShipToPoint)
+    {
+      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint32_t ship = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
+      FleetCommand cmd; cmd.intent = IntentType::Move; cmd.units = { ship }; cmd.targetPoint = { 6000, 0, 0 };
+      Assert::IsTrue(su.ApplyFleetCommand(base, cmd) == 1);
+      for (int i = 0; i < 200 && su.FleetOrderOf(ship)->current.type != OrderType::Idle; ++i) su.Step(0.1f);
+      UniversePos p; Assert::IsTrue(su.GetBasePos(ship, p));
+      Assert::IsTrue(p == UniversePos({ 6000, 0, 0 }));
+    }
+
+    TEST_METHOD(CommandRejectedForUnownedUnit)
+    {
+      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      const uint32_t baseA = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint32_t baseB = su.SpawnBase({ 0, 5000, 0 }, { 0, 0, 0 });
+      const uint32_t shipB = su.SpawnFleetShip(baseB, ServerUniverse::ShipShapeId(), { 0, 5000, 0 });
+      FleetCommand cmd; cmd.intent = IntentType::Move; cmd.units = { shipB }; cmd.targetPoint = { 9999, 0, 0 };
+      Assert::IsTrue(su.ApplyFleetCommand(baseA, cmd) == 0);
+      Assert::IsTrue(su.FleetOrderOf(shipB)->current.type == OrderType::Idle);
+    }
+
+    TEST_METHOD(OrdersQueuePreserveOrder)
+    {
+      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint32_t ship = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
+      auto move = [&](int64_t x, bool q) {
+        FleetCommand c; c.intent = IntentType::Move; c.units = { ship }; c.targetPoint = { x, 0, 0 }; c.queue = q;
+        Assert::IsTrue(su.ApplyFleetCommand(base, c) == 1);
+      };
+      move(2000, false); move(4000, true); move(6000, true);
+      FleetOrder* fo = su.FleetOrderOf(ship);
+      Assert::IsTrue(fo->current.targetPoint.x == 2000 && fo->queue.size() == 2);
+      Assert::IsTrue(fo->queue[0].targetPoint.x == 4000 && fo->queue[1].targetPoint.x == 6000);
+    }
+
+    TEST_METHOD(BuildIntentEnqueuesAtBase)
+    {
+      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      su.StorageOf(base)->amount[kOre] = 1000.0f;
+      FleetCommand c; c.intent = IntentType::Build; c.units = { base };
+      Assert::IsTrue(su.ApplyFleetCommand(base, c) == 1 && su.BuildQueueOf(base)->active);
+      for (int i = 0; i < 40 && su.OwnedShipCount(base) < 1; ++i) su.Step(0.1f);
+      Assert::IsTrue(su.OwnedShipCount(base) == 1);
+    }
+
+    TEST_METHOD(DetectedSetAndFog)
+    {
+      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint32_t nearN = su.SpawnResourceNode(ResourceType::Ore, 100.0f, { 10000, 0, 0 });
+      const uint32_t farN  = su.SpawnResourceNode(ResourceType::Ore, 100.0f, { 80000, 0, 0 });
+      const auto seen = su.DetectedSet(base);
+      Assert::IsTrue(seen.count(base) == 1 && seen.count(nearN) == 1 && seen.count(farN) == 0);
+      Assert::IsTrue(su.BuildSnapshot().entities.size() > su.BuildSnapshotFor(base).entities.size());
+      Assert::IsTrue(!su.OrderScan(base, farN, 2.0f));
+      Assert::IsTrue(su.OrderScan(base, farN, 2.0f) && su.IsRevealedTo(base, farN));
+    }
+
+    TEST_METHOD(AiStateTransitions)
+    {
+      NpcAi ai; ai.aggroRange = 5000.0f; ai.fleeHpFrac = 0.2f;
+      Assert::IsTrue(NextAiState(ai, false, false, 1.0f) == AiState::Defend);
+      Assert::IsTrue(NextAiState(ai, true, true, 1.0f) == AiState::Aggro);
+      Assert::IsTrue(NextAiState(ai, true, false, 1.0f) == AiState::Defend);
+      Assert::IsTrue(NextAiState(ai, true, true, 0.1f) == AiState::Flee);
+    }
+
+    TEST_METHOD(LowDpsStillDamagesAtSimTickRate)
+    {
+      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint32_t ship = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
+      su.WeaponOf(ship)->dps = 20.0f; // below the 30 Hz tick → < 1 dmg per tick
+      const uint16_t site = su.SpawnNpcSite({ 200, 0, 0 }, 1, 50.0f);
+      const uint32_t npc = su.NpcSiteMembers(site).front();
+      FleetCommand atk; atk.intent = IntentType::Attack; atk.units = { ship }; atk.targetNetId = npc;
+      Assert::IsTrue(su.ApplyFleetCommand(base, atk) == 1);
+      const int32_t hp0 = su.HealthOf(npc)->hp;
+      for (int i = 0; i < 90; ++i) su.Step(1.0f / 30.0f);
+      Assert::IsTrue(su.HealthOf(npc)->hp < hp0);
+    }
+
+    TEST_METHOD(AttackerClosesToItsOwnWeaponRange)
+    {
+      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint32_t ship = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
+      const float shipRange = su.WeaponOf(ship)->range;
+      const uint16_t site = su.SpawnNpcSite({ 40000, 0, 0 }, 1, 50.0f);
+      const uint32_t npc = su.NpcSiteMembers(site).front();
+      su.WeaponOf(npc)->range = shipRange * 4.0f;
+      su.NpcAiOf(npc)->aggroRange = 0.0f;
+      FleetCommand atk; atk.intent = IntentType::Attack; atk.units = { ship }; atk.targetNetId = npc;
+      Assert::IsTrue(su.ApplyFleetCommand(base, atk) == 1);
+      const int32_t hp0 = su.HealthOf(npc)->hp;
+      for (int i = 0; i < 200 && su.HealthOf(npc) && su.HealthOf(npc)->hp == hp0; ++i) su.Step(0.1f);
+      UniversePos sp, np;
+      Assert::IsTrue(su.GetBasePos(ship, sp) && su.GetBasePos(npc, np));
+      Assert::IsTrue(UniverseDistance(sp, np) <= static_cast<double>(shipRange));
+      Assert::IsTrue(su.HealthOf(npc)->hp < hp0);
+    }
+
+    TEST_METHOD(FleetClearsNpcSiteAndFiresOnce)
+    {
+      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint16_t site = su.SpawnNpcSite({ 4000, 0, 0 }, 2, 400.0f);
+      std::vector<uint32_t> ships;
+      for (int i = 0; i < 3; ++i) ships.push_back(su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 4000, 0, 0 }));
+      for (int i = 0; i < 600 && !su.IsNpcSiteCleared(site); ++i) {
+        auto members = su.NpcSiteMembers(site);
+        if (!members.empty()) {
+          FleetCommand atk; atk.intent = IntentType::Attack; atk.units = ships; atk.targetNetId = members.front();
+          su.ApplyFleetCommand(base, atk);
+        }
+        su.Step(0.1f);
+      }
+      Assert::IsTrue(su.IsNpcSiteCleared(site));
+      auto cleared = su.DrainClearedSites();
+      Assert::IsTrue(cleared.size() == 1 && cleared.front() == site);
+      Assert::IsTrue(su.DrainClearedSites().empty());
+    }
+  };
+
+  // --- record/replay determinism (M3 area H) ----------------------------------
+  // Mirrors NeuronTools/testrunner/DeterminismTests.cpp (sans the NeuronClient
+  // ScriptedController dep — commands are applied inline).
+
+  const char* kDetSrc =
+      "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
+      "beacon HUB { region = R pos = 0 0 0       links = RIM kind = public }\n"
+      "beacon RIM { region = R pos = 200000 0 0  links = HUB kind = public }\n"
+      "tuning { warp_align = 0 warp_speed_ship = 50000 jump_fuel_ship = 10 jump_spool_ship = 0.5\n"
+      "         jump_cooldown = 0.5 beacon_range = 3000 ship_fuel_max = 100 base_fuel_max = 300 }\n"
+      "economy { fleet_cap = 8 cargo_capacity = 200 storage_capacity = 10000 harvest_rate = 1000\n"
+      "          build_ore = 300 build_ice = 0 build_seconds = 0.1 build_ship_type = 1\n"
+      "          harvester_speed = 100000 harvest_range = 600 sensor_range_ship = 8000\n"
+      "          sensor_range_base = 50000 }\n";
+
+  TEST_CLASS(DeterminismTests)
+  {
+    static uint64_t RunScript(const char* src, uint32_t ticks, bool withCommands)
+    {
+      ServerUniverse su(false);
+      UniverseDataset ds = ParseUniverseOk(src); su.LoadUniverse(ds);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint32_t harv = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 500, 0, 0 });
+      const uint32_t node = su.SpawnResourceNode(ResourceType::Ore, 5000.0f, { 4000, 0, 0 });
+      for (uint32_t t = 0; t < ticks; ++t) {
+        if (withCommands && t == 1) {
+          FleetCommand h; h.intent = IntentType::Harvest; h.units = { harv }; h.targetNetId = node;
+          su.ApplyFleetCommand(base, h);
+        }
+        if (withCommands && t == 60) {
+          FleetCommand j; j.intent = IntentType::Jump; j.units = { harv }; j.beacon = "RIM";
+          su.ApplyFleetCommand(base, j);
+        }
+        su.Step(0.1f);
+      }
+      return su.SimHash();
+    }
+
+  public:
+    TEST_METHOD(SameLogReproducesSimHash)
+    {
+      Assert::IsTrue(RunScript(kDetSrc, 120, true) == RunScript(kDetSrc, 120, true));
+    }
+    TEST_METHOD(DivergentLogChangesSimHash)
+    {
+      Assert::IsTrue(RunScript(kDetSrc, 120, true) != RunScript(kDetSrc, 120, false));
     }
   };
 } // namespace NeuronCoreTest

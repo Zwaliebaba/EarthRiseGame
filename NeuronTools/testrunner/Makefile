@@ -10,11 +10,12 @@ CXX ?= g++
 # The sim integration tests pull in NeuronCore sim headers, which include
 # <DirectXMath.h> for XMFLOAT3; dxmath_shim/ supplies a minimal stand-in so the
 # platform-independent catalog/snapshot/ECS logic builds on Linux.
-CXXFLAGS ?= -std=c++23 -Wall -Wextra -Wpedantic -O2 -g -I../../NeuronCore -Idxmath_shim
+CXXFLAGS ?= -std=c++23 -Wall -Wextra -Wpedantic -O2 -g -I../../NeuronCore -I../../NeuronClient -Idxmath_shim
 
 SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParseTests.cpp \
         CmoAnimationTests.cpp ShapeCatalogTests.cpp UiLayoutTests.cpp StringTableTests.cpp \
-        UniverseDataTests.cpp NavigationTests.cpp EconomyTests.cpp HarvestTests.cpp
+        UniverseDataTests.cpp NavigationTests.cpp EconomyTests.cpp HarvestTests.cpp \
+        FleetTests.cpp ClientFleetTests.cpp DeterminismTests.cpp
 BIN := testrunner
 
 .PHONY: all build run clean
