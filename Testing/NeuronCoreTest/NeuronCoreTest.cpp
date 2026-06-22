@@ -588,6 +588,92 @@ namespace NeuronCoreTest
     }
   };
 
+  // --- Contested-sector scale harness (M4 area J; §17 Done, App. B) -----------
+  // The Windows ERHeadless run gates on wall-clock sim p99 at hundreds of live UDP
+  // sessions; this mirrors the platform-independent pipeline at scale through
+  // ServerUniverse directly (the per-client byte budget, interest culling, RAM,
+  // and determinism). Counts are kept modest so MSTest stays quick.
+
+  TEST_CLASS(LoadHarnessTests)
+  {
+    static constexpr size_t kSafeMtu = 1100;
+
+    // Run the full per-tick pipeline until every client converges; return the tick
+    // count and whether the safe-MTU budget held for every client every tick.
+    static int RunToConvergence(ServerUniverse& su, const std::vector<uint32_t>& clients,
+                                size_t cap, int maxTicks, bool& budgetHeld, uint64_t& baselineBytes)
+    {
+      su.SetVisibleCap(cap);
+      su.Step(0.1f);
+      std::vector<DeltaDecodeState> decoders(clients.size());
+      std::vector<size_t> want(clients.size());
+      for (size_t i = 0; i < clients.size(); ++i) {
+        std::vector<uint32_t> vis; su.Interest().VisibleTo(clients[i], vis); want[i] = vis.size();
+      }
+      budgetHeld = true;
+      int convergedAt = -1;
+      for (int t = 0; t < maxTicks && convergedAt < 0; ++t) {
+        bool all = true;
+        for (size_t i = 0; i < clients.size(); ++i) {
+          const DeltaSnapshot snap = su.BuildClientSnapshot(clients[i], kSafeMtu);
+          const auto bytes = EncodeDeltaSnapshot(snap);
+          if (bytes.size() > kSafeMtu) budgetHeld = false;
+          if (!snap.records.empty()) {
+            decoders[i].Apply(bytes);
+            su.RecordClientSnapshotSent(clients[i], snap);
+            su.AckClient(clients[i], su.Tick());
+          }
+          if (decoders[i].Size() < want[i]) all = false;
+        }
+        if (all) convergedAt = t + 1;
+        su.Step(0.1f);
+      }
+      baselineBytes = su.TotalClientBaselineBytes();
+      return convergedAt;
+    }
+
+    static std::vector<uint32_t> Contested(ServerUniverse& su, int n)
+    {
+      std::vector<uint32_t> c;
+      for (int i = 0; i < n; ++i) c.push_back(su.SpawnBase({ 200 + 5 * i, 0, 0 }, { 0, 0, 0 }));
+      return c;
+    }
+    static std::vector<uint32_t> Dispersed(ServerUniverse& su, int n)
+    {
+      std::vector<uint32_t> c;
+      for (int i = 0; i < n; ++i)
+        c.push_back(su.SpawnBase({ static_cast<int64_t>(i) * Neuron::Universe::kSectorSize * 6, 0, 0 }, { 0, 0, 0 }));
+      return c;
+    }
+
+  public:
+    TEST_METHOD(ContestedSectorHoldsBandwidthAndConverges)
+    {
+      ServerUniverse su(false);
+      bool held = false; uint64_t ram = 0;
+      const int ticks = RunToConvergence(su, Contested(su, 80), 1024, 60, held, ram);
+      Assert::IsTrue(ticks > 0); // converged
+      Assert::IsTrue(held);      // never over the MTU budget
+    }
+
+    TEST_METHOD(DispersedControlIsCheaperThanContested)
+    {
+      ServerUniverse a(false); bool h1 = false; uint64_t ramC = 0;
+      RunToConvergence(a, Contested(a, 80), 1024, 60, h1, ramC);
+      ServerUniverse b(false); bool h2 = false; uint64_t ramD = 0;
+      RunToConvergence(b, Dispersed(b, 80), 1024, 60, h2, ramD);
+      Assert::IsTrue(ramD * 4 < ramC); // interest culling: far smaller baseline (R23)
+    }
+
+    TEST_METHOD(ContestedPipelineIsDeterministic)
+    {
+      ServerUniverse a(false); bool h = false; uint64_t r = 0;
+      RunToConvergence(a, Contested(a, 60), 1024, 60, h, r);
+      ServerUniverse b(false); RunToConvergence(b, Contested(b, 60), 1024, 60, h, r);
+      Assert::AreEqual(a.SimHash(), b.SimHash());
+    }
+  };
+
   // --- Token-indexed connection routing (M4 area G; §9) -----------------------
 
   TEST_CLASS(ConnectionTableTests)

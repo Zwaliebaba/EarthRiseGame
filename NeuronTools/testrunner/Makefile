@@ -18,7 +18,8 @@ SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParse
         FleetTests.cpp ClientFleetTests.cpp DeterminismTests.cpp InterestTests.cpp \
         SnapshotDeltaTests.cpp SnapshotSchedulerTests.cpp SnapshotJobsTests.cpp \
         TimeDilationTests.cpp TelemetryTests.cpp ConnectionTableTests.cpp \
-        CameraTests.cpp OnboardingTests.cpp PickingTests.cpp HudOverlayTests.cpp
+        LoadHarnessTests.cpp CameraTests.cpp OnboardingTests.cpp PickingTests.cpp \
+        HudOverlayTests.cpp
 BIN := testrunner
 
 .PHONY: all build run clean
