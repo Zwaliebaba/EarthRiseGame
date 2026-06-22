@@ -20,6 +20,7 @@
 
 #include "pch.h"
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <format>
@@ -233,14 +234,23 @@ int main()
       host.OnDatagram(from, std::span<const uint8_t>(buf.data(), static_cast<size_t>(n)), out);
     }
 
-    // 2) Advance the fixed-step simulation.
+    // 2) Advance the fixed-step simulation. Each step is timed and reported to the
+    //    accumulator's dilation controller (M4 area H, §7.2): if a tick overruns its
+    //    real-time budget, in-game time slows toward the floor instead of dropping
+    //    ticks. The published factor rides the clock-sync echo (§8.5).
     acc.Tick();
     bool stepped = false;
     while (acc.ConsumeStep())
     {
+      const auto t0 = std::chrono::steady_clock::now();
       universe.Step(static_cast<float>(Neuron::Sim::kSimDeltaSeconds));
+      const double costSec =
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+      acc.ReportTickCost(costSec);
       stepped = true;
     }
+    // acc.DilationFactor() is the published load-shedding state (§8.5 clock echo is
+    // the remaining client-facing wiring; the server-side floor is active here).
 
     // 3) Emit snapshots at the 20 Hz cadence (every ~1.5 sim ticks).
     const uint64_t simTick = acc.GetSimTickCount();

@@ -16,6 +16,7 @@
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
 #include "SnapshotScheduler.h"
+#include "TimeDilation.h"
 #include "UniverseData.h"
 #include "UniverseSource.h" // local copy of the build-time text parser (see header)
 
@@ -425,6 +426,61 @@ namespace NeuronCoreTest
       }
       Assert::IsTrue(sawCapBind);
       Assert::AreEqual(want, client.Size());
+    }
+  };
+
+  // --- Time dilation (M4 area H; §7.2 / §9) -----------------------------------
+
+  TEST_CLASS(DilationTests)
+  {
+    static constexpr double kBudget = 1.0 / 30.0;
+    static double Settle(DilationController& c, const DilationConfig& cfg, double cost, int n)
+    {
+      double f = c.Factor();
+      for (int i = 0; i < n; ++i) f = c.Update(cost, kBudget, cfg);
+      return f;
+    }
+
+  public:
+    TEST_METHOD(FullSpeedWhenUnderBudget)
+    {
+      DilationController c; DilationConfig cfg;
+      Assert::IsTrue(Settle(c, cfg, kBudget * 0.5, 50) >= 0.999);
+      Assert::IsTrue(!c.IsDilated());
+    }
+
+    TEST_METHOD(DilatesTowardOnsetOverLoad)
+    {
+      DilationController c; DilationConfig cfg;
+      const double f = Settle(c, cfg, kBudget * 3.0, 200);
+      Assert::IsTrue(f > 0.30 && f < 0.37); // ~ onset/load = 1/3
+      Assert::IsTrue(c.IsDilated());
+    }
+
+    TEST_METHOD(ClampsAtFloorUnderExtremeOverload)
+    {
+      DilationController c; DilationConfig cfg;
+      const double f = Settle(c, cfg, kBudget * 50.0, 300);
+      Assert::IsTrue(f >= cfg.floor - 1e-9 && f <= cfg.floor + 1e-6);
+    }
+
+    TEST_METHOD(RecoversToFullSpeedWhenLoadDrops)
+    {
+      DilationController c; DilationConfig cfg;
+      Settle(c, cfg, kBudget * 4.0, 200);
+      Assert::IsTrue(c.IsDilated());
+      Assert::IsTrue(Settle(c, cfg, kBudget * 0.2, 500) >= 0.999);
+      Assert::IsTrue(!c.IsDilated());
+    }
+
+    TEST_METHOD(FactorStaysWithinBounds)
+    {
+      DilationController c; DilationConfig cfg;
+      for (int i = 0; i < 500; ++i) {
+        const double cost = (i % 2 == 0) ? kBudget * 8.0 : kBudget * 0.1;
+        const double f = c.Update(cost, kBudget, cfg);
+        Assert::IsTrue(f >= cfg.floor - 1e-9 && f <= 1.0 + 1e-9);
+      }
     }
   };
 

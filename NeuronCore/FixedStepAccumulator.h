@@ -15,6 +15,8 @@
 #endif
 #include <Windows.h>
 
+#include "TimeDilation.h" // M4 area H — bounded time-dilation policy (§7.2)
+
 #include <cassert>
 #include <cstdint>
 
@@ -49,6 +51,7 @@ public:
         m_accumulator    = 0.0;
         m_simTickCount   = 0;
         m_stepsThisFrame = 0;
+        m_dilation.Reset();
     }
 
     // Measure elapsed wall time since the last Tick() call and add to accumulator.
@@ -66,10 +69,29 @@ public:
         const double maxElapsed = kSimDeltaSeconds * kMaxCatchUpTicksPerFrame;
         if (elapsed > maxElapsed) elapsed = maxElapsed;
 
-        m_accumulator    += elapsed;
+        // Time dilation (M4 area H, §7.2): when the sim is overrunning its budget,
+        // the controller's factor < 1 throttles how much real time enters the
+        // accumulator, so fewer fixed steps drain per real second — in-game time
+        // slows toward the floor instead of dropping ticks. Step count/order are
+        // untouched (SimHash unchanged); only real-time spacing dilates.
+        m_accumulator    += elapsed * m_dilation.Factor();
         m_last            = now;
         m_stepsThisFrame  = 0;
     }
+
+    // Feed the real time the last sim tick took (the server measures each
+    // SimulateOneTick) so the dilation controller can stretch/recover the clock.
+    // Returns the current dilation factor (∈ [floor, 1]) for the §8.5 clock echo.
+    double ReportTickCost(double measuredSeconds) noexcept
+    {
+        return m_dilation.Update(measuredSeconds, kSimDeltaSeconds, m_dilationCfg);
+    }
+
+    // Current dilation factor — published in the clock-sync echo (§8.5) so clients
+    // interpolate against the dilated authoritative clock, not wall-clock.
+    [[nodiscard]] double DilationFactor() const noexcept { return m_dilation.Factor(); }
+    [[nodiscard]] bool   IsDilated() const noexcept { return m_dilation.IsDilated(); }
+    [[nodiscard]] DilationConfig& DilationCfg() noexcept { return m_dilationCfg; }
 
     // Returns true and deducts one step's worth of time if a full step is ready
     // AND we have not yet consumed kMaxCatchUpTicksPerFrame steps this frame.
@@ -108,11 +130,13 @@ public:
     }
 
 private:
-    LARGE_INTEGER m_freq{};
-    LARGE_INTEGER m_last{};
-    double        m_accumulator{ 0.0 };
-    uint64_t      m_simTickCount{ 0 };
-    int           m_stepsThisFrame{ 0 };
+    LARGE_INTEGER      m_freq{};
+    LARGE_INTEGER      m_last{};
+    double             m_accumulator{ 0.0 };
+    uint64_t           m_simTickCount{ 0 };
+    int                m_stepsThisFrame{ 0 };
+    DilationController m_dilation{};     // M4 area H (§7.2)
+    DilationConfig     m_dilationCfg{};
 };
 
 } // namespace Neuron::Sim
