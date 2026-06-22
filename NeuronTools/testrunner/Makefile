@@ -16,7 +16,9 @@ SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParse
         CmoAnimationTests.cpp ShapeCatalogTests.cpp UiLayoutTests.cpp StringTableTests.cpp \
         UniverseDataTests.cpp NavigationTests.cpp EconomyTests.cpp HarvestTests.cpp \
         FleetTests.cpp ClientFleetTests.cpp DeterminismTests.cpp InterestTests.cpp \
-        SnapshotDeltaTests.cpp CameraTests.cpp OnboardingTests.cpp PickingTests.cpp \
+        SnapshotDeltaTests.cpp SnapshotSchedulerTests.cpp SnapshotJobsTests.cpp \
+        TimeDilationTests.cpp TelemetryTests.cpp ConnectionTableTests.cpp \
+        LoadHarnessTests.cpp CameraTests.cpp OnboardingTests.cpp PickingTests.cpp \
         HudOverlayTests.cpp
 BIN := testrunner
 

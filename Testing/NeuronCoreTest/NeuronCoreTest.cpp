@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "Command.h"
+#include "ConnectionTable.h"
 #include "Economy.h"
 #include "Fleet.h"
 #include "Interest.h"
@@ -15,6 +16,10 @@
 #include "ServerUniverse.h"
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
+#include "SnapshotJobs.h"
+#include "SnapshotScheduler.h"
+#include "Telemetry.h"
+#include "TimeDilation.h"
 #include "UniverseData.h"
 #include "UniverseSource.h" // local copy of the build-time text parser (see header)
 
@@ -315,6 +320,412 @@ namespace NeuronCoreTest
     }
   };
 
+  // --- Priority / quota snapshot scheduler (M4 area E; §8.4) ------------------
+
+  TEST_CLASS(SchedulerTests)
+  {
+    // Spawn a base and 'n' static scenery props in its sector; returns the base id.
+    static uint32_t SeedScene(ServerUniverse& su, int n)
+    {
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      for (int i = 0; i < n; ++i) su.SpawnProp(0, { 100 + 10 * i, 0, 0 });
+      return base;
+    }
+    static size_t VisibleCount(ServerUniverse& su, uint32_t base)
+    {
+      std::vector<uint32_t> vis; su.Interest().VisibleTo(base, vis); return vis.size();
+    }
+
+  public:
+    TEST_METHOD(PriorityRanksRelevantAndNearAboveDistantNeutral)
+    {
+      RelevanceWeights w;
+      const SchedCandidate ownBase{ 1, 0.0, Iff::Own, true, false, 0 };
+      const SchedCandidate target{ 2, 16000.0, Iff::Enemy, false, true, 0 };
+      const SchedCandidate neutralFar{ 3, 320000.0, Iff::Neutral, false, false, 0 };
+      Assert::IsTrue(SnapshotPriority(ownBase, w) > SnapshotPriority(target, w));
+      Assert::IsTrue(SnapshotPriority(target, w) > SnapshotPriority(neutralFar, w));
+    }
+
+    TEST_METHOD(StalenessRaisesAnAgedEntity)
+    {
+      RelevanceWeights w;
+      SchedCandidate fresh{ 1, 16000.0, Iff::Neutral, false, false, 0 };
+      SchedCandidate aged = fresh; aged.netId = 2; aged.staleness = 100;
+      Assert::IsTrue(SnapshotPriority(aged, w) > SnapshotPriority(fresh, w));
+    }
+
+    TEST_METHOD(ScheduleAppliesVisibleCapAndIsDeterministic)
+    {
+      RelevanceWeights w;
+      std::vector<SchedCandidate> cands;
+      for (uint32_t i = 1; i <= 10; ++i)
+        cands.push_back({ i, 1000.0 * i, Iff::Neutral, false, false, 0 });
+      const ScheduleResult r = ScheduleClient(cands, w, 3);
+      Assert::AreEqual(size_t{ 3 }, r.ordered.size());
+      Assert::AreEqual(size_t{ 7 }, r.capped);
+      Assert::AreEqual(uint32_t{ 1 }, r.ordered[0]);
+      const ScheduleResult r2 = ScheduleClient(cands, w, 3);
+      Assert::IsTrue(r.ordered == r2.ordered);
+    }
+
+    TEST_METHOD(KnownStateAdvancesOnlyOnAck)
+    {
+      ClientKnownState known;
+      SnapshotEntity e; e.netId = 7; e.hp = 100;
+      Assert::IsTrue(known.Base(7) == nullptr);
+      known.RecordSent(5, { e });
+      Assert::IsTrue(known.Base(7) == nullptr); // sent, not acked
+      known.Ack(5);
+      Assert::IsTrue(known.Base(7) != nullptr);
+      Assert::AreEqual(int32_t{ 100 }, known.Base(7)->hp);
+    }
+
+    TEST_METHOD(ColdStartConvergesUnderTinyBudget)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = SeedScene(su, 10);
+      su.Step(0.1f);
+      const size_t want = VisibleCount(su, base);
+      Assert::IsTrue(want >= 11);
+
+      DeltaDecodeState client;
+      bool firstTick = true;
+      for (int t = 0; t < 60 && client.Size() < want; ++t) {
+        const DeltaSnapshot snap = su.BuildClientSnapshot(base, 64);
+        if (firstTick) {
+          Assert::IsTrue(!snap.records.empty());
+          Assert::AreEqual(base, snap.records[0].netId); // own base is top priority
+          firstTick = false;
+        }
+        Assert::IsTrue(EncodeDeltaSnapshot(snap).size() <= 64);
+        client.Apply(EncodeDeltaSnapshot(snap));
+        su.RecordClientSnapshotSent(base, snap);
+        su.AckClient(base, su.Tick());
+        su.Step(0.1f);
+      }
+      Assert::AreEqual(want, client.Size());
+    }
+
+    TEST_METHOD(VisibleCapBindsButStillConverges)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = SeedScene(su, 10);
+      su.SetVisibleCap(3);
+      su.Step(0.1f);
+      const size_t want = VisibleCount(su, base);
+
+      DeltaDecodeState client;
+      bool sawCapBind = false;
+      for (int t = 0; t < 80 && client.Size() < want; ++t) {
+        size_t capped = 0;
+        const DeltaSnapshot snap = su.BuildClientSnapshot(base, 4096, &capped);
+        Assert::IsTrue(snap.records.size() <= 3);
+        if (capped > 0) sawCapBind = true;
+        client.Apply(EncodeDeltaSnapshot(snap));
+        su.RecordClientSnapshotSent(base, snap);
+        su.AckClient(base, su.Tick());
+        su.Step(0.1f);
+      }
+      Assert::IsTrue(sawCapBind);
+      Assert::AreEqual(want, client.Size());
+    }
+  };
+
+  // --- Snapshot job pool determinism (M4 area F; §9) --------------------------
+
+  TEST_CLASS(SnapshotJobsTests)
+  {
+    static std::vector<uint32_t> SeedClients(ServerUniverse& su, int players)
+    {
+      std::vector<uint32_t> clients;
+      for (int p = 0; p < players; ++p) {
+        const int64_t bx = static_cast<int64_t>(p) * Neuron::Universe::kSectorSize;
+        const uint32_t base = su.SpawnBase({ bx, 0, 0 }, { 0, 0, 0 });
+        clients.push_back(base);
+        for (int i = 0; i < 3; ++i) su.SpawnProp(0, { bx + 100 + 10 * i, 0, 0 });
+      }
+      su.Step(0.1f);
+      return clients;
+    }
+    static std::vector<uint8_t> Wire(const std::vector<EncodeResult>& results)
+    {
+      std::vector<uint8_t> all;
+      for (const auto& r : results) {
+        const auto b = EncodeDeltaSnapshot(r.snap);
+        all.push_back(static_cast<uint8_t>(r.clientId & 0xFF));
+        all.insert(all.end(), b.begin(), b.end());
+      }
+      return all;
+    }
+
+  public:
+    TEST_METHOD(PartitionCoversEveryClientOnce)
+    {
+      std::vector<uint32_t> clients = { 1, 2, 3, 4, 5, 6, 7 };
+      const auto parts = PartitionClients(clients, 3);
+      std::vector<uint32_t> seen;
+      for (const auto& p : parts) for (uint32_t c : p) seen.push_back(c);
+      std::sort(seen.begin(), seen.end());
+      Assert::IsTrue(seen == std::vector<uint32_t>({ 1, 2, 3, 4, 5, 6, 7 }));
+    }
+
+    TEST_METHOD(PooledEncodeMatchesSerialReferenceForAnyWorkerCount)
+    {
+      ServerUniverse su(false);
+      const std::vector<uint32_t> clients = SeedClients(su, 8);
+      const std::vector<uint8_t> reference = Wire(EncodeClientsSerial(su, clients, 256));
+      for (size_t workers : { size_t{ 1 }, size_t{ 2 }, size_t{ 3 }, size_t{ 5 }, size_t{ 8 }, size_t{ 16 } }) {
+        const std::vector<uint8_t> pooled = Wire(EncodeClientsPooled(su, clients, 256, workers));
+        Assert::IsTrue(pooled == reference);
+      }
+    }
+  };
+
+  // --- Time dilation (M4 area H; §7.2 / §9) -----------------------------------
+
+  TEST_CLASS(DilationTests)
+  {
+    static constexpr double kBudget = 1.0 / 30.0;
+    static double Settle(DilationController& c, const DilationConfig& cfg, double cost, int n)
+    {
+      double f = c.Factor();
+      for (int i = 0; i < n; ++i) f = c.Update(cost, kBudget, cfg);
+      return f;
+    }
+
+  public:
+    TEST_METHOD(FullSpeedWhenUnderBudget)
+    {
+      DilationController c; DilationConfig cfg;
+      Assert::IsTrue(Settle(c, cfg, kBudget * 0.5, 50) >= 0.999);
+      Assert::IsTrue(!c.IsDilated());
+    }
+
+    TEST_METHOD(DilatesTowardOnsetOverLoad)
+    {
+      DilationController c; DilationConfig cfg;
+      const double f = Settle(c, cfg, kBudget * 3.0, 200);
+      Assert::IsTrue(f > 0.30 && f < 0.37); // ~ onset/load = 1/3
+      Assert::IsTrue(c.IsDilated());
+    }
+
+    TEST_METHOD(ClampsAtFloorUnderExtremeOverload)
+    {
+      DilationController c; DilationConfig cfg;
+      const double f = Settle(c, cfg, kBudget * 50.0, 300);
+      Assert::IsTrue(f >= cfg.floor - 1e-9 && f <= cfg.floor + 1e-6);
+    }
+
+    TEST_METHOD(RecoversToFullSpeedWhenLoadDrops)
+    {
+      DilationController c; DilationConfig cfg;
+      Settle(c, cfg, kBudget * 4.0, 200);
+      Assert::IsTrue(c.IsDilated());
+      Assert::IsTrue(Settle(c, cfg, kBudget * 0.2, 500) >= 0.999);
+      Assert::IsTrue(!c.IsDilated());
+    }
+
+    TEST_METHOD(FactorStaysWithinBounds)
+    {
+      DilationController c; DilationConfig cfg;
+      for (int i = 0; i < 500; ++i) {
+        const double cost = (i % 2 == 0) ? kBudget * 8.0 : kBudget * 0.1;
+        const double f = c.Update(cost, kBudget, cfg);
+        Assert::IsTrue(f >= cfg.floor - 1e-9 && f <= 1.0 + 1e-9);
+      }
+    }
+  };
+
+  // --- Telemetry / §21 counters (M4 area I) -----------------------------------
+
+  TEST_CLASS(TelemetryTests)
+  {
+  public:
+    TEST_METHOD(PercentileNearestRankOverKnownSample)
+    {
+      PercentileWindow w(1000);
+      for (int i = 1; i <= 100; ++i) w.Add(static_cast<double>(i));
+      Assert::AreEqual(50.0, w.Percentile(0.50));
+      Assert::AreEqual(99.0, w.Percentile(0.99));
+      Assert::AreEqual(100.0, w.Percentile(1.0));
+      Assert::AreEqual(1.0, w.Percentile(0.0));
+      Assert::AreEqual(100.0, w.Max());
+    }
+
+    TEST_METHOD(WindowIsBoundedAndEvictsOldest)
+    {
+      PercentileWindow w(8);
+      for (int i = 0; i < 100; ++i) w.Add(static_cast<double>(i));
+      Assert::AreEqual(size_t{ 8 }, w.Count());
+      Assert::AreEqual(99.0, w.Max());
+      Assert::AreEqual(92.0, w.Percentile(0.0));
+    }
+
+    TEST_METHOD(NetCountersSumBytesAndDatagrams)
+    {
+      NetCounters c;
+      c.AddDown(100); c.AddDown(250); c.AddUp(40);
+      Assert::AreEqual(uint64_t{ 350 }, c.downstreamBytes);
+      Assert::AreEqual(uint64_t{ 2 }, c.datagramsOut);
+      Assert::AreEqual(uint64_t{ 40 }, c.upstreamBytes);
+    }
+
+    TEST_METHOD(ServerTelemetryAggregatesTheGates)
+    {
+      ServerTelemetry t;
+      for (int i = 0; i < 99; ++i) t.RecordTickMs(10.0);
+      t.RecordTickMs(40.0);
+      Assert::AreEqual(10.0, t.SimP50());
+      t.RecordTickMs(50.0);
+      Assert::IsTrue(t.SimP99() >= 40.0);
+
+      t.RecordBaselineBytes(4096);
+      Assert::AreEqual(uint64_t{ 4096 }, t.BaselineBytes());
+      t.RecordCapBind(0); t.RecordCapBind(7);
+      Assert::AreEqual(size_t{ 7 }, t.MaxCapBind());
+      Assert::AreEqual(uint64_t{ 1 }, t.CapBindTicks());
+    }
+  };
+
+  // --- Contested-sector scale harness (M4 area J; §17 Done, App. B) -----------
+  // The Windows ERHeadless run gates on wall-clock sim p99 at hundreds of live UDP
+  // sessions; this mirrors the platform-independent pipeline at scale through
+  // ServerUniverse directly (the per-client byte budget, interest culling, RAM,
+  // and determinism). Counts are kept modest so MSTest stays quick.
+
+  TEST_CLASS(LoadHarnessTests)
+  {
+    static constexpr size_t kSafeMtu = 1100;
+
+    // Run the full per-tick pipeline until every client converges; return the tick
+    // count and whether the safe-MTU budget held for every client every tick.
+    static int RunToConvergence(ServerUniverse& su, const std::vector<uint32_t>& clients,
+                                size_t cap, int maxTicks, bool& budgetHeld, uint64_t& baselineBytes)
+    {
+      su.SetVisibleCap(cap);
+      su.Step(0.1f);
+      std::vector<DeltaDecodeState> decoders(clients.size());
+      std::vector<size_t> want(clients.size());
+      for (size_t i = 0; i < clients.size(); ++i) {
+        std::vector<uint32_t> vis; su.Interest().VisibleTo(clients[i], vis); want[i] = vis.size();
+      }
+      budgetHeld = true;
+      int convergedAt = -1;
+      for (int t = 0; t < maxTicks && convergedAt < 0; ++t) {
+        bool all = true;
+        for (size_t i = 0; i < clients.size(); ++i) {
+          const DeltaSnapshot snap = su.BuildClientSnapshot(clients[i], kSafeMtu);
+          const auto bytes = EncodeDeltaSnapshot(snap);
+          if (bytes.size() > kSafeMtu) budgetHeld = false;
+          if (!snap.records.empty()) {
+            decoders[i].Apply(bytes);
+            su.RecordClientSnapshotSent(clients[i], snap);
+            su.AckClient(clients[i], su.Tick());
+          }
+          if (decoders[i].Size() < want[i]) all = false;
+        }
+        if (all) convergedAt = t + 1;
+        su.Step(0.1f);
+      }
+      baselineBytes = su.TotalClientBaselineBytes();
+      return convergedAt;
+    }
+
+    static std::vector<uint32_t> Contested(ServerUniverse& su, int n)
+    {
+      std::vector<uint32_t> c;
+      for (int i = 0; i < n; ++i) c.push_back(su.SpawnBase({ 200 + 5 * i, 0, 0 }, { 0, 0, 0 }));
+      return c;
+    }
+    static std::vector<uint32_t> Dispersed(ServerUniverse& su, int n)
+    {
+      std::vector<uint32_t> c;
+      for (int i = 0; i < n; ++i)
+        c.push_back(su.SpawnBase({ static_cast<int64_t>(i) * Neuron::Universe::kSectorSize * 6, 0, 0 }, { 0, 0, 0 }));
+      return c;
+    }
+
+  public:
+    TEST_METHOD(ContestedSectorHoldsBandwidthAndConverges)
+    {
+      ServerUniverse su(false);
+      bool held = false; uint64_t ram = 0;
+      const int ticks = RunToConvergence(su, Contested(su, 80), 1024, 60, held, ram);
+      Assert::IsTrue(ticks > 0); // converged
+      Assert::IsTrue(held);      // never over the MTU budget
+    }
+
+    TEST_METHOD(DispersedControlIsCheaperThanContested)
+    {
+      ServerUniverse a(false); bool h1 = false; uint64_t ramC = 0;
+      RunToConvergence(a, Contested(a, 80), 1024, 60, h1, ramC);
+      ServerUniverse b(false); bool h2 = false; uint64_t ramD = 0;
+      RunToConvergence(b, Dispersed(b, 80), 1024, 60, h2, ramD);
+      Assert::IsTrue(ramD * 4 < ramC); // interest culling: far smaller baseline (R23)
+    }
+
+    TEST_METHOD(ContestedPipelineIsDeterministic)
+    {
+      ServerUniverse a(false); bool h = false; uint64_t r = 0;
+      RunToConvergence(a, Contested(a, 60), 1024, 60, h, r);
+      ServerUniverse b(false); RunToConvergence(b, Contested(b, 60), 1024, 60, h, r);
+      Assert::AreEqual(a.SimHash(), b.SimHash());
+    }
+  };
+
+  // --- Token-indexed connection routing (M4 area G; §9) -----------------------
+
+  TEST_CLASS(ConnectionTableTests)
+  {
+  public:
+    TEST_METHOD(RoutesByTokenToTheRightSlot)
+    {
+      Neuron::Net::ConnectionTable t;
+      const auto a = t.Open(0xAAAA000011112222ull);
+      const auto b = t.Open(0xBBBB333344445555ull);
+      Assert::IsTrue(a.valid && b.valid);
+      Assert::IsTrue(a.index != b.index);
+      const auto found = t.Find(0xBBBB333344445555ull);
+      Assert::IsTrue(found.valid);
+      Assert::AreEqual(b.index, found.index);
+      Assert::IsTrue(!t.Find(0xDEADBEEFull).valid);
+    }
+
+    TEST_METHOD(RecycledSlotRejectsStaleGeneration)
+    {
+      Neuron::Net::ConnectionTable t;
+      const auto a = t.Open(0xA11ull);
+      Assert::IsTrue(t.Validate(a));
+      t.Close(0xA11ull);
+      Assert::IsTrue(!t.Validate(a));
+      const auto b = t.Open(0xB22ull);
+      Assert::AreEqual(a.index, b.index); // slot recycled
+      Assert::IsTrue(t.Validate(b));
+      Assert::IsTrue(!t.Validate(a));     // stale generation rejected
+    }
+
+    TEST_METHOD(ConnectionIsPinnedToOneLane)
+    {
+      Neuron::Net::ConnectionTable t;
+      const auto a = t.Open(1);
+      Assert::AreEqual(a.index % 4, Neuron::Net::ConnectionTable::Lane(a, 4));
+      Assert::AreEqual(Neuron::Net::ConnectionTable::Lane(a, 4),
+                       Neuron::Net::ConnectionTable::Lane(t.Find(1), 4));
+    }
+
+    TEST_METHOD(FreedSlotsAreReusedNotGrown)
+    {
+      Neuron::Net::ConnectionTable t;
+      for (uint64_t i = 1; i <= 8; ++i) t.Open(i);
+      Assert::AreEqual(size_t{ 8 }, t.SlotCapacity());
+      for (uint64_t i = 1; i <= 8; ++i) t.Close(i);
+      for (uint64_t i = 100; i < 104; ++i) t.Open(i);
+      Assert::AreEqual(size_t{ 8 }, t.SlotCapacity());
+      Assert::AreEqual(size_t{ 4 }, t.ActiveCount());
+    }
+  };
+
   // --- Interest (cell pub/sub, M4 area A; §8.4, §6.3) -------------------------
 
   TEST_CLASS(InterestGridTests)
@@ -439,6 +850,86 @@ namespace NeuronCoreTest
       su.Step(0.1f);
       const auto changed3 = su.ChangedFor(base);
       Assert::IsTrue(std::find(changed3.begin(), changed3.end(), base) == changed3.end());
+    }
+  };
+
+  // --- Tombstone eviction (M4 area D; §8.4 / App. A) --------------------------
+
+  TEST_CLASS(TombstoneTests)
+  {
+  public:
+    TEST_METHOD(ReEmitsUntilAckedThenClears)
+    {
+      ClientBaseline base;
+      base.RecordSent(1, { { 10, 1 } });
+      base.Ack(1);
+      Assert::AreEqual(size_t{ 1 }, base.AckedCount());
+
+      base.Tombstone(10); // entity 10 leaves interest
+      Assert::IsTrue(base.IsTombstoned(10));
+      Assert::AreEqual(size_t{ 0 }, base.AckedCount());
+
+      std::vector<uint32_t> tombs;
+      base.CollectTombstones(tombs);
+      Assert::AreEqual(size_t{ 1 }, tombs.size());
+      Assert::AreEqual(uint32_t{ 10 }, tombs[0]);
+      base.RecordTombstonesSent(5, tombs); // snapshot 5 SENT
+      Assert::IsTrue(base.IsTombstoned(10)); // but not acked → still pending
+
+      tombs.clear();
+      base.CollectTombstones(tombs);
+      base.RecordTombstonesSent(6, tombs);
+      base.Ack(6);
+      Assert::IsTrue(!base.IsTombstoned(10)); // ack of a carrying tick clears it
+      Assert::AreEqual(size_t{ 0 }, base.TombstoneCount());
+    }
+
+    TEST_METHOD(StaleAckBeforeCarryingTickDoesNotClear)
+    {
+      ClientBaseline base;
+      base.Tombstone(10);
+      base.RecordTombstonesSent(5, { 10 });
+      base.Ack(4);
+      Assert::IsTrue(base.IsTombstoned(10)); // tick 4 predates the leave
+      base.Ack(5);
+      Assert::IsTrue(!base.IsTombstoned(10));
+    }
+
+    TEST_METHOD(ReEnteredEntityIsUntombstoned)
+    {
+      ClientBaseline base;
+      base.Tombstone(10);
+      Assert::IsTrue(base.IsTombstoned(10));
+      base.Untombstone(10);
+      Assert::IsTrue(!base.IsTombstoned(10));
+    }
+
+    TEST_METHOD(ServerUniverseEvictsEntityThatLeftInterest)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const uint32_t prop = su.SpawnProp(0, { 100, 0, 0 });
+      su.Step(0.1f);
+
+      auto changed = su.ChangedFor(base);
+      Assert::IsTrue(std::find(changed.begin(), changed.end(), prop) != changed.end());
+      su.RecordSent(base, su.Tick(), changed);
+      su.AckBaseline(base, su.Tick());
+      Assert::IsTrue(su.TombstonesFor(base).empty());
+
+      Assert::IsTrue(su.DespawnBase(prop)); // leaves the grid → leaves interest
+      su.Step(0.1f);
+      const auto tombs1 = su.TombstonesFor(base);
+      Assert::IsTrue(std::find(tombs1.begin(), tombs1.end(), prop) != tombs1.end());
+      su.RecordTombstonesSent(base, su.Tick(), tombs1); // sent but ack lost
+      su.Step(0.1f);
+      const auto tombs2 = su.TombstonesFor(base);
+      Assert::IsTrue(std::find(tombs2.begin(), tombs2.end(), prop) != tombs2.end());
+
+      su.RecordTombstonesSent(base, su.Tick(), tombs2);
+      su.AckBaseline(base, su.Tick());
+      su.Step(0.1f);
+      Assert::IsTrue(su.TombstonesFor(base).empty());
     }
   };
 

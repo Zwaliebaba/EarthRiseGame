@@ -266,7 +266,7 @@ Milestones (full detail in `docs/masterplan.md` §17):
 | **M1b** | Client tech slice (DX12 engine foundation, camera, input) | ✅ Complete |
 | **M2** | Darwinia look + audio (DDS/CMO, HUD, bloom/particles, NeuronAudio) | ✅ Complete |
 | **M3** | Core 4X loop, fleet command & navigation | 🔨 **Active** (areas A–H implemented; Windows client/headless glue unverified) |
-| **M4** | Scale & interest (cell pub/sub, delta compression, load test at scale) | 🔨 In progress (areas A–C implemented) |
+| **M4** | Scale & interest (cell pub/sub, delta compression, load test at scale) | 🔨 Pipeline complete (areas A–J platform-independent logic implemented + tested; Windows IOCP/ERServer integration + the live wall-clock perf gate remain) |
 | **M5** | Accounts, auth & persistence (SQL, warm-restart) | ⏳ |
 | **M6** | Combat model & production deployment (Kubernetes, Azure SQL) | ⏳ |
 | **M7** | Sandbox: conquest, economy, PvE content & onboarding | ⏳ |

@@ -406,12 +406,70 @@ public:
             }
             it = m_pending.erase(it);
         }
+        // A tombstone clears once the client acks a snapshot that carried it (area
+        // D): every snapshot re-emits the pending set, so any ack ≥ the earliest
+        // carrying tick proves a leave record was delivered (§8.4 self-healing).
+        for (auto it = m_tombstones.begin(); it != m_tombstones.end();) {
+            if (it->second != kUnsent && it->second <= tick) it = m_tombstones.erase(it);
+            else ++it;
+        }
     }
 
     // Tombstone reconciliation (area D) drops a netId from the baseline once the
     // client has acked its removal.
     void Forget(uint32_t netId) { m_acked.erase(netId); }
 
+    // Every netId the client is known to hold (its acked baseline). Area D reads
+    // this to find entities that have left interest (acked, but no longer visible)
+    // and must be tombstoned. Appended in netId order (deterministic).
+    void CollectAcked(std::vector<uint32_t>& out) const
+    {
+        for (const auto& [netId, version] : m_acked) out.push_back(netId);
+        std::sort(out.begin(), out.end());
+    }
+
+    // --- tombstone eviction (area D, §8.4 / App. A) --------------------------
+    //
+    // When an entity leaves a client's interest set (cell leave, area A) or is
+    // destroyed, the server marks a *tombstone* here and re-emits a leave record
+    // (netId + DeltaTomb) on every snapshot to this client until the client acks a
+    // snapshot that carried it — so a single lost despawn on the Unreliable channel
+    // never leaves a ghost forever (the M3 full-rebuild "evict by omission" bug at
+    // delta scale). Self-healing: a dropped leave is simply re-sent next tick.
+
+    // Mark 'netId' pending-removal for this client. Drops its acked baseline entry
+    // (it is gone) and queues a tombstone record. Idempotent.
+    void Tombstone(uint32_t netId)
+    {
+        m_acked.erase(netId);
+        m_tombstones.try_emplace(netId, kUnsent); // not yet emitted
+    }
+
+    // The entity re-entered interest before its removal was acked: cancel the
+    // tombstone (it is alive again; the normal version diff re-sends its state).
+    void Untombstone(uint32_t netId) { m_tombstones.erase(netId); }
+
+    [[nodiscard]] bool IsTombstoned(uint32_t netId) const { return m_tombstones.count(netId) != 0; }
+
+    // Append every currently-pending tombstone netId (the scheduler emits one
+    // DeltaTomb record each). netId order (std::map) — deterministic.
+    void CollectTombstones(std::vector<uint32_t>& out) const
+    {
+        for (const auto& [netId, sentTick] : m_tombstones) out.push_back(netId);
+    }
+
+    // Record that the snapshot for 'tick' carried tombstone records for 'netIds',
+    // so an ack of 'tick' (or any later tick — every snapshot re-emits the still-
+    // pending set) clears them. Keeps the earliest carrying tick per tombstone.
+    void RecordTombstonesSent(uint32_t tick, const std::vector<uint32_t>& netIds)
+    {
+        for (uint32_t n : netIds) {
+            auto it = m_tombstones.find(n);
+            if (it != m_tombstones.end() && it->second == kUnsent) it->second = tick;
+        }
+    }
+
+    [[nodiscard]] size_t TombstoneCount() const noexcept { return m_tombstones.size(); }
     [[nodiscard]] size_t AckedCount() const noexcept { return m_acked.size(); }
     [[nodiscard]] size_t PendingCount() const noexcept { return m_pending.size(); }
 
@@ -421,13 +479,16 @@ public:
         size_t bytes = m_acked.size() * (sizeof(uint32_t) * 2);
         for (const auto& [tick, sent] : m_pending)
             bytes += sizeof(uint32_t) + sent.size() * (sizeof(uint32_t) * 2);
+        bytes += m_tombstones.size() * (sizeof(uint32_t) * 2);
         return bytes;
     }
 
 private:
-    static constexpr size_t kMaxPending = 64; // bounded unacked-snapshot history
+    static constexpr size_t   kMaxPending = 64;          // bounded unacked-snapshot history
+    static constexpr uint32_t kUnsent     = 0xFFFFFFFFu; // tombstone queued, not yet emitted
     std::unordered_map<uint32_t, uint32_t>      m_acked;   // netId → acked version
     std::map<uint32_t, SentList>                m_pending; // tick → sent (netId,version)
+    std::map<uint32_t, uint32_t>                m_tombstones; // netId → earliest carrying tick
 };
 
 } // namespace Neuron::Sim

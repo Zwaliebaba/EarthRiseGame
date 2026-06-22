@@ -21,6 +21,7 @@
 #include "Navigation.h"
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
+#include "SnapshotScheduler.h"
 #include "Ecs.h"
 #include "UniverseData.h"
 #include "UniversePos.h"
@@ -472,7 +473,7 @@ public:
         if (it == m_netIdToEntity.end()) return false;
         m_world.DestroyEntity(it->second);
         m_netIdToEntity.erase(it);
-        m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
+        m_interest.Remove(netId); // drop residency (area A); TombstonesFor evicts it per client (area D)
         m_repl.Remove(netId);     // drop replication version (area B)
         return true;
     }
@@ -550,6 +551,153 @@ public:
 
     // Advance a client's acked baseline to 'tick' (its §8.3 snapshot ack).
     void AckBaseline(uint32_t clientId, uint32_t tick) { m_baselines[clientId].Ack(tick); }
+
+    // The tombstone (pending-removal) netIds for a client (M4 area D, §8.4): every
+    // entity the client had acked that is no longer in its interest set — it left a
+    // cell (area A) or was destroyed (removed from the grid). Reconciled against the
+    // live interest set each call, so an entity that re-entered before its removal
+    // acked is un-tombstoned (its normal version diff resends it). The scheduler
+    // (area E) emits one DeltaTomb record per returned netId and reports them via
+    // RecordTombstonesSent so the client's ack clears them. netId order.
+    [[nodiscard]] std::vector<uint32_t> TombstonesFor(uint32_t clientId)
+    {
+        std::vector<uint32_t> visible;
+        m_interest.VisibleTo(clientId, visible); // sorted/deduped
+        Neuron::Sim::ClientBaseline& base = m_baselines[clientId];
+
+        std::vector<uint32_t> acked;
+        base.CollectAcked(acked);
+        // acked and visible are both sorted: an acked entry absent from visible has
+        // left interest → tombstone it.
+        size_t vi = 0;
+        for (uint32_t n : acked) {
+            while (vi < visible.size() && visible[vi] < n) ++vi;
+            if (vi >= visible.size() || visible[vi] != n) {
+                base.Tombstone(n);
+                m_known[clientId].Forget(n); // drop its delta base — a re-entry is first-sight
+            }
+        }
+        for (uint32_t n : visible) base.Untombstone(n); // came back → cancel
+
+        std::vector<uint32_t> out;
+        base.CollectTombstones(out);
+        return out;
+    }
+
+    // Record that 'clientId's snapshot for 'tick' carried tombstone records for
+    // 'netIds' (area D), so acking 'tick' clears them.
+    void RecordTombstonesSent(uint32_t clientId, uint32_t tick, const std::vector<uint32_t>& netIds)
+    {
+        m_baselines[clientId].RecordTombstonesSent(tick, netIds);
+    }
+
+    // --- priority / quota snapshot scheduler (area E, §8.4) ------------------
+
+    // Tunables (the §19 open question; area J sweeps them). Authored, not literal.
+    [[nodiscard]] RelevanceWeights& SchedulerWeights() noexcept { return m_weights; }
+    void SetVisibleCap(size_t cap) noexcept { m_visibleCap = cap; }
+    [[nodiscard]] size_t VisibleCap() const noexcept { return m_visibleCap; }
+
+    // Build the MTU-budgeted delta snapshot for one client (the area-A→E pipeline):
+    //   1. select the entities it still lacks (area B: in interest, version > acked),
+    //   2. rank them by the named priority function and apply the visible cap (R16),
+    //   3. encode each as a minimal delta against the client's last-acked base
+    //      (area C), append tombstone records for entities that left (area D),
+    //   4. keep the priority-ordered prefix that fits the byte budget; the rest spill
+    //      to later ticks (their version stays > acked, so none are dropped).
+    // The returned snapshot is ready to seal/send. 'capped' reports how many interest
+    // entities the cap shed (R16 evidence). Pure read of post-tick state — the area-F
+    // job pool runs this per client over a frozen snapshot.
+    [[nodiscard]] DeltaSnapshot BuildClientSnapshot(uint32_t clientId, size_t byteBudget,
+                                                    size_t* capped = nullptr)
+    {
+        // (1) what the client lacks, and its focus + current targets for ranking.
+        const std::vector<uint32_t> lacked = ChangedFor(clientId);
+        Neuron::Universe::UniversePos focus{};
+        const bool haveFocus = GetBasePos(clientId, focus);
+        const std::unordered_set<uint32_t> targets = ClientTargets(clientId);
+
+        std::vector<Neuron::Sim::SchedCandidate> cands;
+        cands.reserve(lacked.size());
+        auto& sent = m_lastSent[clientId];
+        for (uint32_t netId : lacked) {
+            Neuron::Sim::SchedCandidate c;
+            c.netId = netId;
+            SnapshotEntity cur;
+            if (!SnapshotEntityOf(netId, cur)) continue;
+            c.distance = haveFocus ? Neuron::Sim::UniverseDistance(focus, cur.pos) : 0.0;
+            c.iff      = ClassifyIff(clientId, cur);
+            c.isBase   = (cur.kind == EntityKind::Base || cur.kind == EntityKind::Structure);
+            c.isTarget = targets.count(netId) != 0;
+            const auto sit = sent.find(netId);
+            c.staleness = (sit == sent.end()) ? 0u : (m_tick - sit->second);
+            cands.push_back(c);
+        }
+
+        const Neuron::Sim::ScheduleResult sched =
+            Neuron::Sim::ScheduleClient(std::move(cands), m_weights, m_visibleCap);
+        if (capped) *capped = sched.capped;
+
+        // (3) encode minimal deltas against the per-client acked base.
+        Neuron::Sim::ClientKnownState& known = m_known[clientId];
+        std::vector<DeltaRecord> ordered;
+        ordered.reserve(sched.ordered.size());
+        for (uint32_t netId : sched.ordered) {
+            SnapshotEntity cur;
+            if (!SnapshotEntityOf(netId, cur)) continue;
+            DeltaRecord r = MakeDeltaRecord(cur, known.Base(netId));
+            if (r.mask != 0) ordered.push_back(r);
+        }
+        // Tombstones ride every snapshot until acked (area D), ahead of the budget.
+        const std::vector<uint32_t> tombs = TombstonesFor(clientId);
+        for (uint32_t netId : tombs) {
+            DeltaRecord r; r.netId = netId; r.mask = DeltaTomb;
+            ordered.push_back(r);
+        }
+
+        // (4) keep the prefix that fits the MTU budget; the rest spill next tick.
+        std::vector<uint32_t> overflow;
+        DeltaSnapshot snap = BuildBudgetedSnapshot(m_tick, ordered, byteBudget, overflow);
+        return snap;
+    }
+
+    // Stage what a client snapshot carried so its ack advances every baseline (the
+    // version baseline, the delta-base cache, the last-sent staleness clock, and the
+    // tombstone clock). Call with the snapshot BuildClientSnapshot returned.
+    void RecordClientSnapshotSent(uint32_t clientId, const DeltaSnapshot& snap)
+    {
+        std::vector<uint32_t> liveIds;     // non-tombstone records
+        std::vector<uint32_t> tombIds;     // tombstone records
+        std::vector<SnapshotEntity> states;
+        auto& sent = m_lastSent[clientId];
+        for (const DeltaRecord& r : snap.records) {
+            if (r.mask & DeltaTomb) { tombIds.push_back(r.netId); continue; }
+            liveIds.push_back(r.netId);
+            sent[r.netId] = snap.tick;
+            SnapshotEntity cur;
+            if (SnapshotEntityOf(r.netId, cur)) states.push_back(cur);
+        }
+        RecordSent(clientId, snap.tick, liveIds);              // version baseline (area B)
+        m_known[clientId].RecordSent(snap.tick, std::move(states)); // delta base (area E)
+        RecordTombstonesSent(clientId, snap.tick, tombIds);    // tombstone clock (area D)
+    }
+
+    // Advance every per-client baseline to the client's §8.3 ack of 'tick'.
+    void AckClient(uint32_t clientId, uint32_t tick)
+    {
+        m_baselines[clientId].Ack(tick);
+        m_known[clientId].Ack(tick);
+    }
+
+    // Total per-client baseline RAM: acked-version maps (area B) + delta-base caches
+    // (area E). The App. B gate area I reports.
+    [[nodiscard]] size_t TotalClientBaselineBytes() const
+    {
+        size_t bytes = 0;
+        for (const auto& [clientId, base] : m_baselines) bytes += base.ApproxBytes();
+        for (const auto& [clientId, known] : m_known)    bytes += known.ApproxBytes();
+        return bytes;
+    }
 
     // Per-client / total baseline RAM (App. B gate; area I telemetry reads these).
     [[nodiscard]] size_t BaselineBytes(uint32_t clientId) { return m_baselines[clientId].ApproxBytes(); }
@@ -700,6 +848,30 @@ private:
         const OwnerId* o = m_world.GetComponent<OwnerId>(EntityOf(id.value));
         e.ownerPlayer = o ? o->player : 0;
         return e;
+    }
+
+    // --- snapshot scheduler helpers (area E) --------------------------------
+
+    // Classify an entity relative to the client for the priority IFF term: the
+    // client's own units, hostiles (another player's units or an NPC), else neutral
+    // (scenery, structures, resource nodes).
+    [[nodiscard]] static Neuron::Sim::Iff ClassifyIff(uint32_t clientId, const SnapshotEntity& e) noexcept
+    {
+        if (e.ownerPlayer == clientId)               return Neuron::Sim::Iff::Own;
+        if (e.ownerPlayer != 0 || e.kind == EntityKind::NpcUnit) return Neuron::Sim::Iff::Enemy;
+        return Neuron::Sim::Iff::Neutral;
+    }
+
+    // The netIds the client's units currently have as a command target (Attack/
+    // Guard/Orbit/KeepRange) — these get the priority target bonus.
+    [[nodiscard]] std::unordered_set<uint32_t> ClientTargets(uint32_t clientId)
+    {
+        std::unordered_set<uint32_t> targets;
+        m_world.ForEach<OwnerId, FleetOrder>([&](OwnerId& o, FleetOrder& fo) {
+            if (o.player == clientId && fo.current.targetNetId != 0)
+                targets.insert(fo.current.targetNetId);
+        });
+        return targets;
     }
 
     // --- fleet command routing (area B) -------------------------------------
@@ -865,7 +1037,7 @@ private:
         }
         if (m_world.IsAlive(e)) m_world.DestroyEntity(e);
         m_netIdToEntity.erase(netId);
-        m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
+        m_interest.Remove(netId); // drop residency (area A); TombstonesFor evicts it per client (area D)
         m_repl.Remove(netId);     // drop replication version (area B)
     }
 
@@ -1141,6 +1313,12 @@ private:
     Neuron::Sim::InterestGrid                  m_interest; // cell pub/sub interest (area A)
     Neuron::Sim::ReplicationStamps             m_repl;     // per-entity versions (area B)
     std::unordered_map<uint32_t, Neuron::Sim::ClientBaseline> m_baselines; // player → baseline (area B)
+    // Snapshot scheduler (area E): per-client delta-base cache + last-sent staleness
+    // clock, plus the named-priority tunables and the R16 visible-entity cap.
+    std::unordered_map<uint32_t, Neuron::Sim::ClientKnownState> m_known;
+    std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint32_t>> m_lastSent; // client → netId → tick
+    Neuron::Sim::RelevanceWeights              m_weights{};
+    size_t                                     m_visibleCap{ 256 }; // R16 hard cap (tunable)
     // NPC sites (area F): site id → guardians still alive; cleared sites pending drain.
     std::unordered_map<uint16_t, int>          m_siteAlive;
     std::vector<uint16_t>                      m_clearedSites;

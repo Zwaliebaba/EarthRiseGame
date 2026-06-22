@@ -4,6 +4,15 @@
 > **Scope:** Code validation of the current tree after M3 (core 4X loop) and M4
 > areas A–C (interest grid, version stamping, quantized delta codec) plus the
 > playable-slice client work.
+> **Update (post-review):** M4 areas **D–J** have since landed — tombstone eviction
+> (D), priority/quota scheduler with cold-start (E), the job-pool partition/determinism
+> seam (F), token-routing table (G), bounded time-dilation policy (H), §21 telemetry (I),
+> and a contested-vs-dispersed scale harness (J), all with `testrunner` + `NeuronCoreTest`
+> coverage. So the §3.2 "interest/delta path **built-but-unwired**" finding is **now wired**
+> (per-client `BuildClientSnapshot` selects → ranks → caps → encodes → budgets through
+> `ServerUniverse`); the §3.2 **IOCP / per-connection-thread-safety** findings (and the §4
+> fix order) **still stand** — that integration is the remaining Windows-side M4 work. Source
+> of truth for M4 status: [`../../implementation/M4-scale-interest.md`](../../implementation/M4-scale-interest.md).
 > **Focus (as requested):** (1) DirectXMath adoption, (2) DirectX 12 performance,
 > (3) scalability of the MMO setup for a future move to multithreading.
 > **Complements:** [`networking-scale-review.md`](networking-scale-review.md) (v1,
