@@ -1,8 +1,11 @@
 # M4 — Scale & Interest (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M4**).
-> **Status:** ⏳ Not started (M0/M1a/M1b/M2 complete; M3 active). Drafted from `_template.md`
-> as the next milestone after M3, per [`README.md`](README.md).
+> **Status:** 🔨 In progress — **areas A (cell pub/sub interest), B (version stamping +
+> per-client baselines) and C (quantized sector-local delta codec) implemented** with their
+> `NeuronCoreTest` cases + Linux `testrunner` mirror (§16.2); areas D–J not started.
+> (M0/M1a/M1b/M2 complete; M3 active.) Drafted from `_template.md` as the next milestone
+> after M3, per [`README.md`](README.md).
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 > **Verification:** M4's gates are **real, enforceable** — the contested-sector perf/load run
 > (areas I/J) executes on the **Windows build agent** (§16.3) at the target player count; the
@@ -108,22 +111,28 @@
 - **Current state:** net-new. `DetectedSet`/`BuildSnapshotFor` (M3 area E) are the per-player
   *filter* this replaces; `SectorId`/`SectorHash` already exist in `UniversePos.h`.
 - **Work:**
-  - [ ] **Interest grid** keyed by `SectorId` (`NeuronCore`, new `Interest.h`): cell → subscriber
-        list + resident-entity list. Built over `SectorHash` (§6.3); **no 64-bit Morton key**.
-  - [ ] **Subscribe/unsubscribe on sector crossing:** an explicit **enter/leave event** when an
-        entity's sector index changes (the §8.4 tombstone rule needs these anyway). A player
-        subscribes to its sensor-range neighbourhood of cells; the set updates as the base/camera
-        moves and on **warp/jump prefetch** (wire the existing `OnTravelStart` hook to pre-subscribe
-        the destination cells, R21).
-  - [ ] **Sensor/fog over cells:** fold M3's `DetectedSet` semantics (own + sensor-range + scanned
-        + always-known beacons) into the subscription set so the overview/fog stays correct — the
-        filter becomes a *consequence* of subscription, not a separate per-tick scan.
-- **Tests (`NeuronCoreTest`, §16.1; mirror in `NeuronTools/testrunner/`, §16.2):**
-  - [ ] Crossing a sector boundary emits exactly one leave + one enter; subscriber list membership
-        matches sensor range.
-  - [ ] A mutation in cell C is enqueued to C's subscribers only (count == subscriber count), never
-        to non-subscribers.
-  - [ ] Warp/jump start pre-subscribes the destination cells before arrival (R21).
+  - [x] **Interest grid** keyed by `SectorId` (`NeuronCore/Interest.h`, new): `InterestGrid` —
+        cell → sorted resident-entity list + sorted subscriber list, keyed by `SectorHash` (§6.3);
+        **no 64-bit Morton key**. Empty cells are pruned. Sorted lists keep per-cell membership
+        order-stable across runs (feeds deterministic scheduling at area E).
+  - [x] **Subscribe/unsubscribe on sector crossing:** `UpdateResidency` emits a single
+        leave+enter `CrossEvent` when an entity's sector index changes (the §8.4 tombstone rule at
+        area D consumes these). `SetSubscription` diffs a player's sensor-range neighbourhood
+        (`CollectNeighbourhood` / `SectorRadiusForRange`) to enter/leave deltas; `ServerUniverse::
+        UpdateInterest` (called each `Step`) re-homes entities and re-subscribes players each tick.
+        **Warp/jump prefetch** (R21) wired: `BeginWarpTo`/`BeginJumpTo` → `PrefetchTravelInterest`
+        pins the destination cells, surviving the per-tick refresh until arrival.
+  - [ ] **Sensor/fog over cells:** *(partial)* the spatial neighbourhood is folded into the
+        subscription set; the always-known overlays (own outside sensor range, beacon graph,
+        scanned contacts) still come from M3's `DetectedSet`. Full replacement of the per-tick scan
+        lands with the area-B/E diff path (`BuildSnapshotFor` is untouched for now).
+- **Tests (`NeuronCoreTest`, §16.1; mirror in `NeuronTools/testrunner/InterestTests.cpp`, §16.2):**
+  - [x] Crossing a sector boundary emits exactly one leave + one enter; subscriber list membership
+        matches sensor range (`CrossingEmitsOneLeaveAndOneEnter`, `NeighbourhoodSubscriptionMatchesRange`).
+  - [x] A mutation in cell C is enqueued to C's subscribers only (count == subscriber count), never
+        to non-subscribers (`MutationEnqueuedToCellSubscribersOnly`).
+  - [x] Warp/jump start pre-subscribes the destination cells before arrival
+        (`WarpPrefetchSubscribesDestinationBeforeArrival`, R21).
 - **Depends on:** nothing (server-side). **Blocks:** B, D, E.
 
 ### B. Per-entity version stamping & per-client baselines (§8.4)
@@ -136,23 +145,32 @@
 - **Current state:** net-new. M3 has no versions and no per-client baselines (it rebuilds the whole
   snapshot every tick).
 - **Work:**
-  - [ ] **Replication version** on replicated entities (`Components.h`, new `ReplState`/version
-        field): bumped by the systems that mutate replicated fields (movement, combat, cargo). A
-        stationary/idle entity's version does **not** advance (so it costs ≈0 downstream).
-  - [ ] **Per-client baseline** (`Interest.h`): `netId → acked version` map + the tombstone set
-        (area D), allocated per connection. Advanced **on snapshot ack** (the §8.3 ack carries the
-        acked baseline tick; map the entities in that baseline to acked).
-  - [ ] **Diff = "version > acked":** the scheduler (area E) walks the client's subscribed cells and
-        selects entities whose current version exceeds the client's acked version. Ack-advanced, never
-        last-*sent* (a lost snapshot re-deltas from the still-current acked baseline, §8.4).
-  - [ ] **Baseline RAM accounting:** size the acked-version map + tombstone set (`bytes/client ×
-        max clients`) and expose it to telemetry (area I) — it is an App. B **gate**, not a footnote.
-- **Tests (`NeuronCoreTest`/`ERServerTest`; testrunner mirror):**
-  - [ ] Version bumps iff a replicated field changes; idle entity holds its version across ticks.
-  - [ ] Diff selects exactly the entities changed since the client's acked baseline; a re-acked
-        baseline shrinks the next diff to ∅ for unchanged entities.
-  - [ ] A dropped snapshot (no ack) re-deltas from the still-current acked baseline (no retransmit,
-        converges).
+  - [x] **Replication version** (`Interest.h` `ReplicationStamps`): a monotonic version per `netId`,
+        advanced iff the entity's replicated fields (`ReplFields` — the App. A projection: pos +
+        local offset, hp, owner, shape, kind) changed since the last stamp. A stationary/idle entity
+        holds its version (costs ≈0 downstream). *Implementation note:* a **centralized post-tick
+        dirty-stamp** (`ServerUniverse::StampReplication`, end of `Step`) over a `netId`-keyed side
+        table — chosen over per-system bumps + an ECS `ReplState` component so every replicated
+        entity is covered with **no spawn-site coupling** and the wire format / client stay untouched;
+        the §8.4 observable contract (version advances iff replicated state changed) is identical.
+  - [x] **Per-client baseline** (`Interest.h` `ClientBaseline`): `netId → acked version` map + a
+        bounded per-tick **pending-sent** history, allocated per connection (keyed by player id). 
+        Advanced **on snapshot ack** (`Ack(tick)` folds every pending snapshot ≤ tick into the acked
+        map). The tombstone set rides on this baseline at area D (`Forget(netId)` hook in place).
+  - [x] **Diff = "version > acked":** `ServerUniverse::ChangedFor(client)` selects the interest-set
+        (`InterestGrid::VisibleTo`, area A) entities whose server version exceeds the client's acked
+        version. **Ack-advanced, never last-*sent*** — a dropped snapshot re-deltas from the still-
+        current acked baseline (§8.4). The area-E scheduler will order this diff by priority + MTU.
+  - [x] **Baseline RAM accounting:** `ClientBaseline::ApproxBytes()` +
+        `ServerUniverse::BaselineBytes`/`TotalBaselineBytes` size the acked + pending maps; area I
+        wires them to the App. B gate.
+- **Tests (`NeuronCoreTest`; `NeuronTools/testrunner/InterestTests.cpp` mirror):**
+  - [x] Version bumps iff a replicated field changes; idle entity holds its version across ticks
+        (`VersionBumpsOnlyWhenAReplicatedFieldChanges`, `StampBumpsOnlyOnChange`).
+  - [x] Diff selects exactly the entities changed since the client's acked baseline; a re-acked
+        baseline shrinks the next diff to ∅ (`BaselineDiffSelectsChangedAndAckShrinksToEmpty`).
+  - [x] A dropped snapshot (no ack) re-deltas from the still-current acked baseline, converges on ack
+        (`DroppedSnapshotReDeltasFromAckedBaseline`); baseline-RAM gauge is non-empty after acks.
 - **Depends on:** A. **Blocks:** C, D, E.
 
 ### C. Quantized sector-local delta encoding + changed-field mask (§8.4, App. A)
@@ -167,28 +185,34 @@
 - **Current state:** replaces `Snapshot.h`'s fixed-width absolute-`int64` record. `BitStream.h` /
   `Serde.h` bit-packing already exist.
 - **Work:**
-  - [ ] **New snapshot record codec** (rework `Snapshot.h` to the App. A layout): `netId` + a
-        **changed-field-mask flags byte** (+ tombstone bit, area D); only changed fields follow.
-        Position as a **quantized sector-local delta** (the entity's sector is known because it is in
-        the client's interest set), HP/owner/shape as masked optional fields.
-  - [ ] **Quantization step** (the §19 open question): bits-per-axis chosen against ~1 mm sector
-        precision (§6.3) and the ~16 B target; quantization error must stay under the ~100 ms
-        interpolation delay (§8.4) so it's invisible. Author as a tunable constant, not a literal.
-  - [ ] **Per-tick MTU byte budget + spillover:** the scheduler (area E) fills a snapshot to the
-        **safe-MTU budget** in descending priority; overflow spills to later ticks (bounded
-        staleness on least-relevant entities). Holds the "never larger than MTU, never fragmented"
-        invariant even in dense fights (§8.2/§8.4).
-  - [ ] **Client decode:** `NeuronClient` replica applies masked deltas onto the last-known
-        per-`netId` state, last-writer-wins by `tick` (the existing idempotent rule). Reconstruct
-        absolute position from sector + decoded local delta.
-- **Tests (`NeuronCoreTest`/`NeuronClientTest`; testrunner mirror):**
-  - [ ] Encode→decode round-trip reconstructs position within the quantization bound; changed-field
-        mask omits unchanged fields (a 1-field change costs the mask + 1 field).
-  - [ ] A stationary entity in interest costs ≈0 bytes (mask only / no record).
-  - [ ] A full MTU-budgeted snapshot never exceeds the safe payload; overflow entities appear in a
-        later tick (spillover), none dropped.
-  - [ ] Reordered/duplicate snapshots converge (LWW by tick) — extends the existing idempotency
-        test to the delta format.
+  - [x] **New snapshot record codec** (`Snapshot.h`, additive `DeltaRecord`/`DeltaSnapshot` +
+        `Encode/DecodeDeltaSnapshot`): `netId` + a **changed-field-mask flags byte** (`DeltaFlag`,
+        incl. the `DeltaTomb` bit reserved for area D); only changed fields follow. Position is a
+        **quantized sector-local value** (`DeltaPos`) with the sector sent only on first sight /
+        crossing (`DeltaSector`), HP/owner/shape/kind as masked optional fields. `MakeDeltaRecord
+        (cur, base)` computes the minimal mask vs the client's last-known state. The M3 full codec
+        is **untouched** — the live path swaps over at area E.
+  - [x] **Quantization step** (`kPosQuantBitsPerAxis = 20` → ~1.6 cm/axis): a named **tunable**, well
+        under the ~100 ms interpolation jitter (§8.4) while reaching the App. B ~16 B/delta target;
+        `Quantize/DequantizeSectorLocal` round-trip within one step (area J sweeps the constant).
+  - [x] **Per-tick MTU byte budget + spillover primitive:** `BuildBudgetedSnapshot(ordered, budget,
+        overflow)` keeps the priority-ordered prefix that fits the **safe-MTU budget** and spills the
+        rest to `overflow` (re-scheduled next tick by area E — area B keeps their version > acked, so
+        none are dropped). Holds the "never larger than MTU, never fragmented" invariant (§8.2/§8.4).
+        *The priority ordering + cross-tick spillover state is the area-E scheduler; C owns the codec
+        + the budget primitive.*
+  - [x] **Client decode:** `DeltaDecodeState` (NeuronCore, shared/testable) applies masked deltas
+        onto the last-known per-`netId` state, **last-writer-wins by `tick`** (reordered/duplicate
+        snapshots idempotent), reconstructing absolute position from sector + decoded local delta.
+        The `NeuronClient` replica adopts it when the live path swaps at area E.
+- **Tests (`NeuronCoreTest`; `NeuronTools/testrunner/SnapshotDeltaTests.cpp` mirror):**
+  - [x] Encode→decode round-trip reconstructs position within the quantization bound; the mask omits
+        unchanged fields (a 1-field change costs mask + 1 field) — `FirstSightRoundTripWithinQuantBound`,
+        `MaskOmitsUnchangedFields`, `SectorCrossingReAnchorsPosition`, `EncodesLiveServerEntityRoundTrip`.
+  - [x] A stationary entity costs ≈0 bytes (mask 0 / no record) — `StationaryEntityCostsNothing`.
+  - [x] A budgeted snapshot never exceeds the safe payload; overflow entities spill (none dropped) —
+        `BudgetedSnapshotNeverExceedsAndSpillsTheRest`.
+  - [x] Reordered/duplicate snapshots converge (LWW by tick) — `ReorderedAndDuplicateSnapshotsConvergeByTick`.
 - **Depends on:** A, B. **Blocks:** E, J (the bandwidth gate measures this format).
 
 ### D. Tombstone eviction — self-healing leave/despawn (§8.4)

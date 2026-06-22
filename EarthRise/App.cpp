@@ -13,6 +13,7 @@
 
 #include "pch.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -49,6 +50,10 @@
 #include "ReplicaManager.h"
 #include "Interpolator.h"
 #include "FleetControl.h"      // smart action, control groups, overview (M3 area G)
+#include "HudOverlay.h"        // in-world selection rings / health bars (playable slice)
+#include "Onboarding.h"        // objective/hint chain (playable slice)
+#include "Picking.h"           // viewport click / box selection (playable slice)
+#include "RtsCamera.h"         // free orbit/zoom/pan camera (playable slice)
 #include "Starmap.h"           // beacon route solver (M3 area G)
 #include "Command.h"           // FleetCommand encode (M3 area B)
 
@@ -120,6 +125,17 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   float m_ptrX{0.f}, m_ptrY{0.f};
   bool  m_ptrDown{false}, m_ptrPressed{false}, m_ptrReleased{false};
 
+  // Camera input (playable slice): right-drag orbits, wheel zooms, arrows pan.
+  bool  m_rmbDown{false};
+  float m_prevPtrX{0.f}, m_prevPtrY{0.f};
+  int   m_wheelAccum{0};
+  // Left-drag selection state (playable slice).
+  bool  m_selDragging{false};
+  float m_selX0{0.f}, m_selY0{0.f};
+  static constexpr float kCamYawPerPx   = 0.005f;
+  static constexpr float kCamPitchPerPx = 0.005f;
+  static constexpr float kCamPanFrac    = 0.02f; // pan step as a fraction of zoom distance
+
   // ---- windowed UI (docs/design/darwinia-menu-ui.md) ----
   enum Win { Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other, Win_Count };
   bool  m_winOpen[Win_Count]{ true, false, false, false, false };
@@ -152,6 +168,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   std::vector<uint32_t> m_selection;     // locally-selected owned net ids
   uint32_t m_targetNetId{0};             // last picked target (overview/radar)
   float m_focus[3]{0.f, 0.f, 0.f};       // render-space camera focus (own base)
+  Neuron::Client::RtsCamera m_camera;    // free orbit/zoom/pan camera (playable slice)
+  Neuron::Client::Onboarding m_onboarding; // objective/hint chain (playable slice)
+  DirectX::XMFLOAT4X4 m_viewProj{};       // cached view-proj for HUD overlays (playable slice)
 
   // ---- state ----
   std::array<uint8_t, 4096> m_snapBuf{};
@@ -281,6 +300,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     window.PointerMoved({this, &App::OnPointerMoved});
     window.PointerPressed({this, &App::OnPointerPressed});
     window.PointerReleased({this, &App::OnPointerReleased});
+    window.PointerWheelChanged({this, &App::OnPointerWheel});
   }
 
   // ── Pointer input (physical pixels via the DPI scale) ─────────────────────
@@ -290,7 +310,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const auto p = e.CurrentPoint().Position();
     m_ptrX = p.X * m_dpiScale;
     m_ptrY = p.Y * m_dpiScale;
-    m_ptrDown = e.CurrentPoint().Properties().IsLeftButtonPressed();
+    const auto props = e.CurrentPoint().Properties();
+    m_ptrDown = props.IsLeftButtonPressed();
+    m_rmbDown = props.IsRightButtonPressed(); // right-drag orbits the camera
   }
   void OnPointerPressed(const Windows::UI::Core::CoreWindow&,
                         const Windows::UI::Core::PointerEventArgs& e)
@@ -298,8 +320,18 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const auto p = e.CurrentPoint().Position();
     m_ptrX = p.X * m_dpiScale;
     m_ptrY = p.Y * m_dpiScale;
-    m_ptrDown = true;
+    const auto props = e.CurrentPoint().Properties();
+    m_ptrDown = props.IsLeftButtonPressed();
+    m_rmbDown = props.IsRightButtonPressed();
+    // Anchor the orbit so the first frame of a right-drag has a zero delta.
+    if (m_rmbDown) { m_prevPtrX = m_ptrX; m_prevPtrY = m_ptrY; }
     m_ptrPressed = true;
+  }
+  // Mouse wheel → camera zoom (accumulated; consumed in UpdateCameraInput).
+  void OnPointerWheel(const Windows::UI::Core::CoreWindow&,
+                      const Windows::UI::Core::PointerEventArgs& e)
+  {
+    m_wheelAccum += e.CurrentPoint().Properties().MouseWheelDelta();
   }
   void OnPointerReleased(const Windows::UI::Core::CoreWindow&,
                          const Windows::UI::Core::PointerEventArgs& e)
@@ -307,8 +339,46 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const auto p = e.CurrentPoint().Position();
     m_ptrX = p.X * m_dpiScale;
     m_ptrY = p.Y * m_dpiScale;
-    m_ptrDown = false;
+    const auto props = e.CurrentPoint().Properties();
+    m_ptrDown = props.IsLeftButtonPressed();
+    m_rmbDown = props.IsRightButtonPressed();
     m_ptrReleased = true;
+  }
+
+  // Apply camera input each frame: right-drag orbit, wheel zoom, arrow-key pan.
+  // Platform-independent math lives in Neuron::Client::RtsCamera; this just maps
+  // UWP pointer/keyboard state onto it. (Pan speed scales with zoom distance.)
+  void UpdateCameraInput()
+  {
+    if (m_rmbDown)
+    {
+      const float dx = m_ptrX - m_prevPtrX;
+      const float dy = m_ptrY - m_prevPtrY;
+      m_camera.Rotate(dx * kCamYawPerPx, -dy * kCamPitchPerPx);
+    }
+    m_prevPtrX = m_ptrX;
+    m_prevPtrY = m_ptrY;
+
+    if (m_wheelAccum != 0)
+    {
+      const float notches = static_cast<float>(m_wheelAccum) / 120.0f; // one detent = 120
+      m_camera.Zoom(std::pow(0.88f, notches));                          // wheel up zooms in
+      m_wheelAccum = 0;
+    }
+
+    if (m_window)
+    {
+      using VK = Windows::System::VirtualKey;
+      using KS = Windows::UI::Core::CoreVirtualKeyStates;
+      auto down = [&](VK k) { return (m_window.GetKeyState(k) & KS::Down) == KS::Down; };
+      const float step = m_camera.Distance() * kCamPanFrac;
+      float r = 0.0f, f = 0.0f;
+      if (down(VK::Left))  r -= step;
+      if (down(VK::Right)) r += step;
+      if (down(VK::Up))    f += step;
+      if (down(VK::Down))  f -= step;
+      if (r != 0.0f || f != 0.0f) m_camera.PanWorld(r, f); // (also releases base-follow)
+    }
   }
 
   // Logical DIP -> physical pixels for the swap chain.
@@ -1077,12 +1147,152 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     SendFleet(MakeSmartCommand(tt, m_selection, bestId, {}, /*queue*/false));
   }
 
+  // Left-click / drag-box selection in the 3D viewport (playable slice). Projects
+  // owned units to screen with the same view-proj the scene drew, then resolves a
+  // click (nearest unit) or a drag (box) via the platform-independent Picking helper.
+  // Runs after the radar handler and before UpdateUi consumes the pointer edge, and
+  // ignores clicks over the radar disc or an open UI window. NOTE: the CPU projection
+  // mirrors the renderer's column-major cbuffer convention (XMVector3Transform with
+  // the un-transposed view-proj) — verify the pick lines up on the Windows build.
+  void HandleViewportSelection(UINT screenW, UINT screenH, const DirectX::XMFLOAT4X4& vpf)
+  {
+    using namespace DirectX;
+    const float s = MenuScale(screenH);
+    const float R = 95.f * s, cxr = 20.f * s + R, cyr = static_cast<float>(screenH) - 20.f * s - R;
+    auto overRadar = [&](float x, float y) {
+      const float dx = x - cxr, dy = y - cyr; return dx * dx + dy * dy <= R * R;
+    };
+
+    if (m_ptrPressed && !PointerOverOpenWindow(s) && !overRadar(m_ptrX, m_ptrY))
+    {
+      m_selDragging = true; m_selX0 = m_ptrX; m_selY0 = m_ptrY;
+    }
+    if (!m_selDragging || !m_ptrReleased) return;
+    m_selDragging = false;
+
+    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+    if (self == 0) return;
+
+    // Project owned ships + base to screen (same vpf the scene was rendered with).
+    const XMMATRIX vp = XMLoadFloat4x4(&vpf);
+    std::vector<Neuron::Client::ScreenPoint> pts;
+    const Neuron::Client::ReplicaSet& rs = m_interp.curr;
+    for (uint32_t i = 0; i < rs.count; ++i)
+    {
+      const auto& e = rs.entities[i];
+      if (!e.valid || e.ownerPlayer != self) continue;
+      const auto kind = static_cast<Neuron::Sim::EntityKind>(e.entityType);
+      if (kind != Neuron::Sim::EntityKind::Ship && kind != Neuron::Sim::EntityKind::Base) continue;
+      const XMVECTOR clip = XMVector3Transform(XMVectorSet(e.x, e.y, e.z, 1.f), vp);
+      const float wclip = XMVectorGetW(clip);
+      Neuron::Client::ScreenPoint sp; sp.id = e.networkId;
+      if (wclip > 1e-4f)
+      {
+        const float ndcx = XMVectorGetX(clip) / wclip, ndcy = XMVectorGetY(clip) / wclip;
+        sp.x = (ndcx * 0.5f + 0.5f) * static_cast<float>(screenW);
+        sp.y = (1.f - (ndcy * 0.5f + 0.5f)) * static_cast<float>(screenH);
+        sp.visible = ndcx >= -1.f && ndcx <= 1.f && ndcy >= -1.f && ndcy <= 1.f;
+      }
+      pts.push_back(sp);
+    }
+
+    if (Neuron::Client::IsDrag(m_selX0, m_selY0, m_ptrX, m_ptrY))
+    {
+      Neuron::Client::PickBox(pts, m_selX0, m_selY0, m_ptrX, m_ptrY, m_selection);
+    }
+    else
+    {
+      const uint32_t hit = Neuron::Client::PickNearest(pts, m_ptrX, m_ptrY, 28.f * s);
+      m_selection.clear();
+      if (hit) m_selection.push_back(hit); // empty click clears selection
+    }
+  }
+
+  // Project a render-space point to screen pixels via the cached view-proj. Returns
+  // false when behind the camera or off-screen. Mirrors the renderer's column-major
+  // cbuffer convention (un-transposed view-proj) — verify alignment on Windows.
+  bool ProjectToScreen(float x, float y, float z, UINT screenW, UINT screenH,
+                       float& sx, float& sy) const
+  {
+    using namespace DirectX;
+    const XMMATRIX vp = XMLoadFloat4x4(&m_viewProj);
+    const XMVECTOR clip = XMVector3Transform(XMVectorSet(x, y, z, 1.f), vp);
+    const float wc = XMVectorGetW(clip);
+    if (wc <= 1e-4f) return false;
+    const float ndcx = XMVectorGetX(clip) / wc, ndcy = XMVectorGetY(clip) / wc;
+    if (ndcx < -1.f || ndcx > 1.f || ndcy < -1.f || ndcy > 1.f) return false;
+    sx = (ndcx * 0.5f + 0.5f) * static_cast<float>(screenW);
+    sy = (1.f - (ndcy * 0.5f + 0.5f)) * static_cast<float>(screenH);
+    return true;
+  }
+
+  // In-world feedback (playable slice): a green bracket under each selected unit and
+  // a health bar over every combat unit (own = green, hostile = red). Drawn in the
+  // 2D HUD pass by projecting each replica to screen.
+  void DrawWorldOverlays(UINT screenW, UINT screenH)
+  {
+    if (!m_uiReady) return;
+    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+    const float s = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
+    const Neuron::Client::ReplicaSet& rs = m_interp.curr;
+    for (uint32_t i = 0; i < rs.count; ++i)
+    {
+      const auto& e = rs.entities[i];
+      if (!e.valid) continue;
+      const auto kind = static_cast<Neuron::Sim::EntityKind>(e.entityType);
+      const bool isMine = (e.ownerPlayer == self && self != 0);
+      const bool isNpc = (kind == Neuron::Sim::EntityKind::NpcUnit);
+      const bool selected =
+          std::find(m_selection.begin(), m_selection.end(), e.networkId) != m_selection.end();
+      const bool bar = Neuron::Client::ShowsHealthBar(kind);
+      if (!selected && !bar) continue;
+
+      float sx = 0.f, sy = 0.f;
+      if (!ProjectToScreen(e.x, e.y, e.z, screenW, screenH, sx, sy)) continue;
+
+      if (selected) // green selection bracket
+      {
+        const float rr = 14.f * s, t = 2.f * s;
+        m_canvas.DrawRect(sx - rr, sy - rr, 2 * rr, t, 0.4f, 0.9f, 0.5f, 0.9f);
+        m_canvas.DrawRect(sx - rr, sy + rr - t, 2 * rr, t, 0.4f, 0.9f, 0.5f, 0.9f);
+        m_canvas.DrawRect(sx - rr, sy - rr, t, 2 * rr, 0.4f, 0.9f, 0.5f, 0.9f);
+        m_canvas.DrawRect(sx + rr - t, sy - rr, t, 2 * rr, 0.4f, 0.9f, 0.5f, 0.9f);
+      }
+      if (bar) // health bar, IFF-coloured
+      {
+        const float f = Neuron::Client::HealthFraction(kind, e.hp);
+        if (f >= 0.f)
+        {
+          const float bw = 24.f * s, bh = 3.f * s, bx = sx - bw * 0.5f, by = sy - 18.f * s;
+          m_canvas.DrawRect(bx, by, bw, bh, 0.f, 0.f, 0.f, 0.6f);
+          const float r = isMine ? 0.3f : (isNpc ? 0.95f : 0.9f);
+          const float g = isMine ? 0.85f : (isNpc ? 0.3f : 0.8f);
+          const float b = isMine ? 0.4f : 0.3f;
+          m_canvas.DrawRect(bx, by, bw * f, bh, r, g, b, 0.9f);
+        }
+      }
+    }
+  }
+
   // Minimal command HUD (§22.2/§22.3; M3 area G): the overview contact list (fog-
   // filtered, IFF-coloured, nearest-first) plus the current selection + target.
   void DrawCommandHud(UINT screenW, UINT screenH)
   {
     if (!m_uiReady) return;
     const float s = MenuScale(screenH);
+
+    // Objective banner (playable-slice onboarding) — amber, top-left.
+    if (const char* obj = m_onboarding.CurrentText(); obj && obj[0])
+      m_canvas.DrawText(40.f * s, 18.f * s, obj, 1.0f, 0.85f, 0.4f, s * 0.95f);
+
+    // Live drag-select rectangle (playable slice).
+    if (m_selDragging && m_ptrDown)
+    {
+      const float lx = m_selX0 < m_ptrX ? m_selX0 : m_ptrX;
+      const float ly = m_selY0 < m_ptrY ? m_selY0 : m_ptrY;
+      m_canvas.DrawRect(lx, ly, std::fabs(m_ptrX - m_selX0), std::fabs(m_ptrY - m_selY0),
+                        0.4f, 0.8f, 1.0f, 0.15f);
+    }
     const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
     const auto overview = Neuron::Client::BuildOverview(m_interp.curr, self,
                                                         m_focus[0], m_focus[1], m_focus[2]);
@@ -1200,6 +1410,14 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         m_interp.Advance(m_replica.Current());
     }
 
+    // 2.5 Camera input (orbit/zoom/pan) + onboarding objective chain.
+    UpdateCameraInput();
+    {
+      const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+      m_onboarding.Observe(Neuron::Client::ObserveWorld(
+          m_interp.curr, self, static_cast<uint32_t>(m_selection.size())));
+    }
+
     // 3. Render.
     const UINT w = m_dr.Width();
     const UINT h = m_dr.Height();
@@ -1224,11 +1442,15 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         }
       }
     }
-    // Command view: pulled back and raised so the base sits among the surrounding
-    // scenery cluster (which is placed ahead on +Z), looking slightly forward.
-    const XMVECTOR eye = XMVectorSet(cx, cy + 140.f, cz - 340.f, 0.f);
-    const XMVECTOR at = XMVectorSet(cx, cy + 20.f, cz + 120.f, 0.f);
-    const XMVECTOR up = XMVectorSet(0.f, 1.f, 0.f, 0.f);
+    // Free RTS camera (playable slice): while "follow" is on it tracks the player's
+    // drifting base; right-drag/wheel/arrows orbit, zoom and pan it (UpdateCameraInput).
+    if (m_camera.Follow()) m_camera.SetFocus({ cx, cy, cz });
+    const XMFLOAT3 eyeF = m_camera.Eye();
+    const XMFLOAT3 atF = m_camera.At();
+    const XMFLOAT3 upF = m_camera.Up();
+    const XMVECTOR eye = XMLoadFloat3(&eyeF);
+    const XMVECTOR at = XMLoadFloat3(&atF);
+    const XMVECTOR up = XMLoadFloat3(&upF);
     const float fov = SettingFovRadians();
     const float asp = (h > 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.f;
 
@@ -1243,6 +1465,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     XMFLOAT4X4 vpf;
     XMStoreFloat4x4(&vpf, viewProj);
+    m_viewProj = vpf; // cache for the HUD overlay projection (playable slice)
 
     // Camera basis for billboard particles (world space).
     float camRight[3], camUp[3];
@@ -1396,6 +1619,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // contact (must run before UpdateUi consumes the pointer-press, §23.1/area G).
     m_focus[0] = cx; m_focus[1] = cy; m_focus[2] = cz;
     HandleRadarCommand(h, cx, cz);
+    HandleViewportSelection(w, h, vpf); // 3D-viewport click / box selection
 
     // HUD + windowed UI. Interaction (hover/press/drag/dropdowns) runs first.
     UpdateUi(w, h);
@@ -1427,6 +1651,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     // 2D radar disc (under the windowed UI).
     DrawRadar(w, h, entities, entCount, cx, cy, cz);
+
+    // In-world selection brackets + health bars (playable slice).
+    DrawWorldOverlays(w, h);
 
     // Overview contact list + selection/target readout (M3 area G).
     DrawCommandHud(w, h);
@@ -1478,6 +1705,12 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       SendFleet(c);
       return;
     }
+    case VK::F: // toggle base-follow camera
+      m_camera.SetFollow(!m_camera.Follow());
+      return;
+    case VK::Space: // recenter on the player's base (re-enables follow)
+      m_camera.SetFollow(true);
+      return;
     default:
       return;
     }

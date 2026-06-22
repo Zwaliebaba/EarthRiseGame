@@ -16,6 +16,7 @@
 #include "Components.h"
 #include "Economy.h"
 #include "Fleet.h"
+#include "Interest.h"
 #include "Movement.h"
 #include "Navigation.h"
 #include "ShapeCatalog.h"
@@ -205,6 +206,7 @@ public:
         Sim::BeginWarp(*nav, dest, IsBase(netId) ? m_nav.warpSpeedBase : m_nav.warpSpeedShip,
                        m_nav.warpAlignSeconds);
         OnTravelStart(dest);
+        PrefetchTravelInterest(netId, dest);
         return true;
     }
 
@@ -239,6 +241,7 @@ public:
         Sim::BeginJump(*nav, m_universe.beacons[destIdx].pos, destIdx,
                        base ? m_nav.jumpSpoolBase : m_nav.jumpSpoolShip);
         OnTravelStart(m_universe.beacons[destIdx].pos);
+        PrefetchTravelInterest(netId, m_universe.beacons[destIdx].pos);
         return JumpReject::Accepted;
     }
 
@@ -469,6 +472,8 @@ public:
         if (it == m_netIdToEntity.end()) return false;
         m_world.DestroyEntity(it->second);
         m_netIdToEntity.erase(it);
+        m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
+        m_repl.Remove(netId);     // drop replication version (area B)
         return true;
     }
 
@@ -485,7 +490,102 @@ public:
         HarvestSystem(dtSeconds);
         BuildSystem(dtSeconds);
         ++m_tick;
+        StampReplication();
+        UpdateInterest();
     }
+
+    // Stamp every replicated entity's version against this tick's final state (M4
+    // area B, §8.4): a version advances iff the entity's replicated fields (the
+    // App. A snapshot projection) changed, so an idle entity holds its version and
+    // costs ≈0 downstream. Pure bookkeeping — touches only the version side table,
+    // never sim state, so SimHash is unchanged. The per-client diff reads it.
+    void StampReplication()
+    {
+        m_world.ForEach<NetId, Transform, ShapeId>([&](NetId& id, Transform& t, ShapeId& s) {
+            const auto e = EntityOf(id.value);
+            Neuron::Sim::ReplFields f;
+            f.x = t.pos.x; f.y = t.pos.y; f.z = t.pos.z;
+            f.lox = t.localOffset.x; f.loy = t.localOffset.y; f.loz = t.localOffset.z;
+            const Health* h = m_world.GetComponent<Health>(e);
+            f.hp = h ? h->hp : 1000; // mirror MakeSnapshotEntity's default
+            const OwnerId* o = m_world.GetComponent<OwnerId>(e);
+            f.ownerPlayer = o ? o->player : 0;
+            f.shapeId = s.value;
+            f.kind    = static_cast<uint8_t>(s.kind);
+            m_repl.Stamp(id.value, f);
+        });
+    }
+
+    // --- per-client replication baseline (area B, §8.4 / §8.3) ---------------
+
+    // Current server-side replication version of an entity (0 = never stamped).
+    [[nodiscard]] uint32_t ReplVersion(uint32_t netId) const { return m_repl.Version(netId); }
+
+    // The netIds a client still lacks: in its interest set (area A) and with a
+    // server version beyond its acked baseline. This is the raw area-B diff — the
+    // area-E scheduler orders it by priority and fits it to the MTU budget. Drawn
+    // from VisibleTo so it is sorted/deduped (deterministic). Ack-advanced, never
+    // last-sent, so a dropped snapshot re-deltas from the still-current baseline.
+    [[nodiscard]] std::vector<uint32_t> ChangedFor(uint32_t clientId)
+    {
+        std::vector<uint32_t> visible;
+        m_interest.VisibleTo(clientId, visible);
+        Neuron::Sim::ClientBaseline& base = m_baselines[clientId];
+        std::vector<uint32_t> changed;
+        for (uint32_t netId : visible)
+            if (base.Needs(netId, m_repl.Version(netId))) changed.push_back(netId);
+        return changed;
+    }
+
+    // Record that 'clientId' was sent these netIds (at their current versions) in
+    // the snapshot for 'tick' (§8.3), so acking 'tick' advances its baseline. The
+    // area-E/F encoder calls this as it seals each client's snapshot.
+    void RecordSent(uint32_t clientId, uint32_t tick, const std::vector<uint32_t>& netIds)
+    {
+        Neuron::Sim::ClientBaseline::SentList sent;
+        sent.reserve(netIds.size());
+        for (uint32_t n : netIds) sent.emplace_back(n, m_repl.Version(n));
+        m_baselines[clientId].RecordSent(tick, sent);
+    }
+
+    // Advance a client's acked baseline to 'tick' (its §8.3 snapshot ack).
+    void AckBaseline(uint32_t clientId, uint32_t tick) { m_baselines[clientId].Ack(tick); }
+
+    // Per-client / total baseline RAM (App. B gate; area I telemetry reads these).
+    [[nodiscard]] size_t BaselineBytes(uint32_t clientId) { return m_baselines[clientId].ApproxBytes(); }
+    [[nodiscard]] size_t TotalBaselineBytes() const
+    {
+        size_t bytes = 0;
+        for (const auto& [clientId, base] : m_baselines) bytes += base.ApproxBytes();
+        return bytes;
+    }
+
+    [[nodiscard]] Neuron::Sim::ClientBaseline& Baseline(uint32_t clientId) { return m_baselines[clientId]; }
+
+    // Refresh the cell publish/subscribe interest grid for this tick (M4 area A,
+    // §8.4): every replicated entity re-homes into its current sector cell (one
+    // leave + one enter on a crossing), and every player's subscription is set to
+    // the union of the sector neighbourhoods its sensor sources can reach. Pure
+    // bookkeeping — touches only the interest grid, never sim state, so SimHash is
+    // unchanged. The per-client snapshot diff (areas B/C/E) reads this grid.
+    void UpdateInterest()
+    {
+        m_world.ForEach<NetId, Transform>([&](NetId& id, Transform& t) {
+            m_interest.UpdateResidency(id.value, Neuron::Universe::UniverseToSector(t.pos));
+        });
+        std::unordered_map<uint32_t, std::vector<Neuron::Universe::SectorId>> perPlayer;
+        m_world.ForEach<OwnerId, Sensor, Transform>([&](OwnerId& o, Sensor& s, Transform& t) {
+            if (o.player == 0) return; // NPC/unowned eyes don't subscribe
+            Neuron::Sim::CollectNeighbourhood(Neuron::Universe::UniverseToSector(t.pos),
+                                              Neuron::Sim::SectorRadiusForRange(s.range),
+                                              perPlayer[o.player]);
+        });
+        for (auto& [player, cells] : perPlayer)
+            m_interest.SetSubscription(player, cells);
+    }
+
+    // Interest grid accessor (the area-B/C/E snapshot diff + tests read it).
+    [[nodiscard]] Neuron::Sim::InterestGrid& Interest() noexcept { return m_interest; }
 
     // Build the full snapshot for this tick (interest = everything until M4; the
     // per-player fog-filtered variant is BuildSnapshotFor, area E).
@@ -497,6 +597,19 @@ public:
             snap.entities.push_back(MakeSnapshotEntity(id, t, s));
         });
         return snap;
+    }
+
+    // Current replicated projection of an entity (the area-C delta codec / area-E
+    // encoder reads this). False if the netId has no replicated components.
+    [[nodiscard]] bool SnapshotEntityOf(uint32_t netId, SnapshotEntity& out)
+    {
+        const auto e = EntityOf(netId);
+        NetId*     id = m_world.GetComponent<NetId>(e);
+        Transform* t  = m_world.GetComponent<Transform>(e);
+        ShapeId*   s  = m_world.GetComponent<ShapeId>(e);
+        if (!id || !t || !s) return false;
+        out = MakeSnapshotEntity(*id, *t, *s);
+        return true;
     }
 
     [[nodiscard]] uint32_t Tick() const noexcept { return m_tick; }
@@ -752,6 +865,8 @@ private:
         }
         if (m_world.IsAlive(e)) m_world.DestroyEntity(e);
         m_netIdToEntity.erase(netId);
+        m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
+        m_repl.Remove(netId);     // drop replication version (area B)
     }
 
     // --- NPC AI (area F) -----------------------------------------------------
@@ -838,6 +953,19 @@ private:
     void OnTravelStart(const Neuron::Universe::UniversePos& dest) noexcept
     {
         m_lastTravelSector = Neuron::Universe::UniverseToSector(dest);
+    }
+
+    // Pre-subscribe the travelling unit's owner to the destination cells (R21), so
+    // a warp/jump that crosses sectors faster than a tick has its target already
+    // replicated on arrival. Pinned until the owner's sensor neighbourhood reaches
+    // it (InterestGrid::SetSubscription unpins on arrival).
+    void PrefetchTravelInterest(uint32_t netId, const Neuron::Universe::UniversePos& dest)
+    {
+        const OwnerId* o = m_world.GetComponent<OwnerId>(EntityOf(netId));
+        if (!o || o->player == 0) return;
+        const Sensor* s = m_world.GetComponent<Sensor>(EntityOf(netId));
+        const int radius = s ? Neuron::Sim::SectorRadiusForRange(s->range) : 1;
+        m_interest.PreSubscribe(o->player, Neuron::Universe::UniverseToSector(dest), radius);
     }
 
     // Advance every base's build queue; on completion spawn a ship for the owner
@@ -1010,6 +1138,9 @@ private:
     std::unordered_map<uint16_t, uint32_t>     m_beaconEntity; // beaconIndex → netId
     std::unordered_map<std::string, uint16_t>  m_beaconName;   // beacon name → beaconIndex
     Neuron::Universe::SectorId                 m_lastTravelSector{};
+    Neuron::Sim::InterestGrid                  m_interest; // cell pub/sub interest (area A)
+    Neuron::Sim::ReplicationStamps             m_repl;     // per-entity versions (area B)
+    std::unordered_map<uint32_t, Neuron::Sim::ClientBaseline> m_baselines; // player → baseline (area B)
     // NPC sites (area F): site id → guardians still alive; cleared sites pending drain.
     std::unordered_map<uint16_t, int>          m_siteAlive;
     std::vector<uint16_t>                      m_clearedSites;

@@ -42,10 +42,16 @@ changed, bump the masterplan first, then the plan).
 | M1b — Client tech slice | (complete — masterplan §17) | ✅ |
 | M2 — Darwinia look + audio | [`M2-darwinia-audio.md`](M2-darwinia-audio.md) | ✅ |
 | **M3 — Core 4X loop, fleet command & navigation** | [`M3-core-4x-loop.md`](M3-core-4x-loop.md) | 🔨 **active** (areas A–H implemented; Windows client/headless glue unverified) |
-| M4 — Scale & interest | [`M4-scale-interest.md`](M4-scale-interest.md) | ⏳ drafted (next) |
+| M4 — Scale & interest | [`M4-scale-interest.md`](M4-scale-interest.md) | 🔨 in progress (areas A–C implemented) |
 | M5 — Accounts, auth & persistence | [`M5-accounts-persistence.md`](M5-accounts-persistence.md) | ⏳ drafted |
 | M6 — Combat model & deployment | — | ⏳ |
 | M7 — Sandbox: conquest, economy, PvE, onboarding | — | ⏳ |
+
+### Side tracks
+
+| Track | Plan | Status |
+| --- | --- | --- |
+| Playable vertical slice (forward-pulled M7 onboarding + RTS client affordances) | [`playable-slice.md`](playable-slice.md) | 🔨 logic complete (camera / onboarding / selection / feedback), Linux-tested; pending Windows smoke run |
 
 New milestone plan: copy [`_template.md`](_template.md) → `M<n>-<slug>.md`, fill it from the
 matching masterplan §17 milestone, add a row above.

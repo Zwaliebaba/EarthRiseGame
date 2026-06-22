@@ -154,7 +154,11 @@ int main()
     ConsoleLog("[ERROR] CNG init failed.\n");
     return 1;
   }
-  crypto.LoadOrGenerateStaticKey({}); // M1a: ephemeral static key; M5 persists it.
+  if (!crypto.LoadOrGenerateStaticKey({})) // M1a: ephemeral static key; M5 persists it.
+  {
+    ConsoleLog("[ERROR] static key load/generate failed.\n");
+    return 1;
+  }
 
   // Publish the pinned static public key so dev clients / ERHeadless bots can
   // pin it (§8.3). Real clients ship with this key baked in.
@@ -234,7 +238,7 @@ int main()
     bool stepped = false;
     while (acc.ConsumeStep())
     {
-      universe.Step(Neuron::Sim::kSimDeltaSeconds);
+      universe.Step(static_cast<float>(Neuron::Sim::kSimDeltaSeconds));
       stepped = true;
     }
 

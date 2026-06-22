@@ -22,6 +22,18 @@
     <ClInclude Include="IClientController.h">
       <Filter>Control</Filter>
     </ClInclude>
+    <ClInclude Include="RtsCamera.h">
+      <Filter>Control</Filter>
+    </ClInclude>
+    <ClInclude Include="Onboarding.h">
+      <Filter>Control</Filter>
+    </ClInclude>
+    <ClInclude Include="Picking.h">
+      <Filter>Control</Filter>
+    </ClInclude>
+    <ClInclude Include="HudOverlay.h">
+      <Filter>Control</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Project Files">

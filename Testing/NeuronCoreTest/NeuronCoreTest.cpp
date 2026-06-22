@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -8,6 +10,7 @@
 #include "Command.h"
 #include "Economy.h"
 #include "Fleet.h"
+#include "Interest.h"
 #include "Navigation.h"
 #include "ServerUniverse.h"
 #include "ShapeCatalog.h"
@@ -217,6 +220,225 @@ namespace NeuronCoreTest
         Assert::IsTrue(decoded.entities[i].kind == snap.entities[i].kind);
         Assert::IsTrue(decoded.entities[i].netId == snap.entities[i].netId);
       }
+    }
+  };
+
+  // --- Quantized sector-local delta codec (M4 area C; §8.4, App. A) -----------
+
+  TEST_CLASS(SnapshotDeltaTests)
+  {
+    static SnapshotEntity Ent(uint32_t netId, UniversePos pos, DirectX::XMFLOAT3 local,
+                              int32_t hp, uint16_t shape, EntityKind kind, uint32_t owner)
+    {
+      SnapshotEntity e;
+      e.netId = netId; e.pos = pos; e.localOffset = local; e.hp = hp;
+      e.shapeId = shape; e.kind = kind; e.ownerPlayer = owner;
+      return e;
+    }
+    static double Abs(int64_t pos, float local) { return static_cast<double>(pos) + local; }
+    static double Step()
+    {
+      return static_cast<double>(Neuron::Universe::kSectorSize) /
+             static_cast<double>(uint64_t(1) << kPosQuantBitsPerAxis);
+    }
+
+  public:
+    TEST_METHOD(FirstSightRoundTripWithinQuantBound)
+    {
+      const SnapshotEntity src = Ent(7, { 1000, 2000, 3000 }, { 0.25f, 0.5f, 0.75f },
+                                     640, 5, EntityKind::Ship, 42);
+      DeltaSnapshot snap; snap.tick = 11;
+      snap.records.push_back(MakeDeltaRecord(src, nullptr));
+      DeltaDecodeState dec;
+      Assert::IsTrue(dec.Apply(EncodeDeltaSnapshot(snap)));
+      const SnapshotEntity* got = dec.Find(7);
+      Assert::IsTrue(got != nullptr);
+      Assert::IsTrue(std::fabs(Abs(got->pos.x, got->localOffset.x) - 1000.25) <= Step());
+      Assert::IsTrue(std::fabs(Abs(got->pos.z, got->localOffset.z) - 3000.75) <= Step());
+      Assert::AreEqual(int32_t{ 640 }, got->hp);
+      Assert::AreEqual(uint16_t{ 5 }, got->shapeId);
+      Assert::AreEqual(uint32_t{ 42 }, got->ownerPlayer);
+    }
+
+    TEST_METHOD(MaskOmitsUnchangedFields)
+    {
+      const SnapshotEntity base = Ent(7, { 1000, 0, 0 }, { 0, 0, 0 }, 640, 5, EntityKind::Ship, 42);
+      SnapshotEntity cur = base; cur.hp = 600;
+      const DeltaRecord r = MakeDeltaRecord(cur, &base);
+      Assert::AreEqual(uint8_t{ DeltaHp }, r.mask);
+      Assert::IsTrue(DeltaRecordBits(r) < DeltaRecordBits(MakeDeltaRecord(cur, nullptr)));
+    }
+
+    TEST_METHOD(StationaryEntityCostsNothing)
+    {
+      const SnapshotEntity base = Ent(7, { 1234, 5678, 9012 }, { 0.1f, 0.2f, 0.3f },
+                                      640, 5, EntityKind::Ship, 42);
+      Assert::AreEqual(uint8_t{ 0 }, MakeDeltaRecord(base, &base).mask);
+    }
+
+    TEST_METHOD(BudgetedSnapshotNeverExceedsAndSpillsTheRest)
+    {
+      std::vector<DeltaRecord> recs;
+      for (uint32_t i = 1; i <= 20; ++i)
+        recs.push_back(MakeDeltaRecord(
+            Ent(i, { 1000 * i, 0, 0 }, { 0, 0, 0 }, 100, 5, EntityKind::Ship, 1), nullptr));
+      std::vector<uint32_t> overflow;
+      const size_t budget = 60;
+      const DeltaSnapshot snap = BuildBudgetedSnapshot(1, recs, budget, overflow);
+      Assert::IsTrue(EncodeDeltaSnapshot(snap).size() <= budget);
+      Assert::IsTrue(!overflow.empty());
+      Assert::AreEqual(size_t{ 20 }, snap.records.size() + overflow.size());
+    }
+
+    TEST_METHOD(ReorderedAndDuplicateSnapshotsConvergeByTick)
+    {
+      const SnapshotEntity a = Ent(1, { 0, 0, 0 }, { 0, 0, 0 }, 100, 5, EntityKind::Ship, 7);
+      DeltaDecodeState dec;
+      DeltaSnapshot s5; s5.tick = 5; s5.records.push_back(MakeDeltaRecord(a, nullptr));
+      dec.Apply(EncodeDeltaSnapshot(s5));
+      Assert::AreEqual(int32_t{ 100 }, dec.Find(1)->hp);
+
+      SnapshotEntity a4 = a; a4.hp = 50;
+      DeltaSnapshot s4; s4.tick = 4; s4.records.push_back(MakeDeltaRecord(a4, &a));
+      dec.Apply(EncodeDeltaSnapshot(s4));
+      Assert::AreEqual(int32_t{ 100 }, dec.Find(1)->hp); // stale ignored
+
+      SnapshotEntity a6 = a; a6.hp = 80;
+      DeltaSnapshot s6; s6.tick = 6; s6.records.push_back(MakeDeltaRecord(a6, &a));
+      dec.Apply(EncodeDeltaSnapshot(s6));
+      Assert::AreEqual(int32_t{ 80 }, dec.Find(1)->hp);
+
+      SnapshotEntity a6b = a; a6b.hp = 10;
+      DeltaSnapshot s6b; s6b.tick = 6; s6b.records.push_back(MakeDeltaRecord(a6b, &a));
+      dec.Apply(EncodeDeltaSnapshot(s6b));
+      Assert::AreEqual(int32_t{ 80 }, dec.Find(1)->hp); // duplicate tick ignored
+    }
+  };
+
+  // --- Interest (cell pub/sub, M4 area A; §8.4, §6.3) -------------------------
+
+  TEST_CLASS(InterestGridTests)
+  {
+  public:
+    TEST_METHOD(CrossingEmitsOneLeaveAndOneEnter)
+    {
+      InterestGrid g;
+      const auto first = g.UpdateResidency(7, { 0, 0, 0 });
+      Assert::IsTrue(first.changed && !first.hadPrevious); // enter only
+      Assert::IsTrue(!g.UpdateResidency(7, { 0, 0, 0 }).changed); // same sector = no-op
+
+      const auto ev = g.UpdateResidency(7, { 1, 0, 0 });
+      Assert::IsTrue(ev.changed && ev.hadPrevious);
+      Assert::IsTrue(ev.from == SectorId{ 0, 0, 0 });
+      Assert::IsTrue(ev.to == SectorId{ 1, 0, 0 });
+      Assert::IsTrue(g.Residents({ 0, 0, 0 }).empty());        // exactly one leave
+      Assert::AreEqual(size_t{ 1 }, g.Residents({ 1, 0, 0 }).size()); // exactly one enter
+    }
+
+    TEST_METHOD(NeighbourhoodSubscriptionMatchesRange)
+    {
+      InterestGrid g;
+      std::vector<SectorId> cells;
+      CollectNeighbourhood({ 0, 0, 0 }, 2, cells);
+      g.SetSubscription(1, cells);
+      Assert::IsTrue(g.IsSubscribed(1, { 2, 0, 0 }));
+      Assert::IsTrue(g.IsSubscribed(1, { -2, -2, -2 }));
+      Assert::IsTrue(!g.IsSubscribed(1, { 3, 0, 0 }));     // past the radius
+      Assert::AreEqual(size_t{ 5 * 5 * 5 }, g.Subscriptions(1).size());
+    }
+
+    TEST_METHOD(MutationEnqueuedToCellSubscribersOnly)
+    {
+      InterestGrid g;
+      const SectorId cellC{ 5, 0, 0 };
+      g.UpdateResidency(100, cellC);
+      g.Subscribe(1, cellC);
+      g.Subscribe(2, { 9, 0, 0 }); // subscribes elsewhere
+
+      Assert::AreEqual(size_t{ 1 }, g.Subscribers(cellC).size());
+      Assert::AreEqual(uint32_t{ 1 }, g.Subscribers(cellC)[0]);
+      std::vector<uint32_t> vis;
+      g.VisibleTo(1, vis);
+      Assert::AreEqual(size_t{ 1 }, vis.size());
+      Assert::AreEqual(uint32_t{ 100 }, vis[0]);
+      g.VisibleTo(2, vis);
+      Assert::IsTrue(vis.empty()); // the non-subscriber never sees the mutation
+    }
+
+    TEST_METHOD(WarpPrefetchSubscribesDestinationBeforeArrival)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const UniversePos dest{ int64_t(40) * Neuron::Universe::kSectorSize, 0, 0 };
+      const SectorId destSec = Neuron::Universe::UniverseToSector(dest);
+      Assert::IsTrue(su.BeginWarpTo(base, dest));            // R21 prefetch fires
+      Assert::IsTrue(su.Interest().IsSubscribed(base, destSec)); // before arrival
+      su.Step(0.1f);
+      Assert::IsTrue(su.Interest().IsSubscribed(base, destSec)); // pinned in flight
+    }
+  };
+
+  // --- Replication versions + per-client baselines (M4 area B; §8.4/§8.3) ------
+
+  TEST_CLASS(ReplicationTests)
+  {
+  public:
+    TEST_METHOD(VersionBumpsOnlyWhenAReplicatedFieldChanges)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      su.Step(0.1f);
+      const uint32_t v1 = su.ReplVersion(base);
+      Assert::IsTrue(v1 >= 1);
+      su.Step(0.1f);
+      su.Step(0.1f);
+      Assert::AreEqual(v1, su.ReplVersion(base)); // idle holds its version
+      su.SetBaseVelocity(base, { 50, 0, 0 });
+      su.Step(0.1f);
+      Assert::IsTrue(su.ReplVersion(base) > v1);  // position changed → bump
+    }
+
+    TEST_METHOD(StampBumpsOnlyOnChange)
+    {
+      ReplicationStamps stamps;
+      ReplFields f;
+      f.hp = 100;
+      Assert::AreEqual(uint32_t{ 1 }, stamps.Stamp(42, f));
+      Assert::AreEqual(uint32_t{ 1 }, stamps.Stamp(42, f)); // unchanged
+      f.hp = 90;
+      Assert::AreEqual(uint32_t{ 2 }, stamps.Stamp(42, f)); // changed field
+    }
+
+    TEST_METHOD(BaselineDiffSelectsChangedAndAckShrinksToEmpty)
+    {
+      ClientBaseline base;
+      Assert::IsTrue(base.Needs(10, 3));
+      base.RecordSent(5, { { 10, 3 } });
+      Assert::IsTrue(base.Needs(10, 3)); // from acked, not last-sent
+      base.Ack(5);
+      Assert::IsTrue(!base.Needs(10, 3)); // re-acked → ∅
+      Assert::IsTrue(base.Needs(10, 4));
+      Assert::AreEqual(uint32_t{ 3 }, base.Acked(10));
+    }
+
+    TEST_METHOD(DroppedSnapshotReDeltasFromAckedBaseline)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      su.Step(0.1f);
+      const auto changed1 = su.ChangedFor(base);
+      Assert::IsTrue(std::find(changed1.begin(), changed1.end(), base) != changed1.end());
+
+      su.RecordSent(base, su.Tick(), changed1); // sent but ack lost
+      su.Step(0.1f);
+      const auto changed2 = su.ChangedFor(base);
+      Assert::IsTrue(std::find(changed2.begin(), changed2.end(), base) != changed2.end());
+
+      su.RecordSent(base, su.Tick(), changed2);
+      su.AckBaseline(base, su.Tick());          // now acked
+      su.Step(0.1f);
+      const auto changed3 = su.ChangedFor(base);
+      Assert::IsTrue(std::find(changed3.begin(), changed3.end(), base) == changed3.end());
     }
   };
 
