@@ -1,11 +1,16 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "FleetControl.h" // NeuronClient — smart action / control groups / overview
+#include "HudOverlay.h"   // NeuronClient — in-world overlay helpers (playable slice)
+#include "Onboarding.h"   // NeuronClient — objective chain (playable slice)
+#include "Picking.h"      // NeuronClient — selection hit-testing (playable slice)
+#include "RtsCamera.h"    // NeuronClient — RTS camera (playable slice)
 #include "Starmap.h"      // NeuronClient — beacon route solver
 #include "UniverseData.h" // NeuronCore — UniverseDataset / BeaconDef
 
@@ -125,6 +130,153 @@ namespace NeuronClientTest
       const auto uni = MakeGraph();
       auto reach = ReachableBeacons(uni, "HUB");
       Assert::IsTrue(reach.size() == 4 && reach.count("C") == 1 && reach.count("ISL") == 0);
+    }
+  };
+
+  // --- Playable slice (mirrors NeuronTools/testrunner: Camera/Onboarding/Picking/
+  //     HudOverlay). All header-only client logic, no ECS binding. ----------------
+
+  TEST_CLASS(CameraTests)
+  {
+    static float Dist(const DirectX::XMFLOAT3& a, const DirectX::XMFLOAT3& b)
+    {
+      const float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+      return std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+  public:
+    TEST_METHOD(EyeAboveFocusAtDistance)
+    {
+      RtsCamera cam;
+      cam.SetFocus({ 0, 0, 0 });
+      Assert::IsTrue(cam.Eye().y > 0.0f);
+      Assert::IsTrue(std::fabs(Dist(cam.Eye(), cam.Focus()) - cam.Distance()) < 0.01f);
+    }
+
+    TEST_METHOD(OrbitKeepsDistanceConstant)
+    {
+      RtsCamera cam;
+      cam.SetFocus({ 100, 0, 50 });
+      const float d0 = cam.Distance();
+      cam.Rotate(1.2f, 0.0f);
+      Assert::IsTrue(std::fabs(Dist(cam.Eye(), cam.Focus()) - d0) < 0.01f);
+    }
+
+    TEST_METHOD(ZoomAndPitchClamp)
+    {
+      RtsCamera cam;
+      cam.Zoom(0.0001f);
+      Assert::IsTrue(std::fabs(cam.Distance() - RtsCamera::kMinDistance) < 0.01f);
+      cam.Zoom(100000.0f);
+      Assert::IsTrue(std::fabs(cam.Distance() - RtsCamera::kMaxDistance) < 0.01f);
+      cam.Rotate(0.0f, +10.0f);
+      Assert::IsTrue(std::fabs(cam.Pitch() - RtsCamera::kMaxPitch) < 0.001f);
+      cam.Rotate(0.0f, -10.0f);
+      Assert::IsTrue(std::fabs(cam.Pitch() - RtsCamera::kMinPitch) < 0.001f);
+    }
+
+    TEST_METHOD(PanMovesFocusAndDisablesFollow)
+    {
+      RtsCamera cam;
+      cam.SetFollow(true);
+      cam.SetFocus({ 0, 0, 0 });
+      cam.PanWorld(250.0f, 0.0f);
+      Assert::IsTrue(!cam.Follow());
+      Assert::IsTrue(std::fabs(cam.Focus().x) + std::fabs(cam.Focus().z) > 1.0f);
+      Assert::IsTrue(std::fabs(cam.Focus().y) < 0.001f);
+    }
+  };
+
+  TEST_CLASS(OnboardingTests)
+  {
+    using Step = Onboarding::Step;
+  public:
+    TEST_METHOD(WalksChainOnObservableMilestones)
+    {
+      Onboarding ob;
+      Assert::IsTrue(ob.Current() == Step::Welcome);
+      ObservedState s;
+      s.hasOwnBase = true;     ob.Observe(s); Assert::IsTrue(ob.Current() == Step::Select);
+      s.selectionCount = 2;    ob.Observe(s); Assert::IsTrue(ob.Current() == Step::Engage);
+      s.npcVisible = 3;        ob.Observe(s); Assert::IsTrue(ob.Current() == Step::Clear);
+      s.npcVisible = 0;        ob.Observe(s); Assert::IsTrue(ob.Current() == Step::Done);
+      Assert::IsTrue(ob.Complete());
+    }
+
+    TEST_METHOD(ClearNeedsAPriorSighting)
+    {
+      Onboarding ob;
+      ObservedState s; s.hasOwnBase = true; s.selectionCount = 1;
+      ob.Observe(s); ob.Observe(s);          // → Engage
+      s.npcVisible = 0; ob.Observe(s);
+      Assert::IsTrue(ob.Current() == Step::Engage); // no sighting → cannot clear
+    }
+
+    TEST_METHOD(ObserveWorldCounts)
+    {
+      ReplicaSet set;
+      auto add = [&](uint32_t id, EntityKind k, uint32_t owner) {
+        ReplicaEntity& e = set.entities[set.count++];
+        e.networkId = id; e.entityType = static_cast<uint8_t>(k); e.ownerPlayer = owner; e.valid = true;
+      };
+      const uint32_t me = 7;
+      add(1, EntityKind::Base, me); add(2, EntityKind::Ship, me); add(3, EntityKind::Ship, me);
+      add(4, EntityKind::Ship, 9); add(5, EntityKind::NpcUnit, 0); add(6, EntityKind::NpcUnit, 0);
+      const ObservedState o = ObserveWorld(set, me, 2);
+      Assert::IsTrue(o.hasOwnBase);
+      Assert::AreEqual(uint32_t{ 2 }, o.ownedShips);
+      Assert::AreEqual(uint32_t{ 2 }, o.npcVisible);
+    }
+  };
+
+  TEST_CLASS(PickingTests)
+  {
+  public:
+    TEST_METHOD(NearestWithinRadiusWins)
+    {
+      const std::vector<ScreenPoint> pts = {
+        { 10, 100.f, 100.f, true }, { 11, 130.f, 100.f, true }, { 12, 106.f, 100.f, true } };
+      Assert::AreEqual(uint32_t{ 12 }, PickNearest(pts, 105.f, 100.f, 20.f));
+      Assert::AreEqual(uint32_t{ 0 }, PickNearest(pts, 105.f, 400.f, 20.f)); // none in range
+    }
+
+    TEST_METHOD(InvisibleExcludedAndBoxAnyCorner)
+    {
+      const std::vector<ScreenPoint> pts = {
+        { 1, 50.f, 50.f, true }, { 2, 150.f, 150.f, true },
+        { 3, 300.f, 300.f, true }, { 4, 80.f, 90.f, false } };
+      std::vector<uint32_t> box;
+      PickBox(pts, 200.f, 200.f, 0.f, 0.f, box); // reversed corners
+      Assert::AreEqual(size_t{ 2 }, box.size());
+      Assert::IsTrue(box[0] == 1 && box[1] == 2);
+    }
+
+    TEST_METHOD(DragThreshold)
+    {
+      Assert::IsTrue(!IsDrag(100.f, 100.f, 102.f, 101.f));
+      Assert::IsTrue(IsDrag(100.f, 100.f, 140.f, 130.f));
+    }
+  };
+
+  TEST_CLASS(HudOverlayTests)
+  {
+  public:
+    TEST_METHOD(NominalMaxAndBarVisibility)
+    {
+      Assert::AreEqual(1000, NominalMaxHp(EntityKind::Base));
+      Assert::AreEqual(500, NominalMaxHp(EntityKind::Ship));
+      Assert::AreEqual(300, NominalMaxHp(EntityKind::NpcUnit));
+      Assert::AreEqual(0, NominalMaxHp(EntityKind::Asteroid));
+      Assert::IsTrue(ShowsHealthBar(EntityKind::Ship));
+      Assert::IsTrue(!ShowsHealthBar(EntityKind::Decoration));
+    }
+
+    TEST_METHOD(FractionClampsAndScales)
+    {
+      Assert::IsTrue(std::fabs(HealthFraction(EntityKind::Ship, 250) - 0.5f) < 1e-4f);
+      Assert::IsTrue(std::fabs(HealthFraction(EntityKind::Ship, 900) - 1.0f) < 1e-4f);
+      Assert::IsTrue(std::fabs(HealthFraction(EntityKind::Ship, -50) - 0.0f) < 1e-4f);
+      Assert::IsTrue(HealthFraction(EntityKind::Asteroid, 100) < 0.0f);
     }
   };
 }
