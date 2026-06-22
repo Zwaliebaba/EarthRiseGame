@@ -43,6 +43,9 @@ public:
 
     // -- Send --
     virtual void SendCommand(const Command& cmd)                    = 0;
+    // Variable-length RTS fleet intent (§23.4; M3 area B). 'body' is an encoded
+    // Neuron::Sim::FleetCommand (EncodeFleetCommand); the server validates it.
+    virtual void SendFleetCommand(std::span<const uint8_t> body)    = 0;
 
     // -- Receive (polled by client loop) --
     // Returns false when no more snapshots are available this tick.

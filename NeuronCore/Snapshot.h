@@ -16,7 +16,8 @@
 // and interest eviction land with sector subscriptions at M4.
 //
 // Record: netId u32 · kind u8 · pos(x,y,z) i64 · localOffset(x,y,z) f32 · hp i32
-//         · shapeId u16  (index into ShapeCatalog; selects the client mesh)
+//         · shapeId u16 (index into ShapeCatalog; selects the client mesh)
+//         · ownerPlayer u32 (0 = NPC/unowned; drives client IFF + overview, M3 area G)
 
 #include "Components.h"
 #include "Serde.h"
@@ -38,6 +39,7 @@ struct SnapshotEntity
     DirectX::XMFLOAT3       localOffset{ 0, 0, 0 };
     int32_t                 hp{ 0 };
     uint16_t                shapeId{ 0xFFFF }; // index into ShapeCatalog (kInvalidShapeId)
+    uint32_t                ownerPlayer{ 0 };  // owning player net id (0 = NPC/unowned); IFF
 };
 
 struct Snapshot
@@ -63,6 +65,7 @@ inline std::vector<uint8_t> EncodeSnapshot(const Snapshot& snap)
         wb.WriteFloat(e.localOffset.z);
         wb.WriteUint32(static_cast<uint32_t>(e.hp));
         wb.WriteUint16(e.shapeId);
+        wb.WriteUint32(e.ownerPlayer);
     }
     wb.Finalise();
     auto data = wb.Data();
@@ -91,6 +94,7 @@ inline std::vector<uint8_t> EncodeSnapshot(const Snapshot& snap)
         e.localOffset.z = rb.ReadFloat();
         e.hp            = static_cast<int32_t>(rb.ReadUint32());
         e.shapeId       = rb.ReadUint16();
+        e.ownerPlayer   = rb.ReadUint32();
         if (!rb.IsGood()) return false;
         out.entities.push_back(e);
     }

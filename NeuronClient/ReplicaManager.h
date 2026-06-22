@@ -60,6 +60,8 @@ public:
             r.z          = rs.z;
             r.entityType = static_cast<uint8_t>(e.kind);
             r.shapeId    = e.shapeId;
+            r.hp         = e.hp;
+            r.ownerPlayer = e.ownerPlayer;
             r.valid      = true;
         }
         return true;

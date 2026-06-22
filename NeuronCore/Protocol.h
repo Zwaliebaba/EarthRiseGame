@@ -83,10 +83,11 @@ enum class MsgType : uint8_t
     // an empty baseline and converges via interest-scoped delta snapshots (§8.4).
 
     Snapshot          = 40, // server → client per-tick delta snapshot
-    Command           = 41, // client → server intent
+    Command           = 41, // client → server intent (M1a base-velocity MoveCommand)
     Ack               = 42, // standalone ack (also piggybacked in headers)
     Keepalive         = 43,
     Disconnect        = 44,
+    FleetCommand      = 45, // client → server RTS fleet intent (§23.4; M3 area B)
 };
 
 // ---------------------------------------------------------------------------

@@ -77,13 +77,16 @@
   </ItemDefinitionGroup>
   <!-- Header files -->
   <ItemGroup>
+    <ClInclude Include="FleetControl.h" />
     <ClInclude Include="IClientController.h" />
     <ClInclude Include="Interpolator.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Replica.h" />
     <ClInclude Include="ReplicaManager.h" />
+    <ClInclude Include="ScriptedController.h" />
     <ClInclude Include="Session.h" />
     <ClInclude Include="SessionImpl.h" />
+    <ClInclude Include="Starmap.h" />
   </ItemGroup>
   <!-- Source files -->
   <ItemGroup>

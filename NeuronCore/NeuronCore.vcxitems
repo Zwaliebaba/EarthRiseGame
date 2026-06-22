@@ -30,6 +30,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Ecs.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Economy.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)FakeCrypto.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Fleet.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)FixedStepAccumulator.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)GameMath.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Handshake.h" />

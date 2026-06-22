@@ -95,6 +95,14 @@ public:
                 { startX, startY, 0 }, { 0.0f, 0.0f, 0.0f });
             conn->SetPlayerNetId(netId);
 
+            // Give the player a starter harvester + seed ore so the eXploit loop is
+            // bootstrappable from a fresh connection (a minimal "fleet + base",
+            // §13.1; full onboarding is M7). Harmless if SpawnFleetShip is capped.
+            m_universe->SpawnFleetShip(netId, Neuron::Sim::ServerUniverse::ShipShapeId(),
+                                       { startX + 220, startY, 0 });
+            if (auto* st = m_universe->StorageOf(netId))
+                st->amount[static_cast<int>(Neuron::Sim::ResourceType::Ore)] = 600.0f;
+
             std::vector<std::vector<uint8_t>> sendOut;
             conn->BeginFromCookieResponse(body, sendOut);
             for (auto& d : sendOut) out.push_back({ from, std::move(d) });
@@ -105,13 +113,16 @@ public:
         }
     }
 
-    // Build and queue a snapshot for every connected client.
+    // Build and queue a snapshot for every connected client. Each client gets a
+    // per-player fog-filtered snapshot (§13.0 eXplore; M3 area E) — they only see
+    // what their sensors/scans detect plus the always-known beacon graph. (Full
+    // sector-subscription interest + delta compression land at M4.)
     void BroadcastSnapshots(std::vector<OutDatagram>& out)
     {
-        const auto snap = m_universe->BuildSnapshot();
-        const auto body = Neuron::Sim::EncodeSnapshot(snap);
         for (auto& [key, conn] : m_conns) {
             if (!conn->IsConnected()) continue;
+            const auto snap = m_universe->BuildSnapshotFor(conn->PlayerNetId());
+            const auto body = Neuron::Sim::EncodeSnapshot(snap);
             if (auto dg = conn->SealApp(Channel::Unreliable, MsgType::Snapshot, body)) {
                 if (auto ep = EndpointFor(key))
                     out.push_back({ *ep, std::move(*dg) });
@@ -195,13 +206,20 @@ private:
         conn.OnDatagram(dg, appOut, sendOut);
         for (auto& d : sendOut) out.push_back({ from, std::move(d) });
 
-        // Apply received commands (move intents) to the authoritative universe.
+        // Apply received commands to the authoritative universe (server validates
+        // everything — never client-authoritative, §8.4).
         for (const auto& m : appOut) {
             if (m.type == MsgType::Command) {
+                // Legacy M1a base-velocity move intent.
                 Neuron::Sim::MoveCommand cmd;
                 if (Neuron::Sim::DecodeMoveCommand(m.body, cmd))
                     m_universe->SetBaseVelocity(conn.PlayerNetId(),
                                              { cmd.velX, cmd.velY, cmd.velZ });
+            } else if (m.type == MsgType::FleetCommand) {
+                // M3 RTS fleet intent (§23.4) — ownership/target validated inside.
+                Neuron::Sim::FleetCommand cmd;
+                if (Neuron::Sim::DecodeFleetCommand(m.body, cmd))
+                    m_universe->ApplyFleetCommand(conn.PlayerNetId(), cmd);
             }
         }
     }

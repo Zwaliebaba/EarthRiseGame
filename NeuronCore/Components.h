@@ -12,6 +12,7 @@
 
 #include <DirectXMath.h>
 #include <cstdint>
+#include <vector>
 
 namespace Neuron::Sim
 {
@@ -37,6 +38,9 @@ enum ComponentSlot : uint8_t
     Slot_FleetMember     = 15,
     Slot_Sensor          = 16,
     Slot_HarvestOrder    = 17,
+    Slot_FleetOrder      = 18,
+    Slot_Weapon          = 19,
+    Slot_NpcAi           = 20,
 };
 
 // Entity kinds carried in snapshots (matches §13 entity list). The first seven
@@ -154,6 +158,56 @@ struct HarvestOrder
     HarvestPhase phase{ HarvestPhase::Idle };
     uint32_t     nodeNetId{ 0 }; // target resource node
     uint32_t     baseNetId{ 0 }; // home base to deposit at
+};
+
+// --- fleet command (§8.4 / §23.4) — RTS intents, server-validated ----------
+
+// The concrete movement/combat order a commandable unit (player ship or NPC) is
+// executing. Player ships get these from validated FleetCommands (area B); NPCs
+// get them from the server AI (area F). One order machine drives both. Warp/Jump/
+// Harvest are one-shot intents routed to their own systems (Navigation/Harvest),
+// not stored here. KeepRange/Orbit hold at 'range' metres from the target.
+enum class OrderType : uint8_t
+{
+    Idle = 0, Move = 1, Attack = 2, Guard = 3, Orbit = 4, KeepRange = 5, Retreat = 6
+};
+
+struct FleetOrderEntry
+{
+    OrderType                     type{ OrderType::Idle };
+    uint32_t                      targetNetId{ 0 };  // entity target (Attack/Guard/Orbit/KeepRange)
+    Neuron::Universe::UniversePos targetPoint{};     // point target (Move/Retreat)
+    float                         range{ 0.0f };     // orbit / keep-range stand-off distance
+};
+
+// A unit's current order + a shift-chained queue (§23.4 "commands queue"). The
+// queue is drained front-to-back as each order completes. In-memory at M3 (M5
+// snapshots a flattened form).
+struct FleetOrder
+{
+    FleetOrderEntry              current{};
+    std::vector<FleetOrderEntry> queue;
+};
+
+// Placeholder weapon (§13.7 PvE; full fitting/resist model is M6). Applies flat
+// 'dps' to a target's Health while it is within 'range' and the unit's FleetOrder
+// is Attack. No damage types / resists at M3. 'pending' carries sub-unit fractional
+// damage between ticks so low-dps weapons still land at the 30 Hz step (Health is
+// integer); it is server-internal (not replicated).
+struct Weapon { float range{ 0.0f }; float dps{ 0.0f }; float pending{ 0.0f }; };
+
+// Server NPC AI (§13.7) — patrol/aggro/flee/defend over a hand-placed site. NPCs
+// are server ECS entities (distinct from ERHeadless bots, §10.3). The AI writes
+// the NPC's FleetOrder (move home / attack) so combat + movement reuse one path.
+enum class AiState : uint8_t { Patrol = 0, Aggro = 1, Flee = 2, Defend = 3 };
+struct NpcAi
+{
+    AiState                       state{ AiState::Patrol };
+    Neuron::Universe::UniversePos home{};        // patrol anchor / where it defends
+    float                         aggroRange{ 0.0f };
+    float                         fleeHpFrac{ 0.0f }; // flee below this fraction of maxHp
+    uint32_t                      targetNetId{ 0 };
+    uint16_t                      siteId{ 0 };        // which NPC site this guardian belongs to
 };
 
 } // namespace Neuron::Sim

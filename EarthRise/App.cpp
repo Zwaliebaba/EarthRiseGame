@@ -48,6 +48,9 @@
 #include "SessionImpl.h"
 #include "ReplicaManager.h"
 #include "Interpolator.h"
+#include "FleetControl.h"      // smart action, control groups, overview (M3 area G)
+#include "Starmap.h"           // beacon route solver (M3 area G)
+#include "Command.h"           // FleetCommand encode (M3 area B)
 
 // NeuronCore platform impls (compiled into NeuronClient.lib / accessible via link)
 #include "CngCrypto.h"
@@ -143,6 +146,12 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   std::unique_ptr<Neuron::Client::SessionImpl> m_session;
   Neuron::Client::ReplicaManager m_replica;
   Neuron::Client::InterpBuffer m_interp;
+
+  // ---- fleet command (§23.4; M3 area G) ----
+  Neuron::Client::ControlGroups m_controlGroups;
+  std::vector<uint32_t> m_selection;     // locally-selected owned net ids
+  uint32_t m_targetNetId{0};             // last picked target (overview/radar)
+  float m_focus[3]{0.f, 0.f, 0.f};       // render-space camera focus (own base)
 
   // ---- state ----
   std::array<uint8_t, 4096> m_snapBuf{};
@@ -971,6 +980,135 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_canvas.DrawText(cxr - m_canvas.TextWidth(lbl, ts) * 0.5f, cyr - R - 16.f * s, lbl, 0.780f, 0.839f, 0.863f, ts);
   }
 
+  // --- fleet command interaction (§23.1/§23.4; M3 area G) --------------------
+
+  // Encode + send a validated FleetCommand to the server (the server re-checks
+  // ownership/target; this is purely the client request path, §8.4).
+  void SendFleet(const Neuron::Sim::FleetCommand& cmd)
+  {
+    if (!m_session || m_selection.empty()) return;
+    m_session->SendFleetCommand(Neuron::Sim::EncodeFleetCommand(cmd));
+  }
+
+  // Re-select all of the local player's own ships from the current replica (the
+  // overview "all ships" smart-select, §23.1). Bases are not commandable units.
+  void SelectAllOwnShips()
+  {
+    m_selection.clear();
+    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+    const auto& rs = m_interp.curr;
+    for (uint32_t i = 0; i < rs.count; ++i) {
+      const auto& e = rs.entities[i];
+      if (e.valid && e.ownerPlayer == self &&
+          static_cast<Neuron::Sim::EntityKind>(e.entityType) == Neuron::Sim::EntityKind::Ship)
+        m_selection.push_back(e.networkId);
+    }
+  }
+
+  // True if the pointer is over any open windowed-UI panel (so a click there
+  // should not also reach the radar/HUD beneath it). Mirrors UpdateUi's hit-test.
+  bool PointerOverOpenWindow(float s) const
+  {
+    for (int win = 0; win < Win_Count; ++win) {
+      if (!m_winOpen[win]) continue;
+      if (WinIsPanel(win)) {
+        const UiRow* rows; const int dd = WinRows(win, rows);
+        const bool hasLabel = WinLabel(win) != nullptr;
+        const auto L = Neuron::Render::Ui::BuildPanel(m_winX[win], m_winY[win], s, PanelWidth(s),
+                                                      dd + (hasLabel ? 1 : 0), true);
+        if (L.window.Contains(m_ptrX, m_ptrY)) return true;
+      } else {
+        const char* const* items; const int n = WinButtons(win, items);
+        const auto L = Neuron::Render::Ui::BuildMainMenu(m_winX[win], m_winY[win], s, n);
+        if (L.window.Contains(m_ptrX, m_ptrY)) return true;
+      }
+    }
+    return false;
+  }
+
+  // Resolve a radar click into a smart action against the nearest contact (or
+  // empty space → move). Mirrors DrawRadar's projection so the pick lines up.
+  void HandleRadarCommand(UINT screenH, float fx, float fz)
+  {
+    if (!m_ptrPressed || m_selection.empty()) return;
+    if (PointerOverOpenWindow(MenuScale(screenH))) return; // UI window owns this click
+    const float s = MenuScale(screenH);
+    const float R = 95.f * s;
+    const float cxr = 20.f * s + R;
+    const float cyr = static_cast<float>(screenH) - 20.f * s - R;
+    constexpr float kRange = 1800.f;
+
+    const float ddx = m_ptrX - cxr, ddy = m_ptrY - cyr;
+    if (ddx * ddx + ddy * ddy > R * R) return; // click outside the radar disc
+
+    // World point under the click (radar +X right, +Z up).
+    const float wx = fx + (ddx / R) * kRange;
+    const float wz = fz - (ddy / R) * kRange;
+
+    // Nearest contact to the click (in render space) within a small pick radius.
+    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+    const auto& rs = m_interp.curr;
+    uint32_t bestId = 0; float bestD2 = 0.f;
+    Neuron::Sim::EntityKind bestKind = Neuron::Sim::EntityKind::Unknown;
+    uint32_t bestOwner = 0;
+    for (uint32_t i = 0; i < rs.count; ++i) {
+      const auto& e = rs.entities[i];
+      if (!e.valid || e.networkId == self) continue;
+      const float dx = e.x - wx, dz = e.z - wz, d2 = dx * dx + dz * dz;
+      if (bestId == 0 || d2 < bestD2) {
+        bestId = e.networkId; bestD2 = d2;
+        bestKind = static_cast<Neuron::Sim::EntityKind>(e.entityType); bestOwner = e.ownerPlayer;
+      }
+    }
+
+    // Radar picks are entity-targeted: a click within ~120 m of a contact issues
+    // the smart action on it. An empty-space *move* needs an absolute UniversePos
+    // (the radar only has render-space, with no render→universe inverse here), so
+    // empty clicks are ignored — precise destinations come from the starmap /
+    // overview, which carry world coordinates (M3; a render→universe unproject is a
+    // small follow-up).
+    using namespace Neuron::Client;
+    if (bestId == 0 || bestD2 >= 120.f * 120.f) return;
+    const SmartTarget tt = ClassifyTarget(bestKind, bestOwner, self);
+    m_targetNetId = bestId;
+    // Beacon jumps need the beacon *name* (server keys jumps by name) — the radar
+    // doesn't carry it, so those go through the starmap UI. Skip beacon picks here.
+    if (tt == SmartTarget::Beacon) return;
+    SendFleet(MakeSmartCommand(tt, m_selection, bestId, {}, /*queue*/false));
+  }
+
+  // Minimal command HUD (§22.2/§22.3; M3 area G): the overview contact list (fog-
+  // filtered, IFF-coloured, nearest-first) plus the current selection + target.
+  void DrawCommandHud(UINT screenW, UINT screenH)
+  {
+    if (!m_uiReady) return;
+    const float s = MenuScale(screenH);
+    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+    const auto overview = Neuron::Client::BuildOverview(m_interp.curr, self,
+                                                        m_focus[0], m_focus[1], m_focus[2]);
+    const float ts = s * 0.8f;
+    float y = 20.f * s;
+    const float x = static_cast<float>(screenW) - 230.f * s;
+    char line[96];
+    std::snprintf(line, sizeof(line), "OVERVIEW  sel:%u", static_cast<unsigned>(m_selection.size()));
+    m_canvas.DrawText(x, y, line, 0.78f, 0.84f, 0.86f, ts);
+    y += 14.f * s;
+    int shown = 0;
+    for (const auto& c : overview) {
+      if (shown++ >= 12) break; // cap the on-screen list
+      float r = 0.8f, g = 0.84f, b = 0.86f;
+      using ST = Neuron::Client::SmartTarget;
+      if (c.iff == ST::Enemy) { r = 0.95f; g = 0.4f; b = 0.35f; }
+      else if (c.iff == ST::Ally) { r = 0.45f; g = 0.85f; b = 0.5f; }
+      else if (c.iff == ST::ResourceNode) { r = 0.85f; g = 0.8f; b = 0.45f; }
+      std::snprintf(line, sizeof(line), "%c #%u  %.0fm  hp:%d",
+                    (c.netId == m_targetNetId) ? '>' : ' ',
+                    static_cast<unsigned>(c.netId), c.distance, c.hp);
+      m_canvas.DrawText(x, y, line, r, g, b, ts);
+      y += 12.f * s;
+    }
+  }
+
   void DrawUi(UINT screenW, UINT screenH)
   {
     (void)screenW;
@@ -1254,6 +1392,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_particles.Render(cl, vpf, camRight[0], camRight[1], camRight[2], camUp[0], camUp[1], camUp[2]);
     }
 
+    // Fleet command: a radar click issues a smart action against the nearest
+    // contact (must run before UpdateUi consumes the pointer-press, §23.1/area G).
+    m_focus[0] = cx; m_focus[1] = cy; m_focus[2] = cz;
+    HandleRadarCommand(h, cx, cz);
+
     // HUD + windowed UI. Interaction (hover/press/drag/dropdowns) runs first.
     UpdateUi(w, h);
     m_canvas.Reset();
@@ -1285,6 +1428,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // 2D radar disc (under the windowed UI).
     DrawRadar(w, h, entities, entCount, cx, cy, cz);
 
+    // Overview contact list + selection/target readout (M3 area G).
+    DrawCommandHud(w, h);
+
     // Darwinia windowed UI (Main Menu / Options / settings panels + dropdowns).
     DrawUi(w, h);
 
@@ -1294,11 +1440,47 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   }
 
   // ── Input handlers ───────────────────────────────────────────────────────
-  void OnKeyDown(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::KeyEventArgs& args)
+  void OnKeyDown(const Windows::UI::Core::CoreWindow& win, const Windows::UI::Core::KeyEventArgs& args)
   {
+    using VK = Windows::System::VirtualKey;
+    const VK key = args.VirtualKey();
+
     // Esc closes the active (frontmost) window; the previous one becomes active.
-    if (args.VirtualKey() == Windows::System::VirtualKey::Escape)
-      CloseTopWindow();
+    if (key == VK::Escape) { CloseTopWindow(); return; }
+
+    // --- fleet command hotkeys (§23.2 desktop affordances; M3 area G) ---
+    const bool ctrl =
+        (win.GetKeyState(VK::Control) & Windows::UI::Core::CoreVirtualKeyStates::Down) ==
+        Windows::UI::Core::CoreVirtualKeyStates::Down;
+
+    // Ctrl+# set / # recall control groups (0..9).
+    if (key >= VK::Number0 && key <= VK::Number9) {
+      const int group = static_cast<int>(key) - static_cast<int>(VK::Number0);
+      if (ctrl) m_controlGroups.Set(group, m_selection);
+      else      m_selection = m_controlGroups.Recall(group);
+      return;
+    }
+
+    switch (key) {
+    case VK::A: // select all own ships (smart-select)
+      SelectAllOwnShips();
+      return;
+    case VK::B: { // enqueue a ship build at the player's base
+      if (m_session) {
+        Neuron::Sim::FleetCommand c; c.intent = Neuron::Sim::IntentType::Build;
+        c.units = { m_session->PlayerNetId() };
+        m_session->SendFleetCommand(Neuron::Sim::EncodeFleetCommand(c));
+      }
+      return;
+    }
+    case VK::S: { // stop the current selection
+      Neuron::Sim::FleetCommand c; c.intent = Neuron::Sim::IntentType::Stop; c.units = m_selection;
+      SendFleet(c);
+      return;
+    }
+    default:
+      return;
+    }
   }
 
   // Close an open dropdown first; else close the frontmost open window; if
