@@ -51,7 +51,7 @@ changed, bump the masterplan first, then the plan).
 
 | Track | Plan | Status |
 | --- | --- | --- |
-| Playable vertical slice (forward-pulled M7 onboarding + RTS client affordances) | [`playable-slice.md`](playable-slice.md) | 🔨 camera / onboarding / selection landed; in-world feedback next |
+| Playable vertical slice (forward-pulled M7 onboarding + RTS client affordances) | [`playable-slice.md`](playable-slice.md) | 🔨 logic complete (camera / onboarding / selection / feedback), Linux-tested; pending Windows smoke run |
 
 New milestone plan: copy [`_template.md`](_template.md) → `M<n>-<slug>.md`, fill it from the
 matching masterplan §17 milestone, add a row above.

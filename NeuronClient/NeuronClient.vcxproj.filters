@@ -31,6 +31,9 @@
     <ClInclude Include="Picking.h">
       <Filter>Control</Filter>
     </ClInclude>
+    <ClInclude Include="HudOverlay.h">
+      <Filter>Control</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Project Files">

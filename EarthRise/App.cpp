@@ -13,6 +13,7 @@
 
 #include "pch.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -49,6 +50,7 @@
 #include "ReplicaManager.h"
 #include "Interpolator.h"
 #include "FleetControl.h"      // smart action, control groups, overview (M3 area G)
+#include "HudOverlay.h"        // in-world selection rings / health bars (playable slice)
 #include "Onboarding.h"        // objective/hint chain (playable slice)
 #include "Picking.h"           // viewport click / box selection (playable slice)
 #include "RtsCamera.h"         // free orbit/zoom/pan camera (playable slice)
@@ -168,6 +170,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   float m_focus[3]{0.f, 0.f, 0.f};       // render-space camera focus (own base)
   Neuron::Client::RtsCamera m_camera;    // free orbit/zoom/pan camera (playable slice)
   Neuron::Client::Onboarding m_onboarding; // objective/hint chain (playable slice)
+  DirectX::XMFLOAT4X4 m_viewProj{};       // cached view-proj for HUD overlays (playable slice)
 
   // ---- state ----
   std::array<uint8_t, 4096> m_snapBuf{};
@@ -1205,6 +1208,72 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     }
   }
 
+  // Project a render-space point to screen pixels via the cached view-proj. Returns
+  // false when behind the camera or off-screen. Mirrors the renderer's column-major
+  // cbuffer convention (un-transposed view-proj) — verify alignment on Windows.
+  bool ProjectToScreen(float x, float y, float z, UINT screenW, UINT screenH,
+                       float& sx, float& sy) const
+  {
+    using namespace DirectX;
+    const XMMATRIX vp = XMLoadFloat4x4(&m_viewProj);
+    const XMVECTOR clip = XMVector3Transform(XMVectorSet(x, y, z, 1.f), vp);
+    const float wc = XMVectorGetW(clip);
+    if (wc <= 1e-4f) return false;
+    const float ndcx = XMVectorGetX(clip) / wc, ndcy = XMVectorGetY(clip) / wc;
+    if (ndcx < -1.f || ndcx > 1.f || ndcy < -1.f || ndcy > 1.f) return false;
+    sx = (ndcx * 0.5f + 0.5f) * static_cast<float>(screenW);
+    sy = (1.f - (ndcy * 0.5f + 0.5f)) * static_cast<float>(screenH);
+    return true;
+  }
+
+  // In-world feedback (playable slice): a green bracket under each selected unit and
+  // a health bar over every combat unit (own = green, hostile = red). Drawn in the
+  // 2D HUD pass by projecting each replica to screen.
+  void DrawWorldOverlays(UINT screenW, UINT screenH)
+  {
+    if (!m_uiReady) return;
+    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+    const float s = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
+    const Neuron::Client::ReplicaSet& rs = m_interp.curr;
+    for (uint32_t i = 0; i < rs.count; ++i)
+    {
+      const auto& e = rs.entities[i];
+      if (!e.valid) continue;
+      const auto kind = static_cast<Neuron::Sim::EntityKind>(e.entityType);
+      const bool isMine = (e.ownerPlayer == self && self != 0);
+      const bool isNpc = (kind == Neuron::Sim::EntityKind::NpcUnit);
+      const bool selected =
+          std::find(m_selection.begin(), m_selection.end(), e.networkId) != m_selection.end();
+      const bool bar = Neuron::Client::ShowsHealthBar(kind);
+      if (!selected && !bar) continue;
+
+      float sx = 0.f, sy = 0.f;
+      if (!ProjectToScreen(e.x, e.y, e.z, screenW, screenH, sx, sy)) continue;
+
+      if (selected) // green selection bracket
+      {
+        const float rr = 14.f * s, t = 2.f * s;
+        m_canvas.DrawRect(sx - rr, sy - rr, 2 * rr, t, 0.4f, 0.9f, 0.5f, 0.9f);
+        m_canvas.DrawRect(sx - rr, sy + rr - t, 2 * rr, t, 0.4f, 0.9f, 0.5f, 0.9f);
+        m_canvas.DrawRect(sx - rr, sy - rr, t, 2 * rr, 0.4f, 0.9f, 0.5f, 0.9f);
+        m_canvas.DrawRect(sx + rr - t, sy - rr, t, 2 * rr, 0.4f, 0.9f, 0.5f, 0.9f);
+      }
+      if (bar) // health bar, IFF-coloured
+      {
+        const float f = Neuron::Client::HealthFraction(kind, e.hp);
+        if (f >= 0.f)
+        {
+          const float bw = 24.f * s, bh = 3.f * s, bx = sx - bw * 0.5f, by = sy - 18.f * s;
+          m_canvas.DrawRect(bx, by, bw, bh, 0.f, 0.f, 0.f, 0.6f);
+          const float r = isMine ? 0.3f : (isNpc ? 0.95f : 0.9f);
+          const float g = isMine ? 0.85f : (isNpc ? 0.3f : 0.8f);
+          const float b = isMine ? 0.4f : 0.3f;
+          m_canvas.DrawRect(bx, by, bw * f, bh, r, g, b, 0.9f);
+        }
+      }
+    }
+  }
+
   // Minimal command HUD (§22.2/§22.3; M3 area G): the overview contact list (fog-
   // filtered, IFF-coloured, nearest-first) plus the current selection + target.
   void DrawCommandHud(UINT screenW, UINT screenH)
@@ -1396,6 +1465,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     XMFLOAT4X4 vpf;
     XMStoreFloat4x4(&vpf, viewProj);
+    m_viewProj = vpf; // cache for the HUD overlay projection (playable slice)
 
     // Camera basis for billboard particles (world space).
     float camRight[3], camUp[3];
@@ -1581,6 +1651,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     // 2D radar disc (under the windowed UI).
     DrawRadar(w, h, entities, entCount, cx, cy, cz);
+
+    // In-world selection brackets + health bars (playable slice).
+    DrawWorldOverlays(w, h);
 
     // Overview contact list + selection/target readout (M3 area G).
     DrawCommandHud(w, h);

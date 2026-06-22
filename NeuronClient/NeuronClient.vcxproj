@@ -78,6 +78,7 @@
   <!-- Header files -->
   <ItemGroup>
     <ClInclude Include="FleetControl.h" />
+    <ClInclude Include="HudOverlay.h" />
     <ClInclude Include="IClientController.h" />
     <ClInclude Include="Onboarding.h" />
     <ClInclude Include="Picking.h" />

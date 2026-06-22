@@ -1,7 +1,8 @@
 # Playable Vertical Slice (Implementation Plan)
 
-> **Status:** 🔨 In progress — camera, onboarding and selection landed; in-world
-> feedback pending. Develops on `claude/inspiring-lovelace-gxvs5o`.
+> **Status:** 🔨 Logic complete (camera, onboarding, selection, in-world feedback) and
+> Linux-tested; **pending a Windows build + smoke run** to confirm the client wiring.
+> Develops on `claude/inspiring-lovelace-gxvs5o`.
 > **Relation to the masterplan:** this is a **forward-pulled slice of M7**
 > ("onboarding + full UI suite", §17) plus basic RTS client affordances (§23.1/§23.2).
 > It is **subordinate to [`../masterplan.md`](../masterplan.md)** and does not re-decide
@@ -27,7 +28,7 @@ In scope — **client-side**, mostly `NeuronClient` (platform-independent, Linux
 | **Free RTS camera** (orbit / zoom / pan, base-follow) | `NeuronClient/RtsCamera.h` | right-drag orbit, wheel zoom, arrows pan, F follow, Space recenter | ✅ |
 | **Onboarding objective chain** (Welcome→Select→Engage→Clear→Done) | `NeuronClient/Onboarding.h` | amber objective banner; observed from the replica each frame | ✅ |
 | **Viewport click / box selection** | `NeuronClient/Picking.h` | left-click nearest, drag-box, live rectangle; ignores radar/UI | ✅ |
-| **In-world feedback** (selection rings, health bars, hostile markers) | — | screen-projected overlays in the HUD / scene | ⏳ next |
+| **In-world feedback** (selection brackets, health bars, IFF colour) | `NeuronClient/HudOverlay.h` | green bracket under selected units; HP bar over combat units (own = green, hostile = red) | ✅ |
 
 Out of scope (stays on the roadmap): real combat model (M6), persistence/identity
 (M5), economy/conquest/markets and the full UI suite (M7), scale (M4). The slice does
@@ -38,7 +39,7 @@ and presented.
 
 - The **logic** of each piece (camera math, objective state machine, pick decision)
   ships with `NeuronTools/testrunner` tests and is green on the Linux runner
-  (`CameraTests`, `OnboardingTests`, `PickingTests`).
+  (`CameraTests`, `OnboardingTests`, `PickingTests`, `HudOverlayTests`).
 - The **`App.cpp` wiring** (UWP pointer/keyboard, the CPU world→screen projection for
   picking) is **Windows-only and currently unverified** — it must be built and smoke-
   run on the Windows agent. The one thing to confirm by eye there: viewport picks line
@@ -51,6 +52,6 @@ and presented.
       **select** units by clicking/box-dragging, follows an **objective prompt**, and
       can drive the existing harvest→build and **clear-the-site** loop to completion —
       with selection/health feedback visible in-world.
-- [x] Camera / onboarding / selection logic implemented + Linux-tested.
-- [ ] In-world feedback (selection rings + health bars) implemented.
+- [x] Camera / onboarding / selection / in-world-feedback logic implemented + Linux-tested.
+- [x] In-world feedback (selection brackets + health bars) implemented.
 - [ ] Built and smoke-run on the Windows agent (the real "playable" confirmation).
