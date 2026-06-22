@@ -1,10 +1,10 @@
 # M4 — Scale & Interest (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M4**).
-> **Status:** 🔨 In progress — **area A (cell pub/sub interest) implemented** with its
-> `NeuronCoreTest` cases + Linux `testrunner` mirror (§16.2); areas B–J not started.
-> (M0/M1a/M1b/M2 complete; M3 active.) Drafted from `_template.md` as the next milestone
-> after M3, per [`README.md`](README.md).
+> **Status:** 🔨 In progress — **areas A (cell pub/sub interest) and B (version stamping +
+> per-client baselines) implemented** with their `NeuronCoreTest` cases + Linux `testrunner`
+> mirror (§16.2); areas C–J not started. (M0/M1a/M1b/M2 complete; M3 active.) Drafted from
+> `_template.md` as the next milestone after M3, per [`README.md`](README.md).
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 > **Verification:** M4's gates are **real, enforceable** — the contested-sector perf/load run
 > (areas I/J) executes on the **Windows build agent** (§16.3) at the target player count; the
@@ -144,23 +144,32 @@
 - **Current state:** net-new. M3 has no versions and no per-client baselines (it rebuilds the whole
   snapshot every tick).
 - **Work:**
-  - [ ] **Replication version** on replicated entities (`Components.h`, new `ReplState`/version
-        field): bumped by the systems that mutate replicated fields (movement, combat, cargo). A
-        stationary/idle entity's version does **not** advance (so it costs ≈0 downstream).
-  - [ ] **Per-client baseline** (`Interest.h`): `netId → acked version` map + the tombstone set
-        (area D), allocated per connection. Advanced **on snapshot ack** (the §8.3 ack carries the
-        acked baseline tick; map the entities in that baseline to acked).
-  - [ ] **Diff = "version > acked":** the scheduler (area E) walks the client's subscribed cells and
-        selects entities whose current version exceeds the client's acked version. Ack-advanced, never
-        last-*sent* (a lost snapshot re-deltas from the still-current acked baseline, §8.4).
-  - [ ] **Baseline RAM accounting:** size the acked-version map + tombstone set (`bytes/client ×
-        max clients`) and expose it to telemetry (area I) — it is an App. B **gate**, not a footnote.
-- **Tests (`NeuronCoreTest`/`ERServerTest`; testrunner mirror):**
-  - [ ] Version bumps iff a replicated field changes; idle entity holds its version across ticks.
-  - [ ] Diff selects exactly the entities changed since the client's acked baseline; a re-acked
-        baseline shrinks the next diff to ∅ for unchanged entities.
-  - [ ] A dropped snapshot (no ack) re-deltas from the still-current acked baseline (no retransmit,
-        converges).
+  - [x] **Replication version** (`Interest.h` `ReplicationStamps`): a monotonic version per `netId`,
+        advanced iff the entity's replicated fields (`ReplFields` — the App. A projection: pos +
+        local offset, hp, owner, shape, kind) changed since the last stamp. A stationary/idle entity
+        holds its version (costs ≈0 downstream). *Implementation note:* a **centralized post-tick
+        dirty-stamp** (`ServerUniverse::StampReplication`, end of `Step`) over a `netId`-keyed side
+        table — chosen over per-system bumps + an ECS `ReplState` component so every replicated
+        entity is covered with **no spawn-site coupling** and the wire format / client stay untouched;
+        the §8.4 observable contract (version advances iff replicated state changed) is identical.
+  - [x] **Per-client baseline** (`Interest.h` `ClientBaseline`): `netId → acked version` map + a
+        bounded per-tick **pending-sent** history, allocated per connection (keyed by player id). 
+        Advanced **on snapshot ack** (`Ack(tick)` folds every pending snapshot ≤ tick into the acked
+        map). The tombstone set rides on this baseline at area D (`Forget(netId)` hook in place).
+  - [x] **Diff = "version > acked":** `ServerUniverse::ChangedFor(client)` selects the interest-set
+        (`InterestGrid::VisibleTo`, area A) entities whose server version exceeds the client's acked
+        version. **Ack-advanced, never last-*sent*** — a dropped snapshot re-deltas from the still-
+        current acked baseline (§8.4). The area-E scheduler will order this diff by priority + MTU.
+  - [x] **Baseline RAM accounting:** `ClientBaseline::ApproxBytes()` +
+        `ServerUniverse::BaselineBytes`/`TotalBaselineBytes` size the acked + pending maps; area I
+        wires them to the App. B gate.
+- **Tests (`NeuronCoreTest`; `NeuronTools/testrunner/InterestTests.cpp` mirror):**
+  - [x] Version bumps iff a replicated field changes; idle entity holds its version across ticks
+        (`VersionBumpsOnlyWhenAReplicatedFieldChanges`, `StampBumpsOnlyOnChange`).
+  - [x] Diff selects exactly the entities changed since the client's acked baseline; a re-acked
+        baseline shrinks the next diff to ∅ (`BaselineDiffSelectsChangedAndAckShrinksToEmpty`).
+  - [x] A dropped snapshot (no ack) re-deltas from the still-current acked baseline, converges on ack
+        (`DroppedSnapshotReDeltasFromAckedBaseline`); baseline-RAM gauge is non-empty after acks.
 - **Depends on:** A. **Blocks:** C, D, E.
 
 ### C. Quantized sector-local delta encoding + changed-field mask (§8.4, App. A)

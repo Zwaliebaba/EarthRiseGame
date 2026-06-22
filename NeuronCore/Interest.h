@@ -21,9 +21,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace Neuron::Sim
@@ -299,5 +301,133 @@ private:
 
 inline const std::vector<uint32_t>                    InterestGrid::kEmpty32{};
 inline const std::unordered_set<SectorId, SectorHash> InterestGrid::kEmptySectors{};
+
+// ---------------------------------------------------------------------------
+// Per-entity replication version + per-client baseline (M4 area B, §8.4)
+// ---------------------------------------------------------------------------
+
+// The replicated projection of an entity — the fields a snapshot carries (App. A).
+// Two ticks with identical ReplFields replicate identically, so the version only
+// advances when one of these changes; an idle/stationary entity holds its version
+// and costs ≈0 downstream. (Quantising position to a delta step is area C; here a
+// change is any change to the authoritative fields.)
+struct ReplFields
+{
+    int64_t  x{ 0 }, y{ 0 }, z{ 0 };          // absolute position (metres)
+    float    lox{ 0 }, loy{ 0 }, loz{ 0 };    // sector-local offset
+    int32_t  hp{ 0 };
+    uint32_t ownerPlayer{ 0 };
+    uint16_t shapeId{ 0xFFFF };
+    uint8_t  kind{ 0 };
+    bool operator==(const ReplFields&) const = default;
+};
+
+// Server-global monotonic version per entity (§8.4 "per-entity version/dirty
+// stamping"). Kept as a side table keyed by netId — like InterestGrid residency —
+// so every entity with a NetId is covered with no spawn-site coupling and the wire
+// format / client stay untouched. Stamp() bumps the version iff the replicated
+// fields changed since the last stamp (a newly-seen entity bumps 0 → 1).
+class ReplicationStamps
+{
+public:
+    // Stamp 'cur' for 'netId'; returns the (possibly advanced) current version.
+    uint32_t Stamp(uint32_t netId, const ReplFields& cur)
+    {
+        auto it = m_state.find(netId);
+        if (it == m_state.end()) {
+            m_state.emplace(netId, Entry{ 1, cur });
+            return 1;
+        }
+        if (!(it->second.last == cur)) {
+            ++it->second.version;
+            it->second.last = cur;
+        }
+        return it->second.version;
+    }
+
+    [[nodiscard]] uint32_t Version(uint32_t netId) const
+    {
+        auto it = m_state.find(netId);
+        return it == m_state.end() ? 0u : it->second.version;
+    }
+
+    void Remove(uint32_t netId) { m_state.erase(netId); }
+    [[nodiscard]] size_t Size() const noexcept { return m_state.size(); }
+
+private:
+    struct Entry { uint32_t version{ 0 }; ReplFields last; };
+    std::unordered_map<uint32_t, Entry> m_state;
+};
+
+// Per-client replication baseline (§8.4 / §8.3): the last *acked* version the
+// client holds for each netId, plus the not-yet-acked snapshots we've sent it. The
+// diff is "server version > the client's acked version" — never "last sent" — so a
+// dropped (un-acked) snapshot simply re-deltas from the still-current acked
+// baseline and converges with no explicit retransmit. Allocated per connection;
+// its size is an App. B RAM gate (area I reads ApproxBytes()).
+class ClientBaseline
+{
+public:
+    using SentList = std::vector<std::pair<uint32_t, uint32_t>>; // (netId, version)
+
+    // Does the client still lack 'currentVersion' for 'netId'? (version > acked)
+    [[nodiscard]] bool Needs(uint32_t netId, uint32_t currentVersion) const
+    {
+        auto it = m_acked.find(netId);
+        return currentVersion > (it == m_acked.end() ? 0u : it->second);
+    }
+
+    [[nodiscard]] uint32_t Acked(uint32_t netId) const
+    {
+        auto it = m_acked.find(netId);
+        return it == m_acked.end() ? 0u : it->second;
+    }
+
+    // Record what a snapshot for 'tick' carried, so an ack of that tick can advance
+    // the baseline. Bounded: only the most recent kMaxPending unacked ticks are
+    // kept (older lost snapshots re-delta from 'acked' anyway, so dropping their
+    // record is safe).
+    void RecordSent(uint32_t tick, const SentList& sent)
+    {
+        if (sent.empty()) return;
+        m_pending[tick] = sent;
+        while (m_pending.size() > kMaxPending) m_pending.erase(m_pending.begin());
+    }
+
+    // Advance the acked baseline to 'tick': fold every pending snapshot with key
+    // ≤ tick into 'acked' (max version per netId), then drop them. Monotonic and
+    // idempotent (a stale/duplicate ack does nothing new).
+    void Ack(uint32_t tick)
+    {
+        for (auto it = m_pending.begin(); it != m_pending.end() && it->first <= tick;) {
+            for (const auto& [netId, version] : it->second) {
+                uint32_t& a = m_acked[netId];
+                if (version > a) a = version;
+            }
+            it = m_pending.erase(it);
+        }
+    }
+
+    // Tombstone reconciliation (area D) drops a netId from the baseline once the
+    // client has acked its removal.
+    void Forget(uint32_t netId) { m_acked.erase(netId); }
+
+    [[nodiscard]] size_t AckedCount() const noexcept { return m_acked.size(); }
+    [[nodiscard]] size_t PendingCount() const noexcept { return m_pending.size(); }
+
+    // Approximate resident bytes (App. B baseline-RAM gate; area I telemetry).
+    [[nodiscard]] size_t ApproxBytes() const noexcept
+    {
+        size_t bytes = m_acked.size() * (sizeof(uint32_t) * 2);
+        for (const auto& [tick, sent] : m_pending)
+            bytes += sizeof(uint32_t) + sent.size() * (sizeof(uint32_t) * 2);
+        return bytes;
+    }
+
+private:
+    static constexpr size_t kMaxPending = 64; // bounded unacked-snapshot history
+    std::unordered_map<uint32_t, uint32_t>      m_acked;   // netId → acked version
+    std::map<uint32_t, SentList>                m_pending; // tick → sent (netId,version)
+};
 
 } // namespace Neuron::Sim

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "CppUnitTest.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -281,6 +282,70 @@ namespace NeuronCoreTest
       Assert::IsTrue(su.Interest().IsSubscribed(base, destSec)); // before arrival
       su.Step(0.1f);
       Assert::IsTrue(su.Interest().IsSubscribed(base, destSec)); // pinned in flight
+    }
+  };
+
+  // --- Replication versions + per-client baselines (M4 area B; §8.4/§8.3) ------
+
+  TEST_CLASS(ReplicationTests)
+  {
+  public:
+    TEST_METHOD(VersionBumpsOnlyWhenAReplicatedFieldChanges)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      su.Step(0.1f);
+      const uint32_t v1 = su.ReplVersion(base);
+      Assert::IsTrue(v1 >= 1);
+      su.Step(0.1f);
+      su.Step(0.1f);
+      Assert::AreEqual(v1, su.ReplVersion(base)); // idle holds its version
+      su.SetBaseVelocity(base, { 50, 0, 0 });
+      su.Step(0.1f);
+      Assert::IsTrue(su.ReplVersion(base) > v1);  // position changed → bump
+    }
+
+    TEST_METHOD(StampBumpsOnlyOnChange)
+    {
+      ReplicationStamps stamps;
+      ReplFields f;
+      f.hp = 100;
+      Assert::AreEqual(uint32_t{ 1 }, stamps.Stamp(42, f));
+      Assert::AreEqual(uint32_t{ 1 }, stamps.Stamp(42, f)); // unchanged
+      f.hp = 90;
+      Assert::AreEqual(uint32_t{ 2 }, stamps.Stamp(42, f)); // changed field
+    }
+
+    TEST_METHOD(BaselineDiffSelectsChangedAndAckShrinksToEmpty)
+    {
+      ClientBaseline base;
+      Assert::IsTrue(base.Needs(10, 3));
+      base.RecordSent(5, { { 10, 3 } });
+      Assert::IsTrue(base.Needs(10, 3)); // from acked, not last-sent
+      base.Ack(5);
+      Assert::IsTrue(!base.Needs(10, 3)); // re-acked → ∅
+      Assert::IsTrue(base.Needs(10, 4));
+      Assert::AreEqual(uint32_t{ 3 }, base.Acked(10));
+    }
+
+    TEST_METHOD(DroppedSnapshotReDeltasFromAckedBaseline)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      su.Step(0.1f);
+      const auto changed1 = su.ChangedFor(base);
+      Assert::IsTrue(std::find(changed1.begin(), changed1.end(), base) != changed1.end());
+
+      su.RecordSent(base, su.Tick(), changed1); // sent but ack lost
+      su.Step(0.1f);
+      const auto changed2 = su.ChangedFor(base);
+      Assert::IsTrue(std::find(changed2.begin(), changed2.end(), base) != changed2.end());
+
+      su.RecordSent(base, su.Tick(), changed2);
+      su.AckBaseline(base, su.Tick());          // now acked
+      su.Step(0.1f);
+      const auto changed3 = su.ChangedFor(base);
+      Assert::IsTrue(std::find(changed3.begin(), changed3.end(), base) == changed3.end());
     }
   };
 

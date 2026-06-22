@@ -473,6 +473,7 @@ public:
         m_world.DestroyEntity(it->second);
         m_netIdToEntity.erase(it);
         m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
+        m_repl.Remove(netId);     // drop replication version (area B)
         return true;
     }
 
@@ -489,8 +490,77 @@ public:
         HarvestSystem(dtSeconds);
         BuildSystem(dtSeconds);
         ++m_tick;
+        StampReplication();
         UpdateInterest();
     }
+
+    // Stamp every replicated entity's version against this tick's final state (M4
+    // area B, §8.4): a version advances iff the entity's replicated fields (the
+    // App. A snapshot projection) changed, so an idle entity holds its version and
+    // costs ≈0 downstream. Pure bookkeeping — touches only the version side table,
+    // never sim state, so SimHash is unchanged. The per-client diff reads it.
+    void StampReplication()
+    {
+        m_world.ForEach<NetId, Transform, ShapeId>([&](NetId& id, Transform& t, ShapeId& s) {
+            const auto e = EntityOf(id.value);
+            Neuron::Sim::ReplFields f;
+            f.x = t.pos.x; f.y = t.pos.y; f.z = t.pos.z;
+            f.lox = t.localOffset.x; f.loy = t.localOffset.y; f.loz = t.localOffset.z;
+            const Health* h = m_world.GetComponent<Health>(e);
+            f.hp = h ? h->hp : 1000; // mirror MakeSnapshotEntity's default
+            const OwnerId* o = m_world.GetComponent<OwnerId>(e);
+            f.ownerPlayer = o ? o->player : 0;
+            f.shapeId = s.value;
+            f.kind    = static_cast<uint8_t>(s.kind);
+            m_repl.Stamp(id.value, f);
+        });
+    }
+
+    // --- per-client replication baseline (area B, §8.4 / §8.3) ---------------
+
+    // Current server-side replication version of an entity (0 = never stamped).
+    [[nodiscard]] uint32_t ReplVersion(uint32_t netId) const { return m_repl.Version(netId); }
+
+    // The netIds a client still lacks: in its interest set (area A) and with a
+    // server version beyond its acked baseline. This is the raw area-B diff — the
+    // area-E scheduler orders it by priority and fits it to the MTU budget. Drawn
+    // from VisibleTo so it is sorted/deduped (deterministic). Ack-advanced, never
+    // last-sent, so a dropped snapshot re-deltas from the still-current baseline.
+    [[nodiscard]] std::vector<uint32_t> ChangedFor(uint32_t clientId)
+    {
+        std::vector<uint32_t> visible;
+        m_interest.VisibleTo(clientId, visible);
+        Neuron::Sim::ClientBaseline& base = m_baselines[clientId];
+        std::vector<uint32_t> changed;
+        for (uint32_t netId : visible)
+            if (base.Needs(netId, m_repl.Version(netId))) changed.push_back(netId);
+        return changed;
+    }
+
+    // Record that 'clientId' was sent these netIds (at their current versions) in
+    // the snapshot for 'tick' (§8.3), so acking 'tick' advances its baseline. The
+    // area-E/F encoder calls this as it seals each client's snapshot.
+    void RecordSent(uint32_t clientId, uint32_t tick, const std::vector<uint32_t>& netIds)
+    {
+        Neuron::Sim::ClientBaseline::SentList sent;
+        sent.reserve(netIds.size());
+        for (uint32_t n : netIds) sent.emplace_back(n, m_repl.Version(n));
+        m_baselines[clientId].RecordSent(tick, sent);
+    }
+
+    // Advance a client's acked baseline to 'tick' (its §8.3 snapshot ack).
+    void AckBaseline(uint32_t clientId, uint32_t tick) { m_baselines[clientId].Ack(tick); }
+
+    // Per-client / total baseline RAM (App. B gate; area I telemetry reads these).
+    [[nodiscard]] size_t BaselineBytes(uint32_t clientId) { return m_baselines[clientId].ApproxBytes(); }
+    [[nodiscard]] size_t TotalBaselineBytes() const
+    {
+        size_t bytes = 0;
+        for (const auto& [clientId, base] : m_baselines) bytes += base.ApproxBytes();
+        return bytes;
+    }
+
+    [[nodiscard]] Neuron::Sim::ClientBaseline& Baseline(uint32_t clientId) { return m_baselines[clientId]; }
 
     // Refresh the cell publish/subscribe interest grid for this tick (M4 area A,
     // §8.4): every replicated entity re-homes into its current sector cell (one
@@ -783,6 +853,7 @@ private:
         if (m_world.IsAlive(e)) m_world.DestroyEntity(e);
         m_netIdToEntity.erase(netId);
         m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
+        m_repl.Remove(netId);     // drop replication version (area B)
     }
 
     // --- NPC AI (area F) -----------------------------------------------------
@@ -1055,6 +1126,8 @@ private:
     std::unordered_map<std::string, uint16_t>  m_beaconName;   // beacon name → beaconIndex
     Neuron::Universe::SectorId                 m_lastTravelSector{};
     Neuron::Sim::InterestGrid                  m_interest; // cell pub/sub interest (area A)
+    Neuron::Sim::ReplicationStamps             m_repl;     // per-entity versions (area B)
+    std::unordered_map<uint32_t, Neuron::Sim::ClientBaseline> m_baselines; // player → baseline (area B)
     // NPC sites (area F): site id → guardians still alive; cleared sites pending drain.
     std::unordered_map<uint16_t, int>          m_siteAlive;
     std::vector<uint16_t>                      m_clearedSites;
