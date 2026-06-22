@@ -49,6 +49,7 @@
 #include "ReplicaManager.h"
 #include "Interpolator.h"
 #include "FleetControl.h"      // smart action, control groups, overview (M3 area G)
+#include "Onboarding.h"        // objective/hint chain (playable slice)
 #include "RtsCamera.h"         // free orbit/zoom/pan camera (playable slice)
 #include "Starmap.h"           // beacon route solver (M3 area G)
 #include "Command.h"           // FleetCommand encode (M3 area B)
@@ -162,6 +163,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   uint32_t m_targetNetId{0};             // last picked target (overview/radar)
   float m_focus[3]{0.f, 0.f, 0.f};       // render-space camera focus (own base)
   Neuron::Client::RtsCamera m_camera;    // free orbit/zoom/pan camera (playable slice)
+  Neuron::Client::Onboarding m_onboarding; // objective/hint chain (playable slice)
 
   // ---- state ----
   std::array<uint8_t, 4096> m_snapBuf{};
@@ -1144,6 +1146,10 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   {
     if (!m_uiReady) return;
     const float s = MenuScale(screenH);
+
+    // Objective banner (playable-slice onboarding) — amber, top-left.
+    if (const char* obj = m_onboarding.CurrentText(); obj && obj[0])
+      m_canvas.DrawText(40.f * s, 18.f * s, obj, 1.0f, 0.85f, 0.4f, s * 0.95f);
     const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
     const auto overview = Neuron::Client::BuildOverview(m_interp.curr, self,
                                                         m_focus[0], m_focus[1], m_focus[2]);
@@ -1261,8 +1267,13 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         m_interp.Advance(m_replica.Current());
     }
 
-    // 2.5 Camera input (orbit/zoom/pan).
+    // 2.5 Camera input (orbit/zoom/pan) + onboarding objective chain.
     UpdateCameraInput();
+    {
+      const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+      m_onboarding.Observe(Neuron::Client::ObserveWorld(
+          m_interp.curr, self, static_cast<uint32_t>(m_selection.size())));
+    }
 
     // 3. Render.
     const UINT w = m_dr.Width();
