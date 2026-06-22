@@ -49,6 +49,7 @@
 #include "ReplicaManager.h"
 #include "Interpolator.h"
 #include "FleetControl.h"      // smart action, control groups, overview (M3 area G)
+#include "RtsCamera.h"         // free orbit/zoom/pan camera (playable slice)
 #include "Starmap.h"           // beacon route solver (M3 area G)
 #include "Command.h"           // FleetCommand encode (M3 area B)
 
@@ -120,6 +121,14 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   float m_ptrX{0.f}, m_ptrY{0.f};
   bool  m_ptrDown{false}, m_ptrPressed{false}, m_ptrReleased{false};
 
+  // Camera input (playable slice): right-drag orbits, wheel zooms, arrows pan.
+  bool  m_rmbDown{false};
+  float m_prevPtrX{0.f}, m_prevPtrY{0.f};
+  int   m_wheelAccum{0};
+  static constexpr float kCamYawPerPx   = 0.005f;
+  static constexpr float kCamPitchPerPx = 0.005f;
+  static constexpr float kCamPanFrac    = 0.02f; // pan step as a fraction of zoom distance
+
   // ---- windowed UI (docs/design/darwinia-menu-ui.md) ----
   enum Win { Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other, Win_Count };
   bool  m_winOpen[Win_Count]{ true, false, false, false, false };
@@ -152,6 +161,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   std::vector<uint32_t> m_selection;     // locally-selected owned net ids
   uint32_t m_targetNetId{0};             // last picked target (overview/radar)
   float m_focus[3]{0.f, 0.f, 0.f};       // render-space camera focus (own base)
+  Neuron::Client::RtsCamera m_camera;    // free orbit/zoom/pan camera (playable slice)
 
   // ---- state ----
   std::array<uint8_t, 4096> m_snapBuf{};
@@ -281,6 +291,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     window.PointerMoved({this, &App::OnPointerMoved});
     window.PointerPressed({this, &App::OnPointerPressed});
     window.PointerReleased({this, &App::OnPointerReleased});
+    window.PointerWheelChanged({this, &App::OnPointerWheel});
   }
 
   // ── Pointer input (physical pixels via the DPI scale) ─────────────────────
@@ -290,7 +301,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const auto p = e.CurrentPoint().Position();
     m_ptrX = p.X * m_dpiScale;
     m_ptrY = p.Y * m_dpiScale;
-    m_ptrDown = e.CurrentPoint().Properties().IsLeftButtonPressed();
+    const auto props = e.CurrentPoint().Properties();
+    m_ptrDown = props.IsLeftButtonPressed();
+    m_rmbDown = props.IsRightButtonPressed(); // right-drag orbits the camera
   }
   void OnPointerPressed(const Windows::UI::Core::CoreWindow&,
                         const Windows::UI::Core::PointerEventArgs& e)
@@ -298,8 +311,18 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const auto p = e.CurrentPoint().Position();
     m_ptrX = p.X * m_dpiScale;
     m_ptrY = p.Y * m_dpiScale;
-    m_ptrDown = true;
+    const auto props = e.CurrentPoint().Properties();
+    m_ptrDown = props.IsLeftButtonPressed();
+    m_rmbDown = props.IsRightButtonPressed();
+    // Anchor the orbit so the first frame of a right-drag has a zero delta.
+    if (m_rmbDown) { m_prevPtrX = m_ptrX; m_prevPtrY = m_ptrY; }
     m_ptrPressed = true;
+  }
+  // Mouse wheel → camera zoom (accumulated; consumed in UpdateCameraInput).
+  void OnPointerWheel(const Windows::UI::Core::CoreWindow&,
+                      const Windows::UI::Core::PointerEventArgs& e)
+  {
+    m_wheelAccum += e.CurrentPoint().Properties().MouseWheelDelta();
   }
   void OnPointerReleased(const Windows::UI::Core::CoreWindow&,
                          const Windows::UI::Core::PointerEventArgs& e)
@@ -307,8 +330,46 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const auto p = e.CurrentPoint().Position();
     m_ptrX = p.X * m_dpiScale;
     m_ptrY = p.Y * m_dpiScale;
-    m_ptrDown = false;
+    const auto props = e.CurrentPoint().Properties();
+    m_ptrDown = props.IsLeftButtonPressed();
+    m_rmbDown = props.IsRightButtonPressed();
     m_ptrReleased = true;
+  }
+
+  // Apply camera input each frame: right-drag orbit, wheel zoom, arrow-key pan.
+  // Platform-independent math lives in Neuron::Client::RtsCamera; this just maps
+  // UWP pointer/keyboard state onto it. (Pan speed scales with zoom distance.)
+  void UpdateCameraInput()
+  {
+    if (m_rmbDown)
+    {
+      const float dx = m_ptrX - m_prevPtrX;
+      const float dy = m_ptrY - m_prevPtrY;
+      m_camera.Rotate(dx * kCamYawPerPx, -dy * kCamPitchPerPx);
+    }
+    m_prevPtrX = m_ptrX;
+    m_prevPtrY = m_ptrY;
+
+    if (m_wheelAccum != 0)
+    {
+      const float notches = static_cast<float>(m_wheelAccum) / 120.0f; // one detent = 120
+      m_camera.Zoom(std::pow(0.88f, notches));                          // wheel up zooms in
+      m_wheelAccum = 0;
+    }
+
+    if (m_window)
+    {
+      using VK = Windows::System::VirtualKey;
+      using KS = Windows::UI::Core::CoreVirtualKeyStates;
+      auto down = [&](VK k) { return (m_window.GetKeyState(k) & KS::Down) == KS::Down; };
+      const float step = m_camera.Distance() * kCamPanFrac;
+      float r = 0.0f, f = 0.0f;
+      if (down(VK::Left))  r -= step;
+      if (down(VK::Right)) r += step;
+      if (down(VK::Up))    f += step;
+      if (down(VK::Down))  f -= step;
+      if (r != 0.0f || f != 0.0f) m_camera.PanWorld(r, f); // (also releases base-follow)
+    }
   }
 
   // Logical DIP -> physical pixels for the swap chain.
@@ -1200,6 +1261,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         m_interp.Advance(m_replica.Current());
     }
 
+    // 2.5 Camera input (orbit/zoom/pan).
+    UpdateCameraInput();
+
     // 3. Render.
     const UINT w = m_dr.Width();
     const UINT h = m_dr.Height();
@@ -1224,11 +1288,15 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
         }
       }
     }
-    // Command view: pulled back and raised so the base sits among the surrounding
-    // scenery cluster (which is placed ahead on +Z), looking slightly forward.
-    const XMVECTOR eye = XMVectorSet(cx, cy + 140.f, cz - 340.f, 0.f);
-    const XMVECTOR at = XMVectorSet(cx, cy + 20.f, cz + 120.f, 0.f);
-    const XMVECTOR up = XMVectorSet(0.f, 1.f, 0.f, 0.f);
+    // Free RTS camera (playable slice): while "follow" is on it tracks the player's
+    // drifting base; right-drag/wheel/arrows orbit, zoom and pan it (UpdateCameraInput).
+    if (m_camera.Follow()) m_camera.SetFocus({ cx, cy, cz });
+    const XMFLOAT3 eyeF = m_camera.Eye();
+    const XMFLOAT3 atF = m_camera.At();
+    const XMFLOAT3 upF = m_camera.Up();
+    const XMVECTOR eye = XMLoadFloat3(&eyeF);
+    const XMVECTOR at = XMLoadFloat3(&atF);
+    const XMVECTOR up = XMLoadFloat3(&upF);
     const float fov = SettingFovRadians();
     const float asp = (h > 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.f;
 
@@ -1478,6 +1546,12 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       SendFleet(c);
       return;
     }
+    case VK::F: // toggle base-follow camera
+      m_camera.SetFollow(!m_camera.Follow());
+      return;
+    case VK::Space: // recenter on the player's base (re-enables follow)
+      m_camera.SetFollow(true);
+      return;
     default:
       return;
     }

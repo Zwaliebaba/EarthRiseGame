@@ -79,6 +79,7 @@
   <ItemGroup>
     <ClInclude Include="FleetControl.h" />
     <ClInclude Include="IClientController.h" />
+    <ClInclude Include="RtsCamera.h" />
     <ClInclude Include="Interpolator.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Replica.h" />
