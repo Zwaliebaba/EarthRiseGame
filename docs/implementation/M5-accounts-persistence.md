@@ -4,6 +4,11 @@
 > **Status:** ⏳ Not started (M0/M1a/M1b/M2 complete; M3 active; M4 planned). Drafted from
 > `_template.md`, per [`README.md`](README.md).
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
+> **Verification:** M5's gates are **real, enforceable** — the register/login flow, persistence
+> layer, and the kill/restart **zero-loss drill** (areas A/C/I) run on the **Windows build agent
+> against a dev SQL Server reached over the network** (§16.3, §20); platform-independent hashing
+> /serde logic is mirrored on the Linux `testrunner` (§16.2). Assumes M3 (incl. its Windows
+> surfaces) is closed when M5 starts.
 
 ## Milestone goal (verbatim from §17)
 

@@ -4,6 +4,10 @@
 > **Status:** ⏳ Not started (M0/M1a/M1b/M2 complete; M3 active). Drafted from `_template.md`
 > as the next milestone after M3, per [`README.md`](README.md).
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
+> **Verification:** M4's gates are **real, enforceable** — the contested-sector perf/load run
+> (areas I/J) executes on the **Windows build agent** (§16.3) at the target player count; the
+> platform-independent pipeline/routing logic is mirrored on the Linux `testrunner` (§16.2).
+> Assumes M3 (incl. its Windows surfaces) is closed when M4 starts.
 
 ## Milestone goal (verbatim from §17)
 
