@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "Command.h"
+#include "ConnectionTable.h"
 #include "Economy.h"
 #include "Fleet.h"
 #include "Interest.h"
@@ -533,6 +534,58 @@ namespace NeuronCoreTest
       t.RecordCapBind(0); t.RecordCapBind(7);
       Assert::AreEqual(size_t{ 7 }, t.MaxCapBind());
       Assert::AreEqual(uint64_t{ 1 }, t.CapBindTicks());
+    }
+  };
+
+  // --- Token-indexed connection routing (M4 area G; §9) -----------------------
+
+  TEST_CLASS(ConnectionTableTests)
+  {
+  public:
+    TEST_METHOD(RoutesByTokenToTheRightSlot)
+    {
+      Neuron::Net::ConnectionTable t;
+      const auto a = t.Open(0xAAAA000011112222ull);
+      const auto b = t.Open(0xBBBB333344445555ull);
+      Assert::IsTrue(a.valid && b.valid);
+      Assert::IsTrue(a.index != b.index);
+      const auto found = t.Find(0xBBBB333344445555ull);
+      Assert::IsTrue(found.valid);
+      Assert::AreEqual(b.index, found.index);
+      Assert::IsTrue(!t.Find(0xDEADBEEFull).valid);
+    }
+
+    TEST_METHOD(RecycledSlotRejectsStaleGeneration)
+    {
+      Neuron::Net::ConnectionTable t;
+      const auto a = t.Open(0xA11ull);
+      Assert::IsTrue(t.Validate(a));
+      t.Close(0xA11ull);
+      Assert::IsTrue(!t.Validate(a));
+      const auto b = t.Open(0xB22ull);
+      Assert::AreEqual(a.index, b.index); // slot recycled
+      Assert::IsTrue(t.Validate(b));
+      Assert::IsTrue(!t.Validate(a));     // stale generation rejected
+    }
+
+    TEST_METHOD(ConnectionIsPinnedToOneLane)
+    {
+      Neuron::Net::ConnectionTable t;
+      const auto a = t.Open(1);
+      Assert::AreEqual(a.index % 4, Neuron::Net::ConnectionTable::Lane(a, 4));
+      Assert::AreEqual(Neuron::Net::ConnectionTable::Lane(a, 4),
+                       Neuron::Net::ConnectionTable::Lane(t.Find(1), 4));
+    }
+
+    TEST_METHOD(FreedSlotsAreReusedNotGrown)
+    {
+      Neuron::Net::ConnectionTable t;
+      for (uint64_t i = 1; i <= 8; ++i) t.Open(i);
+      Assert::AreEqual(size_t{ 8 }, t.SlotCapacity());
+      for (uint64_t i = 1; i <= 8; ++i) t.Close(i);
+      for (uint64_t i = 100; i < 104; ++i) t.Open(i);
+      Assert::AreEqual(size_t{ 8 }, t.SlotCapacity());
+      Assert::AreEqual(size_t{ 4 }, t.ActiveCount());
     }
   };
 
