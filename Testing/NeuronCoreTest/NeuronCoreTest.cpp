@@ -8,6 +8,7 @@
 #include "Command.h"
 #include "Economy.h"
 #include "Fleet.h"
+#include "Interest.h"
 #include "Navigation.h"
 #include "ServerUniverse.h"
 #include "ShapeCatalog.h"
@@ -217,6 +218,69 @@ namespace NeuronCoreTest
         Assert::IsTrue(decoded.entities[i].kind == snap.entities[i].kind);
         Assert::IsTrue(decoded.entities[i].netId == snap.entities[i].netId);
       }
+    }
+  };
+
+  // --- Interest (cell pub/sub, M4 area A; §8.4, §6.3) -------------------------
+
+  TEST_CLASS(InterestGridTests)
+  {
+  public:
+    TEST_METHOD(CrossingEmitsOneLeaveAndOneEnter)
+    {
+      InterestGrid g;
+      const auto first = g.UpdateResidency(7, { 0, 0, 0 });
+      Assert::IsTrue(first.changed && !first.hadPrevious); // enter only
+      Assert::IsTrue(!g.UpdateResidency(7, { 0, 0, 0 }).changed); // same sector = no-op
+
+      const auto ev = g.UpdateResidency(7, { 1, 0, 0 });
+      Assert::IsTrue(ev.changed && ev.hadPrevious);
+      Assert::IsTrue(ev.from == SectorId{ 0, 0, 0 });
+      Assert::IsTrue(ev.to == SectorId{ 1, 0, 0 });
+      Assert::IsTrue(g.Residents({ 0, 0, 0 }).empty());        // exactly one leave
+      Assert::AreEqual(size_t{ 1 }, g.Residents({ 1, 0, 0 }).size()); // exactly one enter
+    }
+
+    TEST_METHOD(NeighbourhoodSubscriptionMatchesRange)
+    {
+      InterestGrid g;
+      std::vector<SectorId> cells;
+      CollectNeighbourhood({ 0, 0, 0 }, 2, cells);
+      g.SetSubscription(1, cells);
+      Assert::IsTrue(g.IsSubscribed(1, { 2, 0, 0 }));
+      Assert::IsTrue(g.IsSubscribed(1, { -2, -2, -2 }));
+      Assert::IsTrue(!g.IsSubscribed(1, { 3, 0, 0 }));     // past the radius
+      Assert::AreEqual(size_t{ 5 * 5 * 5 }, g.Subscriptions(1).size());
+    }
+
+    TEST_METHOD(MutationEnqueuedToCellSubscribersOnly)
+    {
+      InterestGrid g;
+      const SectorId cellC{ 5, 0, 0 };
+      g.UpdateResidency(100, cellC);
+      g.Subscribe(1, cellC);
+      g.Subscribe(2, { 9, 0, 0 }); // subscribes elsewhere
+
+      Assert::AreEqual(size_t{ 1 }, g.Subscribers(cellC).size());
+      Assert::AreEqual(uint32_t{ 1 }, g.Subscribers(cellC)[0]);
+      std::vector<uint32_t> vis;
+      g.VisibleTo(1, vis);
+      Assert::AreEqual(size_t{ 1 }, vis.size());
+      Assert::AreEqual(uint32_t{ 100 }, vis[0]);
+      g.VisibleTo(2, vis);
+      Assert::IsTrue(vis.empty()); // the non-subscriber never sees the mutation
+    }
+
+    TEST_METHOD(WarpPrefetchSubscribesDestinationBeforeArrival)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      const UniversePos dest{ int64_t(40) * Neuron::Universe::kSectorSize, 0, 0 };
+      const SectorId destSec = Neuron::Universe::UniverseToSector(dest);
+      Assert::IsTrue(su.BeginWarpTo(base, dest));            // R21 prefetch fires
+      Assert::IsTrue(su.Interest().IsSubscribed(base, destSec)); // before arrival
+      su.Step(0.1f);
+      Assert::IsTrue(su.Interest().IsSubscribed(base, destSec)); // pinned in flight
     }
   };
 

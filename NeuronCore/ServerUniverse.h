@@ -16,6 +16,7 @@
 #include "Components.h"
 #include "Economy.h"
 #include "Fleet.h"
+#include "Interest.h"
 #include "Movement.h"
 #include "Navigation.h"
 #include "ShapeCatalog.h"
@@ -205,6 +206,7 @@ public:
         Sim::BeginWarp(*nav, dest, IsBase(netId) ? m_nav.warpSpeedBase : m_nav.warpSpeedShip,
                        m_nav.warpAlignSeconds);
         OnTravelStart(dest);
+        PrefetchTravelInterest(netId, dest);
         return true;
     }
 
@@ -239,6 +241,7 @@ public:
         Sim::BeginJump(*nav, m_universe.beacons[destIdx].pos, destIdx,
                        base ? m_nav.jumpSpoolBase : m_nav.jumpSpoolShip);
         OnTravelStart(m_universe.beacons[destIdx].pos);
+        PrefetchTravelInterest(netId, m_universe.beacons[destIdx].pos);
         return JumpReject::Accepted;
     }
 
@@ -469,6 +472,7 @@ public:
         if (it == m_netIdToEntity.end()) return false;
         m_world.DestroyEntity(it->second);
         m_netIdToEntity.erase(it);
+        m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
         return true;
     }
 
@@ -485,7 +489,33 @@ public:
         HarvestSystem(dtSeconds);
         BuildSystem(dtSeconds);
         ++m_tick;
+        UpdateInterest();
     }
+
+    // Refresh the cell publish/subscribe interest grid for this tick (M4 area A,
+    // §8.4): every replicated entity re-homes into its current sector cell (one
+    // leave + one enter on a crossing), and every player's subscription is set to
+    // the union of the sector neighbourhoods its sensor sources can reach. Pure
+    // bookkeeping — touches only the interest grid, never sim state, so SimHash is
+    // unchanged. The per-client snapshot diff (areas B/C/E) reads this grid.
+    void UpdateInterest()
+    {
+        m_world.ForEach<NetId, Transform>([&](NetId& id, Transform& t) {
+            m_interest.UpdateResidency(id.value, Neuron::Universe::UniverseToSector(t.pos));
+        });
+        std::unordered_map<uint32_t, std::vector<Neuron::Universe::SectorId>> perPlayer;
+        m_world.ForEach<OwnerId, Sensor, Transform>([&](OwnerId& o, Sensor& s, Transform& t) {
+            if (o.player == 0) return; // NPC/unowned eyes don't subscribe
+            Neuron::Sim::CollectNeighbourhood(Neuron::Universe::UniverseToSector(t.pos),
+                                              Neuron::Sim::SectorRadiusForRange(s.range),
+                                              perPlayer[o.player]);
+        });
+        for (auto& [player, cells] : perPlayer)
+            m_interest.SetSubscription(player, cells);
+    }
+
+    // Interest grid accessor (the area-B/C/E snapshot diff + tests read it).
+    [[nodiscard]] Neuron::Sim::InterestGrid& Interest() noexcept { return m_interest; }
 
     // Build the full snapshot for this tick (interest = everything until M4; the
     // per-player fog-filtered variant is BuildSnapshotFor, area E).
@@ -752,6 +782,7 @@ private:
         }
         if (m_world.IsAlive(e)) m_world.DestroyEntity(e);
         m_netIdToEntity.erase(netId);
+        m_interest.Remove(netId); // drop residency (area A); tombstone reconcile is area D
     }
 
     // --- NPC AI (area F) -----------------------------------------------------
@@ -838,6 +869,19 @@ private:
     void OnTravelStart(const Neuron::Universe::UniversePos& dest) noexcept
     {
         m_lastTravelSector = Neuron::Universe::UniverseToSector(dest);
+    }
+
+    // Pre-subscribe the travelling unit's owner to the destination cells (R21), so
+    // a warp/jump that crosses sectors faster than a tick has its target already
+    // replicated on arrival. Pinned until the owner's sensor neighbourhood reaches
+    // it (InterestGrid::SetSubscription unpins on arrival).
+    void PrefetchTravelInterest(uint32_t netId, const Neuron::Universe::UniversePos& dest)
+    {
+        const OwnerId* o = m_world.GetComponent<OwnerId>(EntityOf(netId));
+        if (!o || o->player == 0) return;
+        const Sensor* s = m_world.GetComponent<Sensor>(EntityOf(netId));
+        const int radius = s ? Neuron::Sim::SectorRadiusForRange(s->range) : 1;
+        m_interest.PreSubscribe(o->player, Neuron::Universe::UniverseToSector(dest), radius);
     }
 
     // Advance every base's build queue; on completion spawn a ship for the owner
@@ -1010,6 +1054,7 @@ private:
     std::unordered_map<uint16_t, uint32_t>     m_beaconEntity; // beaconIndex → netId
     std::unordered_map<std::string, uint16_t>  m_beaconName;   // beacon name → beaconIndex
     Neuron::Universe::SectorId                 m_lastTravelSector{};
+    Neuron::Sim::InterestGrid                  m_interest; // cell pub/sub interest (area A)
     // NPC sites (area F): site id → guardians still alive; cleared sites pending drain.
     std::unordered_map<uint16_t, int>          m_siteAlive;
     std::vector<uint16_t>                      m_clearedSites;

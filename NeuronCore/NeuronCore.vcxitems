@@ -36,6 +36,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Handshake.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)HandshakeMessages.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ICrypto.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Interest.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ISocket.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)LoopbackNetwork.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)MathCommon.h" />

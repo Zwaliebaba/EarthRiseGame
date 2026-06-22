@@ -15,7 +15,7 @@ CXXFLAGS ?= -std=c++23 -Wall -Wextra -Wpedantic -O2 -g -I../../NeuronCore -I../.
 SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParseTests.cpp \
         CmoAnimationTests.cpp ShapeCatalogTests.cpp UiLayoutTests.cpp StringTableTests.cpp \
         UniverseDataTests.cpp NavigationTests.cpp EconomyTests.cpp HarvestTests.cpp \
-        FleetTests.cpp ClientFleetTests.cpp DeterminismTests.cpp
+        FleetTests.cpp ClientFleetTests.cpp DeterminismTests.cpp InterestTests.cpp
 BIN := testrunner
 
 .PHONY: all build run clean

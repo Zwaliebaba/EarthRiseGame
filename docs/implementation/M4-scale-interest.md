@@ -1,8 +1,10 @@
 # M4 — Scale & Interest (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M4**).
-> **Status:** ⏳ Not started (M0/M1a/M1b/M2 complete; M3 active). Drafted from `_template.md`
-> as the next milestone after M3, per [`README.md`](README.md).
+> **Status:** 🔨 In progress — **area A (cell pub/sub interest) implemented** with its
+> `NeuronCoreTest` cases + Linux `testrunner` mirror (§16.2); areas B–J not started.
+> (M0/M1a/M1b/M2 complete; M3 active.) Drafted from `_template.md` as the next milestone
+> after M3, per [`README.md`](README.md).
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 > **Verification:** M4's gates are **real, enforceable** — the contested-sector perf/load run
 > (areas I/J) executes on the **Windows build agent** (§16.3) at the target player count; the
@@ -108,22 +110,28 @@
 - **Current state:** net-new. `DetectedSet`/`BuildSnapshotFor` (M3 area E) are the per-player
   *filter* this replaces; `SectorId`/`SectorHash` already exist in `UniversePos.h`.
 - **Work:**
-  - [ ] **Interest grid** keyed by `SectorId` (`NeuronCore`, new `Interest.h`): cell → subscriber
-        list + resident-entity list. Built over `SectorHash` (§6.3); **no 64-bit Morton key**.
-  - [ ] **Subscribe/unsubscribe on sector crossing:** an explicit **enter/leave event** when an
-        entity's sector index changes (the §8.4 tombstone rule needs these anyway). A player
-        subscribes to its sensor-range neighbourhood of cells; the set updates as the base/camera
-        moves and on **warp/jump prefetch** (wire the existing `OnTravelStart` hook to pre-subscribe
-        the destination cells, R21).
-  - [ ] **Sensor/fog over cells:** fold M3's `DetectedSet` semantics (own + sensor-range + scanned
-        + always-known beacons) into the subscription set so the overview/fog stays correct — the
-        filter becomes a *consequence* of subscription, not a separate per-tick scan.
-- **Tests (`NeuronCoreTest`, §16.1; mirror in `NeuronTools/testrunner/`, §16.2):**
-  - [ ] Crossing a sector boundary emits exactly one leave + one enter; subscriber list membership
-        matches sensor range.
-  - [ ] A mutation in cell C is enqueued to C's subscribers only (count == subscriber count), never
-        to non-subscribers.
-  - [ ] Warp/jump start pre-subscribes the destination cells before arrival (R21).
+  - [x] **Interest grid** keyed by `SectorId` (`NeuronCore/Interest.h`, new): `InterestGrid` —
+        cell → sorted resident-entity list + sorted subscriber list, keyed by `SectorHash` (§6.3);
+        **no 64-bit Morton key**. Empty cells are pruned. Sorted lists keep per-cell membership
+        order-stable across runs (feeds deterministic scheduling at area E).
+  - [x] **Subscribe/unsubscribe on sector crossing:** `UpdateResidency` emits a single
+        leave+enter `CrossEvent` when an entity's sector index changes (the §8.4 tombstone rule at
+        area D consumes these). `SetSubscription` diffs a player's sensor-range neighbourhood
+        (`CollectNeighbourhood` / `SectorRadiusForRange`) to enter/leave deltas; `ServerUniverse::
+        UpdateInterest` (called each `Step`) re-homes entities and re-subscribes players each tick.
+        **Warp/jump prefetch** (R21) wired: `BeginWarpTo`/`BeginJumpTo` → `PrefetchTravelInterest`
+        pins the destination cells, surviving the per-tick refresh until arrival.
+  - [ ] **Sensor/fog over cells:** *(partial)* the spatial neighbourhood is folded into the
+        subscription set; the always-known overlays (own outside sensor range, beacon graph,
+        scanned contacts) still come from M3's `DetectedSet`. Full replacement of the per-tick scan
+        lands with the area-B/E diff path (`BuildSnapshotFor` is untouched for now).
+- **Tests (`NeuronCoreTest`, §16.1; mirror in `NeuronTools/testrunner/InterestTests.cpp`, §16.2):**
+  - [x] Crossing a sector boundary emits exactly one leave + one enter; subscriber list membership
+        matches sensor range (`CrossingEmitsOneLeaveAndOneEnter`, `NeighbourhoodSubscriptionMatchesRange`).
+  - [x] A mutation in cell C is enqueued to C's subscribers only (count == subscriber count), never
+        to non-subscribers (`MutationEnqueuedToCellSubscribersOnly`).
+  - [x] Warp/jump start pre-subscribes the destination cells before arrival
+        (`WarpPrefetchSubscribesDestinationBeforeArrival`, R21).
 - **Depends on:** nothing (server-side). **Blocks:** B, D, E.
 
 ### B. Per-entity version stamping & per-client baselines (§8.4)
