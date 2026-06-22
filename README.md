@@ -194,6 +194,23 @@ exercise:
 3. **Run the UWP client:** deploy and launch `EarthRise` from Visual Studio to render the
    universe with mouse+keyboard input.
 
+**Client controls (playable slice — pending Windows verification):**
+
+| Input | Action |
+| --- | --- |
+| Right-drag | Orbit the camera |
+| Mouse wheel | Zoom |
+| Arrow keys | Pan the camera (releases base-follow) |
+| `F` / `Space` | Toggle base-follow / recenter on your base |
+| Left-click / left-drag | Select nearest unit / box-select |
+| Click the radar (lower-left) | Issue a smart command (move/attack/warp) to the selection |
+| `A` / `B` / `S` | Select all own ships / build a ship at base / stop selection |
+| `Ctrl+#` then `#` | Set / recall a control group |
+
+> An amber **objective banner** (top-left) walks a new player through select → engage →
+> clear the guardian site. Selected units show a green bracket; combat units show an
+> IFF-coloured health bar.
+
 > **UWP loopback:** for local client↔server testing on one machine, UWP is sandboxed off
 > loopback by default. Visual Studio adds a loopback exemption in Debug; test the
 > non-exempt path before Store. `ERHeadless` (Win32) is exempt. See `docs/masterplan.md`
@@ -247,12 +264,18 @@ Milestones (full detail in `docs/masterplan.md` §17):
 | **M0** | Foundations (engine skeleton, ECS, fixed-step time, build) | ✅ Complete |
 | **M1a** | Networked transport (headless): handshake, reliable-UDP, replication | ✅ Complete |
 | **M1b** | Client tech slice (DX12 engine foundation, camera, input) | ✅ Complete |
-| **M2** | Darwinia look + audio (DDS/CMO, HUD, bloom/particles, NeuronAudio) | 🔨 **Active** |
-| **M3** | Core 4X loop, fleet command & navigation | 📝 Planned |
-| **M4** | Scale & interest (cell pub/sub, delta compression, load test at scale) | ⏳ |
+| **M2** | Darwinia look + audio (DDS/CMO, HUD, bloom/particles, NeuronAudio) | ✅ Complete |
+| **M3** | Core 4X loop, fleet command & navigation | 🔨 **Active** (areas A–H implemented; Windows client/headless glue unverified) |
+| **M4** | Scale & interest (cell pub/sub, delta compression, load test at scale) | 🔨 In progress (areas A–C implemented) |
 | **M5** | Accounts, auth & persistence (SQL, warm-restart) | ⏳ |
 | **M6** | Combat model & production deployment (Kubernetes, Azure SQL) | ⏳ |
 | **M7** | Sandbox: conquest, economy, PvE content & onboarding | ⏳ |
+
+> **Side track — playable vertical slice:** a thin client layer (free RTS camera,
+> onboarding objectives, click/box selection, in-world selection/health feedback) that
+> makes the M3 loop actually playable ahead of M4–M7. Logic is Linux-tested; the UWP
+> wiring is **pending a Windows smoke run**. See
+> [`docs/implementation/playable-slice.md`](docs/implementation/playable-slice.md).
 
 ## Contributing
 

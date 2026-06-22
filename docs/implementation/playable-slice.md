@@ -46,6 +46,33 @@ and presented.
   up with rendered unit positions (the projection mirrors the renderer's column-major
   cbuffer convention).
 
+## How to test (Windows smoke run)
+
+Build `EarthRise.slnx` (x64) on the Windows agent, start `ERServer`, then deploy/run the
+`EarthRise` client from Visual Studio (loopback). Controls:
+
+| Input | Expected |
+| --- | --- |
+| Right-drag | Camera orbits around the focus |
+| Mouse wheel | Camera zooms (clamped) |
+| Arrow keys | Camera pans; base-follow turns off |
+| `F` / `Space` | Toggle base-follow / recenter on your base |
+| Left-click a unit | Selects it (green bracket appears) |
+| Left-drag a box | Selects all own units inside it (live rectangle while dragging) |
+| Radar click (lower-left) | Sends the selection a smart command |
+| `A` / `B` / `S` | Select all own ships / build at base / stop |
+
+**Checklist to confirm (the App.cpp wiring the Linux tests can't cover):**
+
+- [ ] Solution **compiles** on MSVC (UWP/WinRT + DirectXMath wiring).
+- [ ] Camera orbit/zoom/pan/follow all respond; `Space` recenters on the base.
+- [ ] **Selection picks line up** with rendered units — click a ship, the bracket lands on
+      it; box-select grabs the right ones. *(If offset, it's the world→screen projection —
+      an isolated fix; the pick decision itself is unit-tested.)*
+- [ ] Health bars sit above combat units, fill matches HP, own = green / hostile = red.
+- [ ] The amber **objective banner** advances Welcome → Select → Engage → Clear → Done as
+      you select a fleet and clear the guardian site.
+
 ## Done (slice gate)
 
 - [ ] A new player connects, sees the universe, can **look around** (orbit/zoom/pan),
