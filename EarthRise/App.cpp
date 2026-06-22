@@ -50,6 +50,7 @@
 #include "Interpolator.h"
 #include "FleetControl.h"      // smart action, control groups, overview (M3 area G)
 #include "Onboarding.h"        // objective/hint chain (playable slice)
+#include "Picking.h"           // viewport click / box selection (playable slice)
 #include "RtsCamera.h"         // free orbit/zoom/pan camera (playable slice)
 #include "Starmap.h"           // beacon route solver (M3 area G)
 #include "Command.h"           // FleetCommand encode (M3 area B)
@@ -126,6 +127,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   bool  m_rmbDown{false};
   float m_prevPtrX{0.f}, m_prevPtrY{0.f};
   int   m_wheelAccum{0};
+  // Left-drag selection state (playable slice).
+  bool  m_selDragging{false};
+  float m_selX0{0.f}, m_selY0{0.f};
   static constexpr float kCamYawPerPx   = 0.005f;
   static constexpr float kCamPitchPerPx = 0.005f;
   static constexpr float kCamPanFrac    = 0.02f; // pan step as a fraction of zoom distance
@@ -1140,6 +1144,67 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     SendFleet(MakeSmartCommand(tt, m_selection, bestId, {}, /*queue*/false));
   }
 
+  // Left-click / drag-box selection in the 3D viewport (playable slice). Projects
+  // owned units to screen with the same view-proj the scene drew, then resolves a
+  // click (nearest unit) or a drag (box) via the platform-independent Picking helper.
+  // Runs after the radar handler and before UpdateUi consumes the pointer edge, and
+  // ignores clicks over the radar disc or an open UI window. NOTE: the CPU projection
+  // mirrors the renderer's column-major cbuffer convention (XMVector3Transform with
+  // the un-transposed view-proj) — verify the pick lines up on the Windows build.
+  void HandleViewportSelection(UINT screenW, UINT screenH, const DirectX::XMFLOAT4X4& vpf)
+  {
+    using namespace DirectX;
+    const float s = MenuScale(screenH);
+    const float R = 95.f * s, cxr = 20.f * s + R, cyr = static_cast<float>(screenH) - 20.f * s - R;
+    auto overRadar = [&](float x, float y) {
+      const float dx = x - cxr, dy = y - cyr; return dx * dx + dy * dy <= R * R;
+    };
+
+    if (m_ptrPressed && !PointerOverOpenWindow(s) && !overRadar(m_ptrX, m_ptrY))
+    {
+      m_selDragging = true; m_selX0 = m_ptrX; m_selY0 = m_ptrY;
+    }
+    if (!m_selDragging || !m_ptrReleased) return;
+    m_selDragging = false;
+
+    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+    if (self == 0) return;
+
+    // Project owned ships + base to screen (same vpf the scene was rendered with).
+    const XMMATRIX vp = XMLoadFloat4x4(&vpf);
+    std::vector<Neuron::Client::ScreenPoint> pts;
+    const Neuron::Client::ReplicaSet& rs = m_interp.curr;
+    for (uint32_t i = 0; i < rs.count; ++i)
+    {
+      const auto& e = rs.entities[i];
+      if (!e.valid || e.ownerPlayer != self) continue;
+      const auto kind = static_cast<Neuron::Sim::EntityKind>(e.entityType);
+      if (kind != Neuron::Sim::EntityKind::Ship && kind != Neuron::Sim::EntityKind::Base) continue;
+      const XMVECTOR clip = XMVector3Transform(XMVectorSet(e.x, e.y, e.z, 1.f), vp);
+      const float wclip = XMVectorGetW(clip);
+      Neuron::Client::ScreenPoint sp; sp.id = e.networkId;
+      if (wclip > 1e-4f)
+      {
+        const float ndcx = XMVectorGetX(clip) / wclip, ndcy = XMVectorGetY(clip) / wclip;
+        sp.x = (ndcx * 0.5f + 0.5f) * static_cast<float>(screenW);
+        sp.y = (1.f - (ndcy * 0.5f + 0.5f)) * static_cast<float>(screenH);
+        sp.visible = ndcx >= -1.f && ndcx <= 1.f && ndcy >= -1.f && ndcy <= 1.f;
+      }
+      pts.push_back(sp);
+    }
+
+    if (Neuron::Client::IsDrag(m_selX0, m_selY0, m_ptrX, m_ptrY))
+    {
+      Neuron::Client::PickBox(pts, m_selX0, m_selY0, m_ptrX, m_ptrY, m_selection);
+    }
+    else
+    {
+      const uint32_t hit = Neuron::Client::PickNearest(pts, m_ptrX, m_ptrY, 28.f * s);
+      m_selection.clear();
+      if (hit) m_selection.push_back(hit); // empty click clears selection
+    }
+  }
+
   // Minimal command HUD (§22.2/§22.3; M3 area G): the overview contact list (fog-
   // filtered, IFF-coloured, nearest-first) plus the current selection + target.
   void DrawCommandHud(UINT screenW, UINT screenH)
@@ -1150,6 +1215,15 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // Objective banner (playable-slice onboarding) — amber, top-left.
     if (const char* obj = m_onboarding.CurrentText(); obj && obj[0])
       m_canvas.DrawText(40.f * s, 18.f * s, obj, 1.0f, 0.85f, 0.4f, s * 0.95f);
+
+    // Live drag-select rectangle (playable slice).
+    if (m_selDragging && m_ptrDown)
+    {
+      const float lx = m_selX0 < m_ptrX ? m_selX0 : m_ptrX;
+      const float ly = m_selY0 < m_ptrY ? m_selY0 : m_ptrY;
+      m_canvas.DrawRect(lx, ly, std::fabs(m_ptrX - m_selX0), std::fabs(m_ptrY - m_selY0),
+                        0.4f, 0.8f, 1.0f, 0.15f);
+    }
     const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
     const auto overview = Neuron::Client::BuildOverview(m_interp.curr, self,
                                                         m_focus[0], m_focus[1], m_focus[2]);
@@ -1475,6 +1549,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // contact (must run before UpdateUi consumes the pointer-press, §23.1/area G).
     m_focus[0] = cx; m_focus[1] = cy; m_focus[2] = cz;
     HandleRadarCommand(h, cx, cz);
+    HandleViewportSelection(w, h, vpf); // 3D-viewport click / box selection
 
     // HUD + windowed UI. Interaction (hover/press/drag/dropdowns) runs first.
     UpdateUi(w, h);

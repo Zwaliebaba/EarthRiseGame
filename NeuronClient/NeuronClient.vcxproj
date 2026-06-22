@@ -80,6 +80,7 @@
     <ClInclude Include="FleetControl.h" />
     <ClInclude Include="IClientController.h" />
     <ClInclude Include="Onboarding.h" />
+    <ClInclude Include="Picking.h" />
     <ClInclude Include="RtsCamera.h" />
     <ClInclude Include="Interpolator.h" />
     <ClInclude Include="pch.h" />
