@@ -15,6 +15,7 @@
 #include "ServerUniverse.h"
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
+#include "SnapshotScheduler.h"
 #include "UniverseData.h"
 #include "UniverseSource.h" // local copy of the build-time text parser (see header)
 
@@ -312,6 +313,118 @@ namespace NeuronCoreTest
       DeltaSnapshot s6b; s6b.tick = 6; s6b.records.push_back(MakeDeltaRecord(a6b, &a));
       dec.Apply(EncodeDeltaSnapshot(s6b));
       Assert::AreEqual(int32_t{ 80 }, dec.Find(1)->hp); // duplicate tick ignored
+    }
+  };
+
+  // --- Priority / quota snapshot scheduler (M4 area E; §8.4) ------------------
+
+  TEST_CLASS(SchedulerTests)
+  {
+    // Spawn a base and 'n' static scenery props in its sector; returns the base id.
+    static uint32_t SeedScene(ServerUniverse& su, int n)
+    {
+      const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
+      for (int i = 0; i < n; ++i) su.SpawnProp(0, { 100 + 10 * i, 0, 0 });
+      return base;
+    }
+    static size_t VisibleCount(ServerUniverse& su, uint32_t base)
+    {
+      std::vector<uint32_t> vis; su.Interest().VisibleTo(base, vis); return vis.size();
+    }
+
+  public:
+    TEST_METHOD(PriorityRanksRelevantAndNearAboveDistantNeutral)
+    {
+      RelevanceWeights w;
+      const SchedCandidate ownBase{ 1, 0.0, Iff::Own, true, false, 0 };
+      const SchedCandidate target{ 2, 16000.0, Iff::Enemy, false, true, 0 };
+      const SchedCandidate neutralFar{ 3, 320000.0, Iff::Neutral, false, false, 0 };
+      Assert::IsTrue(SnapshotPriority(ownBase, w) > SnapshotPriority(target, w));
+      Assert::IsTrue(SnapshotPriority(target, w) > SnapshotPriority(neutralFar, w));
+    }
+
+    TEST_METHOD(StalenessRaisesAnAgedEntity)
+    {
+      RelevanceWeights w;
+      SchedCandidate fresh{ 1, 16000.0, Iff::Neutral, false, false, 0 };
+      SchedCandidate aged = fresh; aged.netId = 2; aged.staleness = 100;
+      Assert::IsTrue(SnapshotPriority(aged, w) > SnapshotPriority(fresh, w));
+    }
+
+    TEST_METHOD(ScheduleAppliesVisibleCapAndIsDeterministic)
+    {
+      RelevanceWeights w;
+      std::vector<SchedCandidate> cands;
+      for (uint32_t i = 1; i <= 10; ++i)
+        cands.push_back({ i, 1000.0 * i, Iff::Neutral, false, false, 0 });
+      const ScheduleResult r = ScheduleClient(cands, w, 3);
+      Assert::AreEqual(size_t{ 3 }, r.ordered.size());
+      Assert::AreEqual(size_t{ 7 }, r.capped);
+      Assert::AreEqual(uint32_t{ 1 }, r.ordered[0]);
+      const ScheduleResult r2 = ScheduleClient(cands, w, 3);
+      Assert::IsTrue(r.ordered == r2.ordered);
+    }
+
+    TEST_METHOD(KnownStateAdvancesOnlyOnAck)
+    {
+      ClientKnownState known;
+      SnapshotEntity e; e.netId = 7; e.hp = 100;
+      Assert::IsTrue(known.Base(7) == nullptr);
+      known.RecordSent(5, { e });
+      Assert::IsTrue(known.Base(7) == nullptr); // sent, not acked
+      known.Ack(5);
+      Assert::IsTrue(known.Base(7) != nullptr);
+      Assert::AreEqual(int32_t{ 100 }, known.Base(7)->hp);
+    }
+
+    TEST_METHOD(ColdStartConvergesUnderTinyBudget)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = SeedScene(su, 10);
+      su.Step(0.1f);
+      const size_t want = VisibleCount(su, base);
+      Assert::IsTrue(want >= 11);
+
+      DeltaDecodeState client;
+      bool firstTick = true;
+      for (int t = 0; t < 60 && client.Size() < want; ++t) {
+        const DeltaSnapshot snap = su.BuildClientSnapshot(base, 64);
+        if (firstTick) {
+          Assert::IsTrue(!snap.records.empty());
+          Assert::AreEqual(base, snap.records[0].netId); // own base is top priority
+          firstTick = false;
+        }
+        Assert::IsTrue(EncodeDeltaSnapshot(snap).size() <= 64);
+        client.Apply(EncodeDeltaSnapshot(snap));
+        su.RecordClientSnapshotSent(base, snap);
+        su.AckClient(base, su.Tick());
+        su.Step(0.1f);
+      }
+      Assert::AreEqual(want, client.Size());
+    }
+
+    TEST_METHOD(VisibleCapBindsButStillConverges)
+    {
+      ServerUniverse su(false);
+      const uint32_t base = SeedScene(su, 10);
+      su.SetVisibleCap(3);
+      su.Step(0.1f);
+      const size_t want = VisibleCount(su, base);
+
+      DeltaDecodeState client;
+      bool sawCapBind = false;
+      for (int t = 0; t < 80 && client.Size() < want; ++t) {
+        size_t capped = 0;
+        const DeltaSnapshot snap = su.BuildClientSnapshot(base, 4096, &capped);
+        Assert::IsTrue(snap.records.size() <= 3);
+        if (capped > 0) sawCapBind = true;
+        client.Apply(EncodeDeltaSnapshot(snap));
+        su.RecordClientSnapshotSent(base, snap);
+        su.AckClient(base, su.Tick());
+        su.Step(0.1f);
+      }
+      Assert::IsTrue(sawCapBind);
+      Assert::AreEqual(want, client.Size());
     }
   };
 
