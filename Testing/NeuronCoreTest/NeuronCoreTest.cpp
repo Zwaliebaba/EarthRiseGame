@@ -16,6 +16,7 @@
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
 #include "SnapshotScheduler.h"
+#include "Telemetry.h"
 #include "TimeDilation.h"
 #include "UniverseData.h"
 #include "UniverseSource.h" // local copy of the build-time text parser (see header)
@@ -481,6 +482,57 @@ namespace NeuronCoreTest
         const double f = c.Update(cost, kBudget, cfg);
         Assert::IsTrue(f >= cfg.floor - 1e-9 && f <= 1.0 + 1e-9);
       }
+    }
+  };
+
+  // --- Telemetry / §21 counters (M4 area I) -----------------------------------
+
+  TEST_CLASS(TelemetryTests)
+  {
+  public:
+    TEST_METHOD(PercentileNearestRankOverKnownSample)
+    {
+      PercentileWindow w(1000);
+      for (int i = 1; i <= 100; ++i) w.Add(static_cast<double>(i));
+      Assert::AreEqual(50.0, w.Percentile(0.50));
+      Assert::AreEqual(99.0, w.Percentile(0.99));
+      Assert::AreEqual(100.0, w.Percentile(1.0));
+      Assert::AreEqual(1.0, w.Percentile(0.0));
+      Assert::AreEqual(100.0, w.Max());
+    }
+
+    TEST_METHOD(WindowIsBoundedAndEvictsOldest)
+    {
+      PercentileWindow w(8);
+      for (int i = 0; i < 100; ++i) w.Add(static_cast<double>(i));
+      Assert::AreEqual(size_t{ 8 }, w.Count());
+      Assert::AreEqual(99.0, w.Max());
+      Assert::AreEqual(92.0, w.Percentile(0.0));
+    }
+
+    TEST_METHOD(NetCountersSumBytesAndDatagrams)
+    {
+      NetCounters c;
+      c.AddDown(100); c.AddDown(250); c.AddUp(40);
+      Assert::AreEqual(uint64_t{ 350 }, c.downstreamBytes);
+      Assert::AreEqual(uint64_t{ 2 }, c.datagramsOut);
+      Assert::AreEqual(uint64_t{ 40 }, c.upstreamBytes);
+    }
+
+    TEST_METHOD(ServerTelemetryAggregatesTheGates)
+    {
+      ServerTelemetry t;
+      for (int i = 0; i < 99; ++i) t.RecordTickMs(10.0);
+      t.RecordTickMs(40.0);
+      Assert::AreEqual(10.0, t.SimP50());
+      t.RecordTickMs(50.0);
+      Assert::IsTrue(t.SimP99() >= 40.0);
+
+      t.RecordBaselineBytes(4096);
+      Assert::AreEqual(uint64_t{ 4096 }, t.BaselineBytes());
+      t.RecordCapBind(0); t.RecordCapBind(7);
+      Assert::AreEqual(size_t{ 7 }, t.MaxCapBind());
+      Assert::AreEqual(uint64_t{ 1 }, t.CapBindTicks());
     }
   };
 
