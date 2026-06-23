@@ -59,5 +59,17 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)WinsockSocket.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)UniverseData.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)UniversePos.h" />
+    <!-- M4 scale/interest pipeline -->
+    <ClInclude Include="$(MSBuildThisFileDirectory)ConnectionTable.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)SnapshotScheduler.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)SnapshotJobs.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)TimeDilation.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Telemetry.h" />
+    <!-- M5 accounts/auth/persistence -->
+    <ClInclude Include="$(MSBuildThisFileDirectory)Outbox.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)WarmRestart.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Pbkdf2.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)PersistTelemetry.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Reconnect.h" />
   </ItemGroup>
 </Project>
