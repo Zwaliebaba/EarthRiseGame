@@ -273,25 +273,36 @@ do not pre-create accounts or universe rows.** Here's the reasoning, straight fr
 header and the persistence design:
 
 - **Game data is not in SQL.** Item/hull/module **stats**, crafting **recipes**, research
-  **costs/prereqs**, anomaly/invasion **definitions**, and the **universe topology** (regions,
-  jump-beacons, resource fields — authored in `Config/universe/sol-frontier.universe`) are
-  **versioned game data loaded into the in-memory sim by `NeuronCore`** (cooked via
-  `NeuronTools/datacook`, loaded with `ServerUniverse::LoadUniverse`). The schema header is
-  explicit: *"Item stats, hull/module stats, crafting recipes … are GAME DATA … NOT stored
-  here."* So there is nothing to "import" into SQL to make the world exist.
+  **costs/prereqs**, anomaly/invasion **definitions**, the **universe topology** (regions,
+  jump-beacons, resource fields — authored in `Config/universe/sol-frontier.universe`, cooked
+  via `NeuronTools/datacook`, loaded with `ServerUniverse::LoadUniverse`), and now the **M6
+  combat catalog** (hull/module/damage-type/resist stats, authored in
+  `NeuronCore/CombatData.h` as `DefaultCombatCatalog`) are all **versioned game data loaded
+  into the in-memory sim by `NeuronCore`** — not rows in SQL. The schema header is explicit:
+  *"Item stats, hull/module stats, crafting recipes … are GAME DATA … NOT stored here."* So
+  there is nothing to "import" into SQL to make the world exist.
 
 - **Player/economy state is created at runtime.** Accounts come from **in-game
   registration**; bases, ships, inventory, wallets, build-queue rows, snapshots, and the
   economy outbox are all written by the server **as the M3 loop produces them**. You start
   from an **empty** database on purpose — a new client converges from an empty baseline.
 
-- **The one nuance (and why it still doesn't block you).** SQL keeps the *canonical item-id
-  space* (`ItemDefs`) and `Regions` purely so persisted player rows have referential
-  integrity. The schema comments call these *"seeded from game data … before go-live,"* but
-  **there is no seed script in the repo yet**, and M5 only persists the subset of rows the M3
-  loop actually generates. So for standing the server up now you **don't** need to seed them.
-  Producing an `ItemDefs`/`Regions` seed (derived from the cooked game data) is a **pre-go-live
-  task**, not a startup step — flag it for whoever owns the M6/M7 data-cook pipeline.
+- **The one nuance (and why it still doesn't block a dev bring-up).** SQL keeps the
+  *canonical item-id space* (`ItemDefs`) and `Regions` purely so persisted player rows have
+  referential integrity. The schema comments call these *"seeded from game data … before
+  go-live,"* but **there is no seed script in the repo yet** — and that gap is now slightly
+  more than theoretical: with the M6 combat model implemented, ships are spawned from
+  catalog **fits**, so a persisted ship's `Ships.HullItemDefId` is a real foreign key into
+  `ItemDefs`. Persisting a fitted ship into an **unseeded** `ItemDefs` would fail that FK.
+  The *catalog itself* now exists in-tree (`NeuronCore/CombatData.h`); what's missing is the
+  step that **emits the matching `ItemDefs`/`Regions` rows to SQL** — the `datacook`
+  text-DSL/seed tool is explicitly **deferred** in the M6 plan (areas A/B). For standing the
+  server up now you still **don't** seed by hand: the no-DB/dev-stub smoke run persists
+  nothing, and the M5 loop only writes the narrow subset it generates. But **before the live
+  M5+M6 persistence drill** (a fitted ship surviving a warm restart on Windows + SQL),
+  someone needs to produce that seed — auto-generated from the cooked game data so the SQL
+  id-space and the sim's id-space can't drift. Track it as a real pre-drill item, not a
+  vague "go-live" one.
 
 **Bottom line:** empty schema → run the server → data populates itself. Loading data now
 would be redundant at best and could conflict with the IDENTITY-driven rows the server
