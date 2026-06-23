@@ -15,6 +15,13 @@
 //
 // The OVERLAPPED* returned by GetQueuedCompletionStatus is the first member of
 // RecvOp, so we recover the owning RecvOp by CONTAINING_RECORD.
+//
+// Per-connection affinity (M4 area G): the IOCP receive threads do not invoke the
+// callback directly. They peek each datagram's 64-bit connection token (clear AEAD
+// header, App. A) and enqueue the datagram onto that token's affinity *lane* — a
+// dedicated worker thread chosen by a stable token→lane hash, so all datagrams for
+// one connection are serviced single-threaded. A cookie-phase datagram (no token)
+// is laned by its ip:port instead, so a peer's handshake also stays on one lane.
 
 #include "pch.h"
 
@@ -25,11 +32,15 @@
 #include <Windows.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
+#include <mutex>
 #include <thread>
 #include <vector>
 
-#include "Protocol.h" // kMaxDatagramBytes
+#include "ConnectionTable.h" // Neuron::Net::PeekConnectionToken (token-peek router)
+#include "Protocol.h"        // kMaxDatagramBytes
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -94,11 +105,22 @@ bool EndpointToSockaddr(const Endpoint& ep, sockaddr_storage& out, int& outLen)
     return false;
 }
 
-// Hash a remote endpoint to a worker "lane" for per-connection affinity (§9).
-// Not used to dispatch in this skeleton (the raw callback fans out to whoever
-// completes), but provided so the connection router built on top has a single,
-// canonical lane assignment to consult.
-[[maybe_unused]] unsigned LaneForEndpoint(const Endpoint& ep, unsigned numLanes)
+// Lane for a post-handshake datagram: a stable hash of the 64-bit connection token
+// (M4 area G). All datagrams for one connection hash to the same lane → the callback
+// is single-threaded per connection. This need not equal ConnectionTable::Lane()'s
+// slot-index lane (the listener doesn't know the slot index); affinity only requires
+// the assignment be *consistent per connection*, which a token hash guarantees.
+unsigned LaneForToken(uint64_t token, unsigned numLanes)
+{
+    if (numLanes == 0) return 0;
+    uint64_t h = token * 0x9E3779B97F4A7C15ull; // splitmix-style spread
+    h ^= h >> 32;
+    return static_cast<unsigned>(h % numLanes);
+}
+
+// Lane for a cookie-phase datagram (no token yet): hash the peer's ip:port so a
+// peer's whole handshake stays on one lane until its token-bearing traffic begins.
+unsigned LaneForEndpoint(const Endpoint& ep, unsigned numLanes)
 {
     if (numLanes == 0) return 0;
     uint64_t h = 1469598103934665603ull; // FNV-1a
@@ -106,6 +128,26 @@ bool EndpointToSockaddr(const Endpoint& ep, sockaddr_storage& out, int& outLen)
     h ^= ep.port; h *= 1099511628211ull;
     return static_cast<unsigned>(h % numLanes);
 }
+
+// A datagram handed from an IOCP receive thread to an affinity lane: the source
+// endpoint plus the owned bytes (copied out of the RecvOp so the RecvOp can be
+// re-posted immediately).
+struct LaneItem
+{
+    Endpoint             from;
+    std::vector<uint8_t> bytes;
+};
+
+// One affinity lane: a single worker thread draining a FIFO queue. One connection's
+// datagrams always land on one lane, so the callback runs single-threaded per conn.
+struct Lane
+{
+    std::mutex               mtx;
+    std::condition_variable  cv;
+    std::deque<LaneItem>     queue;
+    std::thread              thread;
+    std::atomic<bool>        running{ false };
+};
 
 } // namespace
 
@@ -115,10 +157,50 @@ struct IocpUdpListenerImpl
     SOCKET                                       sock   = INVALID_SOCKET;
     HANDLE                                       iocp   = nullptr;
     uint16_t                                     port   = 0;
-    std::vector<std::thread>                     workers;
+    unsigned                                     laneCount = 0; // 0 until Start resolves it
+    std::vector<std::thread>                     workers;       // IOCP receive threads
     std::vector<RecvOp*>                         recvOps;
+    std::vector<std::unique_ptr<Lane>>           lanes;         // per-connection affinity lanes
     std::atomic<bool>                            running{ false };
     Neuron::Server::IocpUdpListener::RecvCallback callback;
+
+    // Route + enqueue a received datagram to its connection's affinity lane (area G).
+    void DispatchToLane(const Endpoint& from, const uint8_t* data, size_t len)
+    {
+        if (lanes.empty()) {
+            // Lane dispatch disabled — fall back to the raw inline callback (M1a).
+            if (callback) callback(from, std::span<const uint8_t>(data, len));
+            return;
+        }
+        const std::span<const uint8_t> dg(data, len);
+        const auto token = Neuron::Net::PeekConnectionToken(dg);
+        const unsigned lane = token ? LaneForToken(*token, laneCount)
+                                    : LaneForEndpoint(from, laneCount);
+        Lane& L = *lanes[lane];
+        {
+            std::lock_guard<std::mutex> lk(L.mtx);
+            L.queue.push_back({ from, std::vector<uint8_t>(data, data + len) });
+        }
+        L.cv.notify_one();
+    }
+
+    // One lane worker: drain its queue in order, invoking the callback single-
+    // threaded so per-connection reliability/decrypt state is never raced (area G).
+    void LaneLoop(Lane* L)
+    {
+        for (;;) {
+            LaneItem item;
+            {
+                std::unique_lock<std::mutex> lk(L->mtx);
+                L->cv.wait(lk, [&] { return !L->queue.empty() || !L->running.load(); });
+                if (!L->running.load() && L->queue.empty()) return;
+                item = std::move(L->queue.front());
+                L->queue.pop_front();
+            }
+            if (callback)
+                callback(item.from, std::span<const uint8_t>(item.bytes.data(), item.bytes.size()));
+        }
+    }
 
     bool PostRecv(RecvOp* op)
     {

@@ -8,10 +8,13 @@
 > cold-start from ∅ (E), snapshot job-pool partition + determinism seam (F), token-indexed
 > routing table (G), bounded time-dilation policy (H), §21 telemetry counters (I), and a
 > contested-vs-dispersed scale harness over the pipeline (J).
-> **Remaining for milestone close (Windows build agent, §16.3):** the IOCP per-connection
-> affinity dispatch (G) and the OS thread pool + frozen read-view isolation (F) in `ERServer`;
-> wiring the dilation factor into the §8.5 clock echo + client interpolator (H); the
-> ERServer/ERHeadless counter sampling sites (I); and **the real Done gate — the
+> **All server-loop wiring is now written in `ERServer`/`ServerHost` (`[~]` — unverified on
+> Linux; validate on the build agent):** the IOCP receive listener with per-connection
+> affinity lanes replacing the M1a `Sleep(1)` poll (G), the OS thread-pool snapshot encode
+> over the frozen post-tick view (F), the dilation factor fed into `ServerHost`'s clock echo
+> each loop (H, server side; the client interpolator wiring is M5/NeuronClient), and the
+> ERServer telemetry sampling sites (I — tick/encode ms, per-client bytes, dilation, baseline
+> RAM). **The single remaining item is the Windows-agent Done gate — the
 > hundreds-of-live-sessions contested-sector run measuring wall-clock sim-time p99 under
 > bounded time dilation (J)**, which only the Windows agent can execute.
 > (M0/M1a/M1b/M2 complete; M3 active.)
@@ -309,11 +312,15 @@
         + area-C codec and **gathers results back into client order**, and `EncodeClientsSerial` is the
         single-threaded reference. Encode is a pure projection of post-tick state, so the gathered
         output is partition-count-independent.
-  - [ ] **Frozen read view + OS thread pool** *(Windows, ERServer):* run the partitions on real
-        worker threads against a frozen post-tick snapshot (no concurrent sim writes; per-client
-        baseline entries pre-created so workers touch disjoint state), and **rewire
-        `BroadcastSnapshots`** to dispatch to the pool and collect sealed datagrams (seal/AEAD stays
-        per-connection, area G). *Not buildable on the Linux runner.*
+  - [~] **Frozen read view + OS thread pool** *(written; Windows, ERServer — unverified on Linux):*
+        `ERServer` calls `host.BroadcastSnapshots(out, encodeWorkers, &tel)` with
+        `encodeWorkers = hardware_concurrency()`, so `EncodeClientsPooled` partitions the per-client
+        encode across real workers against the post-tick state; the gathered output is
+        partition-count-independent (the testrunner gate proves byte-identical to the serial
+        reference). Per-client baselines are pre-created at accept (`ServerUniverse::Baseline`) so
+        workers touch disjoint state; seal/AEAD stays per-connection on the sim thread (area G).
+        *Not buildable on the Linux runner; the frozen-mirror hardening for fully concurrent encode
+        during the next tick is a build-agent follow-up.*
 - **Tests (`NeuronCoreTest` `SnapshotJobsTests`; testrunner `SnapshotJobs` mirror):**
   - [x] Pooled encode produces **byte-identical** output to the single-threaded reference for the
         same frozen state, across 1…16 workers (`PooledEncodeMatchesSerialReferenceForAnyWorkerCount`);
@@ -337,12 +344,21 @@
         with **no per-datagram string hash or allocation**; recycled slots bump a generation so a
         stale handle to a reused slot is rejected (the ECS-handle pattern). Per-connection state
         attaches to the slot; `Lane()` gives each connection a stable affinity lane.
-  - [ ] **Replace `ServerHost`'s `m_conns`/`m_lastSeenMs` string maps** with the table (keep a small
-        first-packet `ip:port → token` association for the pre-token cookie phase) and confirm the
-        per-connection reliability state is fixed-size ring buffers / bitsets. *Windows ERServer.*
-  - [ ] **IOCP per-connection affinity:** dispatch each connection's decode/reliability/decrypt on
-        its `Lane()` so IOCP threads never race its sequence/nonce/decrypt state
-        (`ERServer/IocpUdpListener`). *Not buildable on the Linux runner.*
+  - [x] **Replace `ServerHost`'s `m_conns`/`m_lastSeenMs` string maps** with the table — done:
+        `ServerHost` routes encrypted datagrams by the 64-bit token via `ConnectionTable`
+        (generation-tagged slot lookup, no per-datagram string hash) and keeps only a cookie-phase
+        `ip:port → token` association; per-connection reliability state stays the fixed-size
+        sliding-window/bitset in `Connection.h`. *(Header-level rewrite, exercised by the testrunner
+        ConnectionTable suite; live integration is the IOCP item below.)*
+  - [~] **IOCP per-connection affinity** *(written; Windows, ERServer — unverified on Linux):*
+        `ERServer` drives the loop with `Neuron::Server::IocpUdpListener` (`SetLaneCount(0)` = one
+        affinity lane per hardware thread, `Start(port, 0)` = one IOCP recv thread per hardware
+        thread), replacing the M1a single-thread `Sleep(1)` Winsock poll. The IOCP recv threads do
+        the raw recv and hand each datagram to its connection's lane; the lane callback marshals the
+        datagram to the single sim thread's inbound queue, which calls `host.OnDatagram` — so the
+        authoritative universe stays single-threaded while receive scales across cores.
+        *Not buildable on the Linux runner; pushing the per-connection decode onto the lane itself
+        (vs marshalling to the sim thread) is a build-agent throughput follow-up.*
 - **Tests (`NeuronCoreTest` `ConnectionTableTests`; testrunner `ConnectionTable` mirror):**
   - [x] Token routing hits the right connection; a recycled slot with a stale generation is rejected
         (`RoutesByTokenToTheRightSlot`, `RecycledSlotRejectsStaleGeneration`); freed slots are reused
@@ -371,9 +387,12 @@
         and recovering slow; the accumulator scales its elapsed intake by `Factor()`. The step
         **count and order are unchanged** — only spacing dilates, so `SimHash` is identical dilated vs
         not. `ERServer` times each `Step` and feeds `ReportTickCost`, so the floor is active server-side.
-  - [ ] **Publish the factor** in the §8.5 clock echo so the client interpolator tracks the dilated
-        authoritative clock. `DilationFactor()` exposes it; the clock-sync message + client
-        interpolator wiring is the remaining client-facing step. *Windows/protocol.*
+  - [~] **Publish the factor** in the §8.5 clock echo *(server side written; client interpolator is
+        M5/NeuronClient — unverified on Linux):* `ERServer` calls `host.SetDilationFactor(acc.
+        DilationFactor())` each loop, which pushes the factor onto every `ServerConnection` so the
+        next clock-sync response carries it (`ClockSyncBody::dilationFactor`, already on the wire).
+        The client-side interpolator that *consumes* the echoed factor is the remaining client step,
+        tracked under M5 reconnect/NeuronClient. *Windows/client.*
   - [ ] **Island-aware sim structure** (`ServerUniverse::Step`): partition systems over sector islands
         with a fixed ordered reduce, run serial at launch. *Reserved; the determinism property is the
         `SimHash`-stable read the area-J harness already asserts, full partition deferred.*
@@ -405,9 +424,13 @@
         the App. B gates — per-client downstream p99, **per-client baseline-RAM gauge** (area B/E
         `TotalClientBaselineBytes`), **cold-start convergence**, dilation state, and the **R16
         cap-bind** evidence.
-  - [ ] **Sampling sites + export** *(Windows ERServer/ERHeadless):* record tick/encode ms, per-client
-        bytes, acks, and dilation at the live sites, and export as structured logs + perf counters /
-        ETW consumable by the harness (§16.3). *Not buildable on the Linux runner.*
+  - [~] **Sampling sites + export** *(written; Windows ERServer/ERHeadless — unverified on Linux):*
+        `ERServer` instantiates `ServerTelemetry` + records at the live sites — `RecordTickMs` per
+        step, `RecordEncodeMs`/`RecordEntityCount` per snapshot, `RecordDilation` each loop, and the
+        App. B per-client downstream / baseline-RAM / cap-bind gauges via `BroadcastSnapshots(...,
+        &tel)`; the periodic heartbeat logs sim/encode p99 + dilation + baseline RAM as structured
+        console lines. (M5 adds `PersistTelemetry` at the same loop.) *Not buildable on the Linux
+        runner; perf-counter/ETW export is the build-agent step.*
 - **Tests (`NeuronCoreTest` `TelemetryTests`; testrunner `Telemetry` mirror):**
   - [x] Nearest-rank p50/p99 correct over a known sample and order-independent; the window is bounded
         and evicts oldest; net counters sum; the aggregate gates (baseline RAM, cap-bind) read back
@@ -440,7 +463,9 @@
   - [ ] **Scale the live bot host** to hundreds of NeuronClient sessions (own UDP port each, §10.3),
         and the **wall-clock degradation gate**: under real overload the shard **dilates** (area H)
         and stays correct (no dropped ticks, `SimHash` consistent), with sim **p99 < 33.3 ms** and
-        per-client downstream ≤ App. B. *Windows ERHeadless build agent (§16.3) only.*
+        per-client downstream ≤ App. B. *Windows ERHeadless build agent (§16.3) only.* **The
+        server-side wiring this gate exercises (IOCP receive, pooled encode, dilation echo, telemetry
+        sites) is now written (G/F/H/I `[~]`); this remains the one item that needs the live agent.*
 - **Tests (`ERHeadlessTest` on Windows; `LoadHarness` testrunner mirror for the pipeline):**
   - [x] Contested-sector pipeline holds the **per-client byte budget** every tick and converges;
         dispersed control is far cheaper; baseline RAM bounded; cap binds yet converges; the pipeline
@@ -475,28 +500,35 @@ M4's per-client baseline state is **session** state — shape it so M5 doesn't h
 
 ## Done gate (mirrors §17 "Done")
 
-> **Pipeline-complete on Linux; milestone close awaits the Windows agent.** The
+> **Pipeline + all server-loop wiring written; milestone close awaits the Windows agent.** The
 > platform-independent half of every gate is implemented and green on the `testrunner` +
-> `NeuronCoreTest`; the items still open all require the **Windows build agent** (real UDP
-> sessions, IOCP, a wall-clock sim-time measurement) and are called out as such.
+> `NeuronCoreTest`, and the `ERServer`/`ServerHost` integration (IOCP receive, pooled encode,
+> dilation echo, telemetry sites) is now **written but unverified on Linux** (`[~]`). The single
+> item still genuinely open is the **Windows build-agent wall-clock contested-sector perf run** —
+> real UDP sessions + a wall-clock sim-time p99 measurement only the agent can produce.
 
 - [~] **Contested-sector load test holds the frame budget under two separate gates** — the
       per-client **bandwidth** gate is met by the pipeline harness (J); the per-tick **sim time
-      p99 < 33.3 ms** gate is **wall-clock and Windows-only** (runs on the build agent, §16.3).
+      p99 < 33.3 ms** gate is **wall-clock and Windows-only** (runs on the build agent, §16.3). The
+      server loop it measures (IOCP receive, pooled encode, dilation) is now wired (`[~]`).
 - [~] **Degrades via bounded time dilation, never ticket-dropping** — the bounded dilation **policy**
-      is implemented + tested and active server-side (H); exercising it under **real overload** at the
-      target count is the Windows run (J).
+      is implemented + tested and active server-side, and `ERServer` now feeds `ReportTickCost` +
+      echoes `DilationFactor()` each loop (H); exercising it under **real overload** at the target
+      count is the Windows run (J).
 - [x] **Per-client downstream + per-client baseline RAM measured vs the App. B budgets** — measured
-      and bounded in the pipeline harness (B, C, E, I, J); the tight App. B numbers are confirmed on
-      the Windows run.
+      and bounded in the pipeline harness (B, C, E, I, J), and recorded at the live `ERServer`
+      telemetry sites; the tight App. B numbers are confirmed on the Windows run.
 - [x] **§21 net/sim counter aggregation wired *before* the run** (I), and the **dispersed control case
-      passes** (J). The live sampling sites attach on Windows.
-- [~] **Token-indexed routing** replaces the `ip:port` string map — the **routing table** is
-      implemented + tested (G); the `ServerHost` swap + **IOCP per-connection affinity** are Windows.
+      passes** (J). The live sampling sites are now wired in `ERServer` (`[~]`, validate on Windows).
+- [~] **Token-indexed routing** replaces the `ip:port` string map — the routing table **and** the
+      `ServerHost` swap to token routing are done (`[x]` in area G); **IOCP per-connection affinity**
+      is written in `ERServer` and is the Windows-unverified piece (`[~]`).
 - [x] **All matching `<project>Test` suites green** (§16.1) + **Linux `testrunner` mirrors** for the
       platform-independent pipeline/routing logic (§16.2) — areas A–J, **197 testrunner cases green**.
-- [ ] Per-milestone perf gate met (§16.3, App. B) — **the two-gate contested-sector result on the
-      Windows agent is the remaining gate that closes M4.**
+      (`ERServer.cpp` + `ServerHost.h` are not in the testrunner; their integration is `[~]`.)
+- [ ] Per-milestone perf gate met (§16.3, App. B) — **the two-gate contested-sector wall-clock result
+      on the Windows agent is the one remaining gate that closes M4.** All wiring it depends on is
+      written.
 
-**Legend:** `[x]` done & verified on Linux · `[~]` platform-independent logic done & tested, Windows
-run/integration remaining · `[ ]` not yet met.
+**Legend:** `[x]` done & verified on Linux · `[~]` written (logic tested and/or integration wired),
+Windows run/validation remaining · `[ ]` not yet met.

@@ -21,10 +21,11 @@ changed, bump the masterplan first, then the plan).
 1. **One hot plan at a time.** Only the current milestone has a live plan. M3 is current
    (`M3-core-4x-loop.md`). Earlier milestones (M0/M1a/M1b/M2) are complete — see the
    masterplan footer.
-2. **Scoped, not exhaustive.** A plan covers exactly one milestone's *Done* gate (§17). M4 and
-   M5 are **drafted ahead** (from §17 + the §8.4/§9/§14/§15 specs) as forward-looking roadmaps;
-   they stay subordinate to the masterplan and are **re-confirmed against it when each goes active**
-   (its predecessor's actual landing may shift details). Don't draft M6–M7 until they're next.
+2. **Scoped, not exhaustive.** A plan covers exactly one milestone's *Done* gate (§17). M4,
+   M5 and M6 are **drafted ahead** (from §17 + the §8.4/§9/§13/§14/§15/§20/§25 specs) as
+   forward-looking roadmaps; they stay subordinate to the masterplan and are **re-confirmed against
+   it when each goes active** (its predecessor's actual landing may shift details). Don't draft M7
+   until it's next.
 3. **Every feature ships with its test in the same commit** (masterplan §16.1). Each work
    item names the `<project>Test` cases that gate it. A feature isn't done until its tests
    pass.
@@ -42,9 +43,9 @@ changed, bump the masterplan first, then the plan).
 | M1b — Client tech slice | (complete — masterplan §17) | ✅ |
 | M2 — Darwinia look + audio | [`M2-darwinia-audio.md`](M2-darwinia-audio.md) | ✅ |
 | **M3 — Core 4X loop, fleet command & navigation** | [`M3-core-4x-loop.md`](M3-core-4x-loop.md) | 🔨 **active** (areas A–H implemented; Windows client/headless glue unverified) |
-| M4 — Scale & interest | [`M4-scale-interest.md`](M4-scale-interest.md) | 🔨 pipeline complete (areas A–J platform-independent logic implemented + tested; Windows IOCP/ERServer integration + the live wall-clock perf gate remain) |
-| M5 — Accounts, auth & persistence | [`M5-accounts-persistence.md`](M5-accounts-persistence.md) | ⏳ drafted |
-| M6 — Combat model & deployment | — | ⏳ |
+| M4 — Scale & interest | [`M4-scale-interest.md`](M4-scale-interest.md) | 🔨 pipeline complete + all server-loop wiring written (areas A–J logic tested on testrunner; `ERServer`/`ServerHost` IOCP receive, pooled encode, dilation echo + telemetry sites written, Windows-unverified; only the live wall-clock contested-sector perf gate remains) |
+| M5 — Accounts, auth & persistence | [`M5-accounts-persistence.md`](M5-accounts-persistence.md) | 🔨 implemented (portable cores verified on testrunner; ODBC/auth/warm-restart wiring + the `ERServer` bootstrap written, Windows-unverified; only the live kill/restart zero-loss drill on the build agent + dev SQL remains) |
+| M6 — Combat model & deployment | [`M6-combat-deployment.md`](M6-combat-deployment.md) | ⏳ drafted |
 | M7 — Sandbox: conquest, economy, PvE, onboarding | — | ⏳ |
 
 ### Side tracks

@@ -127,18 +127,27 @@ public:
         return HsOutput::Message(MsgType::HandshakeResponse, std::move(out));
     }
 
-    // Step 4: echo the client's timestamp and stamp our server time.
+    // Step 4: echo the client's timestamp and stamp our server time + current
+    // time-dilation factor (M4 area H, §8.5) so the client interpolates against the
+    // dilated authoritative clock. The host sets the factor each loop via the
+    // connection (SetDilationFactor); clock-sync is a one-shot at connect, so a
+    // mid-session dilation change is also republished on the periodic clock re-sync.
     [[nodiscard]] HsOutput OnClockSyncRequest(std::span<const uint8_t> body)
     {
         ClockSyncBody cs;
         if (!ClockSyncBody::Decode(body, cs))
             return HsOutput::Fail(DisconnectReason::HandshakeFailure);
         cs.serverTimeMicros = m_serverTime;
+        cs.dilationFactor   = m_dilationFactor;
         std::vector<uint8_t> out;
         cs.Encode(out);
         m_complete = true; // crypto established; login proceeds on the secure channel
         return HsOutput::Message(MsgType::ClockSyncResponse, std::move(out));
     }
+
+    // Set the dilation factor echoed in the clock-sync response (§7.2). Fed from the
+    // server loop's FixedStepAccumulator::DilationFactor() each tick.
+    void SetDilationFactor(double f) noexcept { m_dilationFactor = f; }
 
     [[nodiscard]] bool IsComplete()  const noexcept { return m_complete; }
     [[nodiscard]] bool HasKeys()     const noexcept { return m_haveKeys; }
@@ -152,6 +161,7 @@ private:
     std::vector<uint8_t> m_staticPriv;
     uint64_t             m_token{ 0 };
     uint64_t             m_serverTime{ 0 };
+    double               m_dilationFactor{ 1.0 }; // M4 area H — published in clock echo
     uint32_t             m_epoch{ 0 };
 
     EcdhKeyPair          m_serverEphemeral;
@@ -207,6 +217,10 @@ public:
     // Round-trip estimate from clock sync (micros); valid once complete.
     [[nodiscard]] uint64_t RttMicros() const noexcept { return m_rttMicros; }
     [[nodiscard]] int64_t  ClockOffsetMicros() const noexcept { return m_clockOffsetMicros; }
+    // Server time-dilation factor from the last clock-sync response (M4 area H,
+    // §7.2/§8.5); 1.0 = full speed. The interpolator scales server-time advance by
+    // this so it tracks the dilated authoritative clock, not wall-clock.
+    [[nodiscard]] double   DilationFactor() const noexcept { return m_dilationFactor; }
 
 private:
     // Step 1→3: got the cookie; make an ephemeral keypair and return it + cookie.
@@ -290,6 +304,7 @@ private:
         m_clockOffsetMicros =
             static_cast<int64_t>(cs.serverTimeMicros) -
             static_cast<int64_t>(cs.clientTimeMicros + m_rttMicros / 2);
+        m_dilationFactor = cs.dilationFactor; // M4 area H — track the dilated server clock
         m_complete = true;
         return HsOutput::None(); // ready to send LoginRequest on the secure channel
     }
@@ -308,6 +323,7 @@ private:
     bool        m_cookieHandled{ false };
     uint64_t    m_rttMicros{ 0 };
     int64_t     m_clockOffsetMicros{ 0 };
+    double      m_dilationFactor{ 1.0 }; // M4 area H — last server dilation factor
 };
 
 } // namespace Neuron::Net

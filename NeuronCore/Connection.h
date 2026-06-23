@@ -73,6 +73,13 @@ public:
     [[nodiscard]] bool      IsConnected() const noexcept { return m_state == ConnState::Connected; }
     [[nodiscard]] uint64_t  Token() const noexcept { return m_token; }
     [[nodiscard]] uint32_t  PlayerNetId() const noexcept { return m_playerNetId; }
+    // Server time-dilation factor from the last clock-sync response (M4 area H,
+    // §7.2/§8.5); 1.0 = full speed. The client interpolator scales server-time
+    // advance by this so it tracks the dilated authoritative clock, not wall-clock.
+    [[nodiscard]] double    DilationFactor() const noexcept
+    {
+        return m_client ? m_client->DilationFactor() : 1.0;
+    }
 
     // Process an inbound datagram. Appends any decoded app messages to 'appOut'
     // and any datagrams to send back to 'sendOut'. Returns false on fatal error.
@@ -265,6 +272,11 @@ public:
     [[nodiscard]] uint32_t  PlayerNetId() const noexcept { return m_playerNetId; }
     void SetPlayerNetId(uint32_t id) noexcept { m_playerNetId = id; }
     [[nodiscard]] const std::string& LoginName() const noexcept { return m_loginName; }
+
+    // M4 area H (§7.2/§8.5): the host pushes the server's current time-dilation
+    // factor each loop so the clock-sync echo (OnClockSyncRequest) publishes it to
+    // the client. Cheap setter; no effect until the next clock-sync response is sent.
+    void SetDilationFactor(double f) noexcept { m_server.SetDilationFactor(f); }
 
     // Feed the (already cookie-verified) CookieResponse to begin ECDH.
     bool BeginFromCookieResponse(std::span<const uint8_t> body,

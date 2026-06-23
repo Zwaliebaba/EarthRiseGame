@@ -43,6 +43,7 @@ CREATE TABLE Accounts (
     PasswordHash    VARBINARY(64)   NOT NULL,   -- PBKDF2-HMAC-SHA512 output
     PasswordSalt    VARBINARY(32)   NOT NULL,   -- per-account random salt
     -- Server pepper is applied in-process; never stored here.
+    Pbkdf2Iterations INT            NOT NULL DEFAULT 210000, -- §14 cost, stored per hash (raisable; migration 005)
     CreatedAt       DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
     LastLoginAt     DATETIME2       NULL,
     Status          TINYINT         NOT NULL DEFAULT 0,  -- 0=active 1=banned 2=suspended
@@ -88,6 +89,8 @@ CREATE TABLE CurrencyLedger (
     CreatedAt       DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
 );
 CREATE INDEX IX_CurrencyLedger_Account ON CurrencyLedger (AccountId, CreatedAt);
+-- Defence in depth: a replayed economy event can't append a second ledger row (migration 004).
+CREATE UNIQUE INDEX UX_CurrencyLedger_Ref ON CurrencyLedger (RefType, RefId) WHERE RefType IS NOT NULL AND RefId IS NOT NULL;
 
 
 -- ============================================================
@@ -531,10 +534,13 @@ CREATE TABLE EconomyOutbox (
     OutboxId        BIGINT          NOT NULL IDENTITY(1,1) PRIMARY KEY,
     EventType       NVARCHAR(64)    NOT NULL,   -- 'trade','loot_claimed','build_complete','insurance_payout','territory_captured',…
     Payload         NVARCHAR(MAX)   NOT NULL,   -- JSON blob of the event
+    IdempotencyKey  BIGINT          NULL,       -- exactly-once dedupe for ordered drain/replay (migration 004)
     CreatedAt       DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
     ProcessedAt     DATETIME2       NULL
 );
 CREATE INDEX IX_EconomyOutbox_Unprocessed ON EconomyOutbox (OutboxId) WHERE ProcessedAt IS NULL;
+-- A replayed drain cannot insert a duplicate effect (zero-loss + no double-credit, §15).
+CREATE UNIQUE INDEX UX_EconomyOutbox_IdemKey ON EconomyOutbox (IdempotencyKey) WHERE IdempotencyKey IS NOT NULL;
 
 
 -- ============================================================
@@ -545,6 +551,7 @@ CREATE INDEX IX_EconomyOutbox_Unprocessed ON EconomyOutbox (OutboxId) WHERE Proc
 CREATE TABLE SimSnapshots (
     SnapshotId      BIGINT          NOT NULL IDENTITY(1,1) PRIMARY KEY,
     SimTickNumber   BIGINT          NOT NULL,
+    OutboxWatermark BIGINT          NOT NULL DEFAULT 0,  -- max OutboxId reflected in Blob; restart replays OutboxId > this (migration 004)
     TakenAt         DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
     Blob            VARBINARY(MAX)  NOT NULL
 );

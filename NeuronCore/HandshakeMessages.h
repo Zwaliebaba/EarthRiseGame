@@ -98,15 +98,27 @@ struct HandshakeResponseBody
 };
 
 // --- Step 4: ClockSync (both directions). RTT/offset estimation. ---
+// M4 area H (§7.2/§8.5): the response carries the server's current time-dilation
+// factor so the client interpolates against the *dilated authoritative clock*, not
+// wall-clock — under overload the server slows in-game time toward a floor, and the
+// client must track that or it over-extrapolates. Sent as fixed-point parts-per-
+// million (factor ∈ [floor, 1] → [100000, 1000000]) to stay integer on the wire.
+// Backward-aware: an old 16-byte body (no field) decodes as factor 1.0 (full speed).
+inline constexpr uint32_t kDilationFixedOne = 1'000'000; // 1.0 in ppm fixed-point
+
 struct ClockSyncBody
 {
-    uint64_t clientTimeMicros{ 0 }; // echoed back
-    uint64_t serverTimeMicros{ 0 }; // filled by server in the response
+    uint64_t clientTimeMicros{ 0 };   // echoed back
+    uint64_t serverTimeMicros{ 0 };   // filled by server in the response
+    double   dilationFactor{ 1.0 };   // server time-dilation (§7.2); 1.0 = full speed
 
     void Encode(std::vector<uint8_t>& out) const
     {
         PutU64(out, clientTimeMicros);
         PutU64(out, serverTimeMicros);
+        // Clamp to [floor=0, 1]·1e6 and round to ppm; the controller never exceeds 1.
+        double f = dilationFactor < 0.0 ? 0.0 : (dilationFactor > 1.0 ? 1.0 : dilationFactor);
+        PutU32(out, static_cast<uint32_t>(f * static_cast<double>(kDilationFixedOne) + 0.5));
     }
     [[nodiscard]] static bool Decode(std::span<const uint8_t> in, ClockSyncBody& b)
     {
@@ -114,6 +126,11 @@ struct ClockSyncBody
         size_t off = 0;
         b.clientTimeMicros = GetU64(in, off);
         b.serverTimeMicros = GetU64(in, off);
+        // Versioned/forward-compatible: the dilation field is optional. A peer that
+        // predates it (16-byte body) is treated as full speed.
+        b.dilationFactor = (in.size() >= off + 4)
+            ? static_cast<double>(GetU32(in, off)) / static_cast<double>(kDilationFixedOne)
+            : 1.0;
         return true;
     }
 };

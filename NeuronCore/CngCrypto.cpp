@@ -618,6 +618,44 @@ bool CngCrypto::Pbkdf2(std::span<const uint8_t> password,
 }
 
 // -----------------------------------------------------------------------------
+// PBKDF2-HMAC-SHA512 (raw RFC-2898 — no pepper) — M5 area C (§14)
+// -----------------------------------------------------------------------------
+//
+// The production hashing path for AccountStore. It deliberately does NO pepper
+// handling: it derives dkLen bytes from (password, salt) over 'iterations' rounds,
+// exactly like the portable reference Neuron::Crypto::Pbkdf2HmacSha512 (Pbkdf2.h).
+// The caller (AccountStore) appends the server pepper to the password first, so this
+// stays the pure KDF and the CNG↔reference cross-check (ERServerTest) compares like
+// for like. BCRYPT_HMAC_SHA512_ALG_HANDLE is a Win10+ pseudo-handle (no open/close).
+std::vector<uint8_t>
+CngCrypto::Pbkdf2HmacSha512(std::span<const uint8_t> password,
+                            std::span<const uint8_t> salt,
+                            uint32_t iterations,
+                            size_t dkLen)
+{
+    std::vector<uint8_t> out(dkLen, 0);
+    if (dkLen == 0)
+        return out;
+
+    // BCryptDeriveKeyPBKDF2 takes the password and salt verbatim (no pepper), matching
+    // the reference's (password, salt, iterations, dkLen) contract byte-for-byte.
+    const NTSTATUS st = BCryptDeriveKeyPBKDF2(
+        BCRYPT_HMAC_SHA512_ALG_HANDLE,
+        // CNG accepts a null/zero-length password or salt; pass a valid (possibly
+        // empty) pointer either way.
+        password.empty() ? nullptr : const_cast<PUCHAR>(password.data()),
+        static_cast<ULONG>(password.size()),
+        salt.empty() ? nullptr : const_cast<PUCHAR>(salt.data()),
+        static_cast<ULONG>(salt.size()),
+        static_cast<ULONGLONG>(iterations),
+        out.data(), static_cast<ULONG>(out.size()), 0);
+
+    if (!NT_SUCCESS(st))
+        out.clear(); // signal failure with an empty buffer (caller checks size)
+    return out;
+}
+
+// -----------------------------------------------------------------------------
 // Random
 // -----------------------------------------------------------------------------
 

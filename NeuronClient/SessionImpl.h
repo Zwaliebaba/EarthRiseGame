@@ -140,6 +140,12 @@ public:
     [[nodiscard]] uint32_t PlayerNetId() const noexcept
         { return m_conn ? m_conn->PlayerNetId() : 0; }
 
+    // Server time-dilation factor from the last clock-sync echo (M4 area H, §8.5);
+    // 1.0 = full speed. The client loop feeds this into InterpBuffer::SetServerDilation
+    // so interpolation tracks the dilated authoritative clock, not wall-clock.
+    [[nodiscard]] double ServerDilation() const noexcept
+        { return m_conn ? m_conn->DilationFactor() : 1.0; }
+
 private:
     Neuron::Net::ICrypto*                          m_crypto;
     Neuron::Net::EcPubKey                          m_pinnedPub;
