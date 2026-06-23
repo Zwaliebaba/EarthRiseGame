@@ -33,6 +33,9 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -78,8 +81,8 @@ public:
     // skip this round.
     using SnapshotCaptureFn = std::function<SnapshotRequest(int64_t /*nowUnix*/)>;
 
-    // 'nowUnixFn' supplies wall-clock seconds (the parent passes a real clock; tests
-    // pass a fake) so the RPO/snapshot cadences and the RPO watermark are testable.
+    // The worker uses a wall clock (std::chrono::system_clock) for the RPO/snapshot
+    // cadences + the RPO watermark; the cadences come from 'cfg' (env-tunable, §15/§19).
     explicit PersistenceThread(PersistConfig cfg);
     ~PersistenceThread();
 

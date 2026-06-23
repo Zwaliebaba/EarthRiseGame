@@ -21,6 +21,10 @@
 #include <sqlext.h>
 #include <sqltypes.h>
 
+#include <algorithm>
+#include <cstring>
+#include <ctime>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -417,39 +421,42 @@ OdbcConnection::ExecQuery(std::string_view sql, std::span<const SqlParam> params
         row.reserve(cols);
         for (size_t c = 0; c < cols; ++c) {
             SqlValue v;
-            // Pull as binary first; this preserves VARBINARY exactly and lets callers
-            // reinterpret integers/strings as needed (the stores know each column type).
-            std::vector<uint8_t> buf(256);
-            SQLLEN ind = 0;
-            size_t total = 0;
-            while (true) {
-                SQLLEN avail = static_cast<SQLLEN>(buf.size() - total);
+            // Read each column as binary and ACCUMULATE chunks until SQLGetData reports
+            // SQL_SUCCESS (the final chunk) rather than SQL_SUCCESS_WITH_INFO (more to
+            // come). This preserves VARBINARY(MAX) blobs of any size (SimSnapshots.Blob)
+            // exactly, and lets callers reinterpret integers/strings (each store knows
+            // its column types). Per ODBC: on SQL_SUCCESS_WITH_INFO the driver fills the
+            // whole 'chunk' buffer; on SQL_SUCCESS 'ind' is the remaining byte count.
+            std::vector<uint8_t> acc;
+            std::vector<uint8_t> chunk(4096);
+            bool done = false;
+            while (!done) {
+                SQLLEN ind = 0;
                 const SQLRETURN gr = SQLGetData(stmt, static_cast<SQLUSMALLINT>(c + 1),
-                                                SQL_C_BINARY, buf.data() + total, avail, &ind);
-                if (gr == SQL_NO_DATA)
-                    break;
-                if (!SqlOk(gr)) {
+                                                SQL_C_BINARY, chunk.data(),
+                                                static_cast<SQLLEN>(chunk.size()), &ind);
+                if (gr == SQL_NO_DATA) {
+                    done = true;
+                } else if (gr == SQL_SUCCESS_WITH_INFO) {
+                    // Truncated: the buffer is full; more data remains — append it all.
+                    acc.insert(acc.end(), chunk.begin(), chunk.end());
+                } else if (gr == SQL_SUCCESS) {
+                    if (ind == SQL_NULL_DATA) {
+                        v.isNull = true;
+                    } else if (ind > 0) {
+                        const size_t n = static_cast<size_t>(ind);
+                        acc.insert(acc.end(), chunk.begin(),
+                                   chunk.begin() + static_cast<ptrdiff_t>(std::min(n, chunk.size())));
+                    }
+                    done = true;
+                } else {
                     CaptureDiag(SQL_HANDLE_STMT, stmt);
                     SQLFreeHandle(SQL_HANDLE_STMT, stmt);
                     return std::nullopt;
                 }
-                if (ind == SQL_NULL_DATA) {
-                    v.isNull = true;
-                    break;
-                }
-                if (ind == SQL_NO_TOTAL || static_cast<size_t>(ind) > static_cast<size_t>(avail)) {
-                    // More data than fit — grow and continue (chunked read).
-                    total = buf.size();
-                    buf.resize(buf.size() * 2);
-                    continue;
-                }
-                total += static_cast<size_t>(ind);
-                break;
             }
-            if (!v.isNull) {
-                buf.resize(total);
-                v.bytes = std::move(buf);
-            }
+            if (!v.isNull)
+                v.bytes = std::move(acc);
             row.push_back(std::move(v));
         }
         result.rows.push_back(std::move(row));

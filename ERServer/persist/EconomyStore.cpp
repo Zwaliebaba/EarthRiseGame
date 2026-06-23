@@ -105,12 +105,11 @@ EconomyStore::AppendWriteThrough(const EconomyMutation& m, int64_t /*nowUnix*/)
         // no-op (no double-credit). Roll back and return the EXISTING OutboxId so the
         // caller treats it as success (mirrors Outbox::Apply returning false → skip).
         if (lease->LastError().IsUniqueViolation()) {
+            // Roll back; the lease returns to autocommit and stays connected, so reuse
+            // it (do NOT acquire a 2nd lease — that would deadlock a poolMax==1 pool).
             (void)lease->Rollback();
-            auto reLease = m_pool->Acquire();
-            if (!reLease)
-                return std::nullopt;
             const SqlParam q[] = { SqlParam::Make(idem) };
-            if (auto r = reLease->ExecQuery(
+            if (auto r = lease->ExecQuery(
                     "SELECT OutboxId FROM EconomyOutbox WHERE IdempotencyKey = ?", q, 1)) {
                 if (!r->Empty() && !r->rows.front().empty())
                     return ReadI64(r->rows.front().front());
