@@ -17,6 +17,18 @@
 > (3) scalability of the MMO setup for a future move to multithreading.
 > **Complements:** [`networking-scale-review.md`](networking-scale-review.md) (v1,
 > design-level). This review grades the *implementation as it now stands*.
+>
+> **Update 2 (2026-06-23, post full-codebase audit):** three findings here are now
+> addressed in-tree. **DX-2 (double-buffering) is resolved** — `DeviceResources::kFrameCount`
+> is now **3 (triple-buffered, §11.1)**; every swap-chain/RTV/allocator/fence/upload/
+> timestamp size derives from the constant, so the §“double-buffered (`kFrameCount = 2`)”
+> notes below (incl. the DX-2 row) are superseded. Two build-hygiene gaps the audit surfaced
+> were also fixed: the dxc shader-header generation was gated `Debug|x64`-only (so Release
+> wouldn’t regenerate `CompiledShaders/*.h`) and is now broadened to **`Release|x64` too**
+> (`/Qembed_debug` stays Debug-only); and 10 M4/M5 headers present in `NeuronCore/` but absent
+> from **`NeuronCore.vcxitems`** are now registered. The empty **`ERHeadlessTest`** project was
+> seeded with bot-harness + record/replay-determinism smoke tests (§16.1). The §3.2
+> **IOCP / per-connection thread-safety** items remain the open Windows-side work.
 
 ---
 
