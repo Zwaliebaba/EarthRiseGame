@@ -9,6 +9,12 @@
 
 -- ---- Helper note: dropping a defaulted column needs its default constraint gone
 --      first; each drop below clears the auto-named default via dynamic SQL.
+-- ---- Binding note: any DML (UPDATE/INSERT/SELECT) that reads a LEGACY column of an
+--      already-existing table must run via EXEC(N'...'). SQL Server binds column names
+--      of existing tables at batch-COMPILE time, so an `IF EXISTS(...legacy column...)`
+--      guard does NOT stop a "Msg 207 Invalid column name" when the column is absent
+--      (deferred name resolution covers missing tables, not missing columns). DDL like
+--      ALTER TABLE DROP COLUMN is checked at runtime, so it stays guarded without EXEC.
 
 -- ============================================================
 -- Accounts: onboarding flag
@@ -94,10 +100,15 @@ GO
 -- Seed wallets from existing bases' credits (if the old column is still present).
 IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('Bases') AND name = 'StorageCredits')
 BEGIN
-    INSERT INTO Wallets (AccountId, Balance)
-    SELECT b.AccountId, b.StorageCredits
-    FROM Bases b
-    WHERE NOT EXISTS (SELECT 1 FROM Wallets w WHERE w.AccountId = b.AccountId);
+    -- Dynamic SQL so the legacy column binds at EXEC time, where the IF guard actually
+    -- protects it. A plain statement binds 'StorageCredits' at batch-compile time and
+    -- fails ("Invalid column name") on a DB that never had the legacy column (e.g. one
+    -- created from schema.sql, or a re-run after the column was dropped).
+    EXEC(N'
+        INSERT INTO Wallets (AccountId, Balance)
+        SELECT b.AccountId, b.StorageCredits
+        FROM Bases b
+        WHERE NOT EXISTS (SELECT 1 FROM Wallets w WHERE w.AccountId = b.AccountId);');
 END
 GO
 
@@ -139,7 +150,8 @@ GO
 -- Back-fill HullHp from the old HP if present, then drop legacy columns.
 IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('Bases') AND name = 'HP')
 BEGIN
-    UPDATE Bases SET HullHp = HP, MaxHullHp = MaxHP;
+    -- Dynamic SQL: defer legacy-column (HP/MaxHP) binding to runtime (see note above).
+    EXEC(N'UPDATE Bases SET HullHp = HP, MaxHullHp = MaxHP;');
     DECLARE @b_sql NVARCHAR(MAX) = N'';
     SELECT @b_sql = @b_sql + N'ALTER TABLE Bases DROP CONSTRAINT ' + QUOTENAME(dc.name) + N';'
     FROM sys.default_constraints dc
@@ -177,13 +189,15 @@ GO
 -- HullHp from old HP; then drop legacy columns.
 IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('Ships') AND name = 'ShipType')
 BEGIN
-    UPDATE Ships SET
+    -- Dynamic SQL: defer legacy-column (HP/MaxHP/ShipType) binding to runtime (see note
+    -- above). ShipType→Role map: 0=scout→0, 1=harvester→5, 2=fighter→1, 3=builder→7.
+    EXEC(N'UPDATE Ships SET
         HullHp = HP, MaxHullHp = MaxHP,
-        Role = CASE ShipType WHEN 0 THEN 0   -- scout
-                             WHEN 1 THEN 5   -- harvester
-                             WHEN 2 THEN 1   -- fighter
-                             WHEN 3 THEN 7   -- builder
-                             ELSE 1 END;
+        Role = CASE ShipType WHEN 0 THEN 0
+                             WHEN 1 THEN 5
+                             WHEN 2 THEN 1
+                             WHEN 3 THEN 7
+                             ELSE 1 END;');
     DECLARE @s_sql NVARCHAR(MAX) = N'';
     SELECT @s_sql = @s_sql + N'ALTER TABLE Ships DROP CONSTRAINT ' + QUOTENAME(dc.name) + N';'
     FROM sys.default_constraints dc
