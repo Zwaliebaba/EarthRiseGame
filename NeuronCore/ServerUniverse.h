@@ -22,6 +22,7 @@
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
 #include "SnapshotScheduler.h"
+#include "WarmRestart.h" // M5 area F — PersistState capture/restore (portable, testrunner-verified)
 #include "Ecs.h"
 #include "UniverseData.h"
 #include "UniversePos.h"
@@ -805,6 +806,190 @@ public:
         return false;
     }
 
+    // --- warm-restart capture / restore (M5 area F, §15) ----------------------
+    // Portable glue between the authoritative ECS and the persistable POD mirror
+    // Neuron::Persist::PersistState (WarmRestart.h): the half the snapshot serializer
+    // (SimSnapshotStore) writes and a restart loads. Verified on the Linux testrunner
+    // (WarmRestartCaptureTests) — Capture→Encode→Decode→Restore→Capture is stable, and
+    // SimHash matches for the economy/ownership subset.
+    //
+    // Authoritative-entity → PersistState mapping (covers what M3/M4 produce, §15):
+    //   * bases (BaseTag):     pos, layered HP (M3's single Health → hull; shield/armor
+    //                          seed to maxHp until the M6 combat model fills them, per
+    //                          WarmRestart.h), Storage[3], Fuel, NavState.phase,
+    //                          ownership (OwnerId.player), baseState (0 = active at M3).
+    //   * ships  (ShipTag, no NpcAi): pos, HP, Cargo[3], shipType, ownership.
+    //   * builds (active BuildQueue):  owner, recipe, progress.
+    //   * npcs   (NpcAi):      pos, HP, siteId, aiState — transient, blob-only (§15).
+    // ownerAccount carries OwnerId.player here (a player ≈ their base net id at this
+    // layer); ERServer's auth layer rebinds the real AccountId on restore (§14).
+    [[nodiscard]] Neuron::Persist::PersistState CaptureState() const
+    {
+        Neuron::Persist::PersistState s;
+        s.tick = m_tick;
+
+        // Bases: BaseTag. Layered-HP convention: hull = current Health.hp, shield/armor
+        // seed to maxHp (round-trips: restore writes hull back to Health.hp).
+        m_world.ForEach<BaseTag, NetId, Transform>(
+            [&](const BaseTag&, const NetId& id, const Transform& t) {
+                Neuron::Persist::PersistBase b;
+                b.netId = id.value;
+                b.x = t.pos.x; b.y = t.pos.y; b.z = t.pos.z;
+                if (const OwnerId* o = GetC<OwnerId>(id.value)) b.ownerAccount = o->player;
+                if (const Health* h = GetC<Health>(id.value)) {
+                    b.hullHp = h->hp; b.shieldHp = h->maxHp; b.armorHp = h->maxHp;
+                }
+                if (const Storage* st = GetC<Storage>(id.value))
+                    for (int i = 0; i < kResourceSlots; ++i) b.storage[i] = st->amount[i];
+                if (const Fuel* f = GetC<Fuel>(id.value)) b.fuel = f->current;
+                if (const NavState* n = GetC<NavState>(id.value)) b.navPhase = static_cast<uint8_t>(n->phase);
+                b.baseState = 0; // disable-not-destroy state is M6; active at M3
+                s.bases.push_back(b);
+            });
+
+        // Ships: ShipTag without NpcAi (NPC guardians also carry ShipTag).
+        m_world.ForEach<ShipTag, NetId, Transform>(
+            [&](const ShipTag& tag, const NetId& id, const Transform& t) {
+                if (GetC<NpcAi>(id.value)) return; // NPC, captured below
+                Neuron::Persist::PersistShip sh;
+                sh.netId = id.value;
+                sh.x = t.pos.x; sh.y = t.pos.y; sh.z = t.pos.z;
+                sh.shipType = tag.shipType;
+                if (const OwnerId* o = GetC<OwnerId>(id.value)) sh.ownerAccount = o->player;
+                if (const Health* h = GetC<Health>(id.value)) sh.hp = h->hp;
+                if (const Cargo* c = GetC<Cargo>(id.value))
+                    for (int i = 0; i < kResourceSlots; ++i) sh.cargo[i] = c->amount[i];
+                s.ships.push_back(sh);
+            });
+
+        // Builds: one row per active build queue (owner-scoped, §13.4).
+        m_world.ForEach<BuildQueue, OwnerId>([&](const BuildQueue& q, const OwnerId& o) {
+            if (!q.active) return;
+            Neuron::Persist::PersistBuild bd;
+            bd.ownerAccount = o.player;
+            bd.itemDefId    = q.recipe;
+            bd.progress     = q.progress;
+            s.builds.push_back(bd);
+        });
+
+        // NPCs: NpcAi (transient; blob-only, §15).
+        m_world.ForEach<NpcAi, NetId, Transform>(
+            [&](const NpcAi& ai, const NetId& id, const Transform& t) {
+                Neuron::Persist::PersistNpc n;
+                n.netId = id.value;
+                n.x = t.pos.x; n.y = t.pos.y; n.z = t.pos.z;
+                n.siteId  = ai.siteId;
+                n.aiState = static_cast<uint8_t>(ai.state);
+                if (const Health* h = GetC<Health>(id.value)) n.hp = h->hp;
+                s.npcs.push_back(n);
+            });
+
+        return s;
+    }
+
+    // Rebuild the authoritative sim from a PersistState (warm restart). Destroys all
+    // current entities and respawns bases/ships/NPCs at their persisted net ids, then
+    // restores layered HP / storage / cargo / fuel / nav / build / ownership exactly,
+    // so a subsequent CaptureState reproduces 'state' (the testrunner round-trip gate).
+    // Beacons/scenery are reconstructed from the cooked dataset on a separate load, not
+    // the blob (map infrastructure is game data, §15) — call LoadUniverse before this if
+    // the beacon graph is needed; restore does not respawn props.
+    void RestoreState(const Neuron::Persist::PersistState& state)
+    {
+        // Wipe every live entity + side tables (a fresh shard, §9 stateless restore).
+        std::vector<Neuron::ECS::EntityHandle> all;
+        all.reserve(m_netIdToEntity.size());
+        for (const auto& [netId, e] : m_netIdToEntity) all.push_back(e);
+        for (const auto e : all) if (m_world.IsAlive(e)) m_world.DestroyEntity(e);
+        m_netIdToEntity.clear();
+        m_interest = Neuron::Sim::InterestGrid{};
+        m_repl     = Neuron::Sim::ReplicationStamps{};
+        m_baselines.clear();
+        m_known.clear();
+        m_lastSent.clear();
+        m_buildCompleted.clear();
+
+        m_tick = static_cast<uint32_t>(state.tick);
+        uint32_t maxNetId = 0;
+
+        for (const auto& b : state.bases) {
+            auto e = m_world.CreateEntity();
+            m_world.AddComponent<Transform>(e).pos = { b.x, b.y, b.z };
+            m_world.AddComponent<Velocity>(e);
+            m_world.AddComponent<NetId>(e).value = b.netId;
+            m_world.AddComponent<BaseTag>(e);
+            m_world.AddComponent<Health>(e) = { b.hullHp, b.shieldHp }; // shield seeded == maxHp
+            m_world.AddComponent<ShapeId>(e) = { BaseShapeId(), EntityKind::Base };
+            auto& fuel = m_world.AddComponent<Fuel>(e);
+            fuel = { b.fuel, m_nav.baseFuelMax };
+            m_world.AddComponent<NavState>(e).phase = static_cast<NavPhase>(b.navPhase);
+            m_world.AddComponent<OwnerId>(e).player = static_cast<uint32_t>(b.ownerAccount);
+            auto& st = m_world.AddComponent<Storage>(e);
+            st.capacity = m_economy.storageCapacity;
+            for (int i = 0; i < kResourceSlots; ++i) st.amount[i] = b.storage[i];
+            auto& q = m_world.AddComponent<BuildQueue>(e);
+            m_world.AddComponent<Sensor>(e).range = m_economy.sensorRangeBase;
+            // Re-apply this owner's active build (matched below from state.builds).
+            for (const auto& bd : state.builds) {
+                if (bd.ownerAccount == b.ownerAccount) {
+                    q.active = true; q.paid = true; q.recipe = static_cast<uint8_t>(bd.itemDefId);
+                    q.progress = bd.progress;
+                    break;
+                }
+            }
+            m_netIdToEntity[b.netId] = e;
+            maxNetId = std::max(maxNetId, b.netId);
+        }
+
+        for (const auto& sh : state.ships) {
+            auto e = m_world.CreateEntity();
+            m_world.AddComponent<Transform>(e).pos = { sh.x, sh.y, sh.z };
+            m_world.AddComponent<Velocity>(e);
+            m_world.AddComponent<NetId>(e).value = sh.netId;
+            m_world.AddComponent<ShipTag>(e).shipType = sh.shipType;
+            m_world.AddComponent<ShapeId>(e) = { ShipShapeId(), EntityKind::Ship };
+            m_world.AddComponent<OwnerId>(e).player = static_cast<uint32_t>(sh.ownerAccount);
+            auto& c = m_world.AddComponent<Cargo>(e);
+            c.capacity = m_economy.cargoCapacity;
+            for (int i = 0; i < kResourceSlots; ++i) c.amount[i] = sh.cargo[i];
+            m_world.AddComponent<Fuel>(e) = { m_nav.shipFuelMax, m_nav.shipFuelMax };
+            m_world.AddComponent<NavState>(e);
+            m_world.AddComponent<Sensor>(e).range = m_economy.sensorRangeShip;
+            m_world.AddComponent<FleetMember>(e);
+            m_world.AddComponent<Health>(e) = { sh.hp, kShipHp };
+            m_world.AddComponent<FleetOrder>(e);
+            m_world.AddComponent<Weapon>(e) = { kShipWeaponRange, kShipWeaponDps };
+            m_netIdToEntity[sh.netId] = e;
+            maxNetId = std::max(maxNetId, sh.netId);
+        }
+
+        m_siteAlive.clear();
+        m_clearedSites.clear();
+        for (const auto& n : state.npcs) {
+            auto e = m_world.CreateEntity();
+            m_world.AddComponent<Transform>(e).pos = { n.x, n.y, n.z };
+            m_world.AddComponent<Velocity>(e);
+            m_world.AddComponent<NetId>(e).value = n.netId;
+            m_world.AddComponent<ShipTag>(e).shipType = 0;
+            m_world.AddComponent<ShapeId>(e) = { ShipShapeId(), EntityKind::NpcUnit };
+            m_world.AddComponent<OwnerId>(e).player = 0;
+            m_world.AddComponent<Health>(e) = { n.hp, kNpcHp };
+            m_world.AddComponent<FleetOrder>(e);
+            m_world.AddComponent<Weapon>(e) = { kNpcWeaponRange, kNpcWeaponDps };
+            auto& ai = m_world.AddComponent<NpcAi>(e);
+            ai.state      = static_cast<AiState>(n.aiState);
+            ai.home       = { n.x, n.y, n.z };
+            ai.aggroRange = kNpcAggroRange;
+            ai.fleeHpFrac = kNpcFleeHpFrac;
+            ai.siteId     = n.siteId;
+            m_netIdToEntity[n.netId] = e;
+            ++m_siteAlive[n.siteId];
+            maxNetId = std::max(maxNetId, n.netId);
+        }
+
+        m_nextNetId = maxNetId + 1; // future spawns never collide with restored ids
+    }
+
     static constexpr float kMaxBaseSpeed = 50.0f; // m/s cap (server validates intents)
 
     // Placeholder fleet/combat balance (§13.7) — flat damage to Health, no fitting/
@@ -826,6 +1011,13 @@ private:
     {
         auto it = m_netIdToEntity.find(netId);
         return it == m_netIdToEntity.end() ? Neuron::ECS::EntityHandle::Null() : it->second;
+    }
+    // const component read for CaptureState (the ECS GetComponent is non-const but the
+    // read is logically const — capture never mutates sim state).
+    template <typename T>
+    [[nodiscard]] const T* GetC(uint32_t netId) const
+    {
+        return const_cast<Neuron::ECS::World&>(m_world).GetComponent<T>(EntityOf(netId));
     }
     [[nodiscard]] bool IsBase(uint32_t netId) { return m_world.HasComponent<BaseTag>(EntityOf(netId)); }
     void StopMotion(uint32_t netId)
