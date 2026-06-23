@@ -374,22 +374,26 @@
   clients **reconnect cleanly**.
 - **Masterplan refs:** §17 M5 Done, §10.3 (ERHeadless harness), §16.1/§16.2/§16.3, §26 (uptime SLA),
   R12/R22.
-- **Current state:** net-new. M3 area H drives the loop with bots; M5 adds accounts + the kill/restart
-  durability drill.
+- **Current state:** **the drill harness is the only genuinely-remaining item** — every piece it
+  exercises (auth, outbox, write-behind, warm-restart, reconnect, telemetry) is written, and the
+  `ERServer.cpp` bootstrap that wires them is in place; the live kill/restart on Windows + SQL is what
+  remains. M3 area H already drives the loop with bots.
 - **Work:**
-  - [ ] **Register/login E2E:** a bot registers + logs in over the encrypted channel (C), gets a
+  - [~] **Register/login E2E:** a bot registers + logs in over the encrypted channel (C), gets a
         session token, plays the M3 loop (harvest→build), with economy mutations going write-through (D).
+        *All server-side wiring written; the bot-side register/login + the run are Windows + SQL.*
   - [ ] **Kill/restart drill:** mid-play, **kill the ERServer container**; restart it (warm-restart F);
         assert **universe + bases + economy restore** — economy **zero-loss** (D, `SimHash`/ledger
-        check), position within RPO (E).
-  - [ ] **Reconnect:** the connected bots reconnect with backoff/jitter (G), re-bind to their accounts'
-        bases, and resume — no economy lost, no double-spawn.
-  - [ ] **Counters wired** (H) so the drill's zero-loss + RPO + reconnect-spread assertions are
-        automated.
+        check), position within RPO (E). *The live container restart needs the build agent + SQL.*
+  - [~] **Reconnect:** the connected bots reconnect with backoff/jitter (G), re-bind to their accounts'
+        bases, and resume — no economy lost, no double-spawn. *Server re-bind written; live run Windows.*
+  - [x] **Counters wired** (H) so the drill's zero-loss + RPO + reconnect-spread assertions are
+        automated — `PersistTelemetry`/`ServerTelemetry` aggregation is verified and the `ERServer`
+        sampling sites are wired (the live read is part of the Windows drill).
 - **Tests (`ERHeadlessTest`):**
   - [ ] Full drill: login → play → kill/restart → restore → reconnect, with **zero economy loss**
-        asserted via the ledger + `SimHash` economy subset.
-  - [ ] Position restored within the stated RPO; clients reconnect without a storm.
+        asserted via the ledger + `SimHash` economy subset. *Windows + SQL — the Done gate.*
+  - [ ] Position restored within the stated RPO; clients reconnect without a storm. *Windows + SQL.*
 - **Depends on:** A–H. **Blocks:** Done gate (it *is* the end-to-end verification).
 
 ---
@@ -415,10 +419,11 @@ state stays **session-only** (never normalized, §15) and is recreated on reconn
 cold-start path. **Azure SQL + K8s + managed-identity auth are M6** (§20) — keep every statement
 Azure-SQL-compatible so that migration is a connection-string + auth change.
 
-## Remaining: `ERServer.cpp` `main()` bootstrap (Windows build agent)
+## `ERServer.cpp` `main()` bootstrap — WRITTEN (Windows-unverified)
 
-The components + their seams all exist; what's left is the entry-point glue, best written
-**with the compiler** (it ties together exact persist struct fields). Precise steps:
+The entry-point glue that ties the components together is now **written in `ERServer.cpp`**
+(unverified on Linux — no MSBuild/ODBC/CNG/SQL here; validate on the build agent). It follows
+the shape below; the only remaining work is the live kill/restart drill (area I) on Windows + SQL.
 
 ```cpp
 // 1. Config + persistence thread (owns the ODBC pool; off the 30 Hz tick, §9).
@@ -440,8 +445,9 @@ if (auto snap = persist.LoadLatestSnapshotForRestore()) {
 //    sample ServerTelemetry/PersistTelemetry. On shutdown: persist.Stop().
 ```
 
-M4 perf items that ride here (Windows agent): swap the loop to the **IOCP listener** + per-connection
-lane affinity, and run snapshot encode via `EncodeClientsPooled` over a frozen post-tick view.
+M4 perf items that ride here are also **written** (Windows-unverified): the loop is driven by the
+**IOCP listener** + per-connection lane affinity, and snapshot encode runs via `EncodeClientsPooled`
+over the post-tick view (`host.BroadcastSnapshots(out, encodeWorkers, &tel)`). See M4 areas F/G.
 
 ## Done gate (mirrors §17 "Done")
 
