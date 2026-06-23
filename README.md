@@ -7,9 +7,14 @@
 > territorial PvP** in a real-time loop shared by ~100 concurrent players at launch and
 > **designed to scale to hundreds**.
 
-> **Status:** pre-release / in active development. Milestones **M0, M1a, M1b complete**;
-> **M2 (Darwinia look + audio)** is the current engineering milestone. See
-> [`docs/masterplan.md`](docs/masterplan.md) §17 for the roadmap.
+> **Status:** pre-release / in active development. Milestones **M0–M2 complete**. The
+> platform-independent simulation, networking, persistence and **combat** logic through
+> **M6** is implemented and green on the Linux `testrunner` (**269 cases, 0 failed**); what
+> remains across **M3–M6** is the **Windows / real-infrastructure integration & verification**
+> — the DX12/UWP client glue, IOCP, the `ERServer` + ODBC/SQL Server persistence layer, and
+> the M6 deployment track (Azure SQL, Kubernetes, Store pass). See
+> [`docs/masterplan.md`](docs/masterplan.md) §17 for the roadmap and
+> [`docs/implementation/`](docs/implementation/) for the per-milestone status.
 
 ---
 
@@ -267,8 +272,8 @@ Milestones (full detail in `docs/masterplan.md` §17):
 | **M2** | Darwinia look + audio (DDS/CMO, HUD, bloom/particles, NeuronAudio) | ✅ Complete |
 | **M3** | Core 4X loop, fleet command & navigation | 🔨 **Active** (areas A–H implemented; Windows client/headless glue unverified) |
 | **M4** | Scale & interest (cell pub/sub, delta compression, load test at scale) | 🔨 Pipeline complete (areas A–J platform-independent logic implemented + tested; Windows IOCP/ERServer integration + the live wall-clock perf gate remain) |
-| **M5** | Accounts, auth & persistence (SQL, warm-restart) | ⏳ |
-| **M6** | Combat model & production deployment (Kubernetes, Azure SQL) | ⏳ |
+| **M5** | Accounts, auth & persistence (SQL, warm-restart) | 🔨 Pipeline complete (portable cores — PBKDF2 auth, write-through outbox, write-behind, warm-restart snapshot+log, reconnect backoff/jitter — implemented + testrunner-verified; the `ERServer/persist/` ODBC layer, account-bound auth flow and `main()` bootstrap are written but Windows-unverified; the live kill/restart **zero-loss drill** on Windows + SQL remains) |
+| **M6** | Combat model & production deployment (Kubernetes, Azure SQL) | 🔨 Combat model implemented (areas A–G — layered defense + fitting, damage/resist/tracking, weapons/projectiles with sub-stepping, EWAR/logistics, PvE AI, loot-on-kill + base disable-not-destroy — and the balance-gate **sim** half, all testrunner-verified; the **deployment track** — Azure SQL migration, Kubernetes prod topology, Store-compliance pass — plus client combat VFX/SFX, optional prediction, and the deployed-stack balance bands are **not started**) |
 | **M7** | Sandbox: conquest, economy, PvE content & onboarding | ⏳ |
 
 > **Side track — playable vertical slice:** a thin client layer (free RTS camera,
