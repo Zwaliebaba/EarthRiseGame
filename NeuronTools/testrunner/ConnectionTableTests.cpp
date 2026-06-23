@@ -5,7 +5,10 @@
 // The IOCP per-connection lane dispatch is the Win32 ERServer side.
 
 #include "ConnectionTable.h"
+#include "PacketCodec.h" // WritePacketHeader — canonical wire layout the peek must match
 #include "TestRunner.h"
+
+#include <vector>
 
 using namespace ertest;
 using Neuron::Net::ConnectionTable;
@@ -84,4 +87,49 @@ ER_TEST(ConnectionTable, FreedSlotsAreReusedNotGrown)
     for (uint64_t i = 100; i < 104; ++i) t.Open(i);
     ER_CHECK_EQ(t.SlotCapacity(), size_t{ 8 }); // recycled the freed slots, no growth
     ER_CHECK_EQ(t.ActiveCount(), size_t{ 4 });
+}
+
+// --- token-peek routing helper (M4 area G: route encrypted datagrams by token) ---
+
+// An encrypted datagram's clear header carries the connection token; PeekConnectionToken
+// extracts it (no decrypt) so the host can ConnectionTable::Find the owning slot.
+ER_TEST(ConnectionTable, PeekConnectionTokenReadsTheHeaderToken)
+{
+    using namespace Neuron::Net;
+    const uint64_t token = 0xDEAD'BEEF'1234'5678ull;
+
+    // Build a datagram exactly as ServerConnection/SecureChannel would: kind byte,
+    // then the clear PacketHeader (protocolId u32 · token u64 · packetNumber u64).
+    std::vector<uint8_t> dg;
+    dg.push_back(kDatagramKindEncrypted);
+    PacketHeader hdr; hdr.connectionToken = token; hdr.packetNumber = 42;
+    WritePacketHeader(dg, hdr);
+    dg.insert(dg.end(), { 0x11, 0x22, 0x33 }); // (stands in for AEAD ciphertext+tag)
+
+    const auto peeked = PeekConnectionToken(dg);
+    ER_CHECK(peeked.has_value());
+    ER_CHECK_EQ(*peeked, token);
+
+    // The peeked token routes straight to the connection's slot.
+    ConnectionTable t;
+    const ConnHandle h = t.Open(token);
+    ER_CHECK(t.Validate(h));
+    const ConnHandle routed = t.Find(*peeked);
+    ER_CHECK(routed.valid);
+    ER_CHECK_EQ(routed.index, h.index);
+}
+
+// A clear-handshake datagram (cookie phase) has no token yet → nullopt, so the host
+// falls back to the ip:port→token association. A runt shorter than the header → nullopt.
+ER_TEST(ConnectionTable, PeekConnectionTokenRejectsClearAndRunt)
+{
+    using namespace Neuron::Net;
+    const std::vector<uint8_t> clear{ 0x00 /*ClearHandshake*/, 0x01, 0xAA, 0xBB };
+    ER_CHECK(!PeekConnectionToken(clear).has_value());
+
+    const std::vector<uint8_t> runt{ kDatagramKindEncrypted, 0x01, 0x02, 0x03 }; // < header
+    ER_CHECK(!PeekConnectionToken(runt).has_value());
+
+    const std::vector<uint8_t> empty;
+    ER_CHECK(!PeekConnectionToken(empty).has_value());
 }

@@ -15,11 +15,39 @@
 // Win32 ERServer side.
 
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
 namespace Neuron::Net
 {
+
+// Datagram-header layout constants for the token-peek router (App. A), kept here so
+// the pure routing helper has no dependency on Connection.h (DatagramKind) or the
+// Winsock layers — it operates on raw datagram bytes and is unit-testable on Linux.
+//   byte 0            : DatagramKind (0x00 ClearHandshake, 0x01 Encrypted)
+//   bytes 1..4        : protocol_id  u32   (clear, AEAD AAD)
+//   bytes 5..12       : connection_token u64 (clear, AEAD AAD)   ← what we route on
+//   bytes 13..20      : packet_number u64
+inline constexpr uint8_t kDatagramKindEncrypted = 0x01;
+inline constexpr size_t  kTokenByteOffset       = 1 + sizeof(uint32_t); // kind + protocol_id
+
+// Peek the 64-bit connection token out of an *encrypted* datagram's clear header
+// (App. A) without decrypting — the fast routing key for ConnectionTable::Find. The
+// token is authenticated as AEAD AAD, so SecureChannel::Open still rejects a forged
+// header after routing; this is purely "which connection does this datagram belong
+// to?" Returns nullopt for a clear-handshake datagram (no token yet → cookie phase)
+// or a runt too short to contain the token. Little-endian, matching PacketCodec.h.
+[[nodiscard]] inline std::optional<uint64_t> PeekConnectionToken(std::span<const uint8_t> dg) noexcept
+{
+    if (dg.empty() || dg[0] != kDatagramKindEncrypted) return std::nullopt;
+    if (dg.size() < kTokenByteOffset + sizeof(uint64_t)) return std::nullopt;
+    uint64_t token = 0;
+    for (size_t i = 0; i < sizeof(uint64_t); ++i)
+        token |= static_cast<uint64_t>(dg[kTokenByteOffset + i]) << (8 * i);
+    return token;
+}
 
 // A stable reference to a connection slot: index + the generation it was opened at.
 // Validate() rejects it once the slot is recycled (generation moved on).
