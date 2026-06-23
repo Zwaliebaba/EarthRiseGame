@@ -351,7 +351,12 @@ private:
         std::vector<uint32_t> ids;
         ids.reserve(m_conns.size());
         for (auto& [t, e] : m_conns)
-            if (e.conn->IsConnected()) ids.push_back(e.playerNetId);
+            // M5 area C: a connection that completed the M1 handshake (IsConnected) but
+            // has not yet logged in under real auth has playerNetId 0 / no base — it has
+            // nothing to replicate, so it is excluded from the snapshot set until login
+            // binds its base (OnAuthMessage). Under the dev stub the base is bound at
+            // cookie time, so this never excludes a stubbed peer.
+            if (e.conn->IsConnected() && e.playerNetId != 0) ids.push_back(e.playerNetId);
         std::sort(ids.begin(), ids.end());
         return ids;
     }
