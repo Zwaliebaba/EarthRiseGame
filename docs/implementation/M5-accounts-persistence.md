@@ -1,8 +1,32 @@
 # M5 — Accounts, Auth & Persistence (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M5**).
-> **Status:** ⏳ Not started (M0/M1a/M1b/M2 complete; M3 active; M4 planned). Drafted from
-> `_template.md`, per [`README.md`](README.md).
+> **Status:** 🔨 **Implemented — portable cores verified on the Linux testrunner; the
+> ODBC/auth/warm-restart wiring is written but UNVERIFIED here** (this is a Linux container:
+> no MSBuild / ODBC Driver 18 / CNG / reachable SQL Server — see §16.3). Validate on the
+> Windows build agent against the dev SQL Server.
+> - **Verified now (testrunner, §16.2):** write-through outbox zero-loss + idempotent replay
+>   (`OutboxTests`, area D); warm-restart blob serde + `StateHash` (`WarmRestartTests`) and the
+>   `ServerUniverse`↔`PersistState` capture/restore round-trip incl. `SimHash` (`WarmRestartCaptureTests`,
+>   area F); reconnect backoff/jitter (`ReconnectTests`, area G); PBKDF2-HMAC-SHA512 vs FIPS-180/
+>   RFC-4231 KATs (`Pbkdf2Tests`, area C hash); persistence/auth telemetry (`PersistTelemetryTests`,
+>   area H). **224 testrunner cases green.**
+> - **Written, Windows-unverified:** the `ERServer/persist/*` ODBC layer (A), `CngCrypto::Pbkdf2HmacSha512`
+>   (C — must match the portable reference, gated by the `ERServerTest` cross-check), `ServerHost`
+>   account-bound auth flow (C), write-behind (E) + `SimSnapshotStore` (F) SQL, **and now the
+>   `ERServer.cpp` `main()` bootstrap** that wires them together: `PersistConfig::LoadFromEnv` →
+>   `OdbcConnectionPool` + `PersistenceThread` + `AccountStore` injected into `ServerHost`
+>   (`SetPersistDeps`); the persisted static server key (file-backed, replacing the M1a ephemeral
+>   key); startup warm-restart restore (`LoadLatestSnapshotForRestore` → `DecodeState` →
+>   `ServerUniverse::RestoreState`, then `ReadOutboxSince` replay); the periodic snapshot capture
+>   callback (`CaptureState` → `EncodeState` at the current outbox watermark); and build-completion
+>   economy events routed to the outbox via the persistence thread. Schema: migrations **004** (outbox
+>   idempotency key + snapshot watermark) and **005** (per-account PBKDF2 iterations) landed;
+>   `schema.sql` aligned.
+> - **Remaining (Windows build agent + dev SQL only):** the **live kill/restart zero-loss drill** on
+>   Windows + SQL (I) — the one item that genuinely needs the agent. All wiring it exercises is written.
+>
+> _Original plan (drafted from `_template.md`, per [`README.md`](README.md)) follows._
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 > **Verification:** M5's gates are **real, enforceable** — the register/login flow, persistence
 > layer, and the kill/restart **zero-loss drill** (areas A/C/I) run on the **Windows build agent
@@ -96,25 +120,28 @@
 - **Masterplan refs:** §15 (ODBC wrapper, connection pooling, parameterized statements/procs, TVP/
   `bcp` for big checkpoints, `Encrypt=yes`), §9 ("DB is out of the tick hot path"), §20 (external SQL
   over the network; connection string from a secret/env), R4.
-- **Current state:** net-new — no `persist/` directory exists. The `Config/db/` schema + migrations
-  are drafted (area B).
+- **Current state:** **written** — `ERServer/persist/` exists (`OdbcConnection`, `OdbcConnectionPool`,
+  `PersistConfig`, `PersistQueue`, `PersistenceThread`, plus the stores). Windows/ODBC, **unverified
+  on Linux** (no Driver 18 / reachable SQL here). The `Config/db/` schema + migrations are in place.
 - **Work:**
-  - [ ] **`ERServer/persist/` ODBC wrapper:** connect (`SQLDriverConnect`, Driver 18, `Encrypt=yes`),
-        **parameterized statements / stored procs**, result binding, error mapping — thin, custom, no
-        third-party. Connection string + credentials from a **secret/env** (§20), never hard-coded.
-  - [ ] **Connection pooling** + a **persistence thread** that owns both durability paths (D outbox
-        drain, E write-behind batch) via MPSC queues from the sim; **SQL latency never stalls the
-        30 Hz tick** (§9).
-  - [ ] **Azure-SQL compatibility guard:** avoid cross-DB queries / SQL Agent / FILESTREAM (§15) so
-        the M6 migration is connection-string-only.
+  - [~] **`ERServer/persist/` ODBC wrapper:** `OdbcConnection` connects (`SQLDriverConnect`, Driver 18,
+        `Encrypt=yes`), with parameterized statements, result binding + error mapping; the connection
+        string + credentials come from `PersistConfig::LoadFromEnv` (§20), never hard-coded.
+        *Written; validate on the build agent.*
+  - [~] **Connection pooling** + a **persistence thread**: `OdbcConnectionPool` + `PersistenceThread`
+        own both durability paths (D outbox drain, E write-behind batch) via the `PersistQueue` MPSC
+        queues; the tick only ever does O(1) `Enqueue*` (`EnqueueEconomy`/`EnqueueWriteBehind`), so SQL
+        latency never stalls the 30 Hz tick (§9). *Written; validate on the build agent.*
+  - [~] **Azure-SQL compatibility guard:** the stores use single multi-statement transactions, no
+        cross-DB / SQL Agent / FILESTREAM (§15) so the M6 migration is connection-string-only. *Written.*
   - [ ] **CI wiring (§16.3):** the `SessionStart` hook already targets a **dev SQL Server over the
         network** — point the persist-layer integration tests at it (skip gracefully if absent on a
-        pure-Linux run).
+        pure-Linux run). *Pending the build agent.*
 - **Tests (`ERServerTest`, §16.1):**
-  - [ ] Connect / round-trip a parameterized insert+select against the dev SQL instance;
-        connection-pool reuse; error path on a bad statement is mapped, not crashed.
-  - [ ] The persistence thread drains a queue without blocking a simulated tick loop (hot-path
-        isolation assert).
+  - [~] Connect / round-trip a parameterized insert+select against the dev SQL instance;
+        connection-pool reuse; error path on a bad statement is mapped, not crashed. *ODBC — Windows.*
+  - [~] The persistence thread drains a queue without blocking a simulated tick loop (hot-path
+        isolation assert). *Windows (the queue model itself is the testrunner-verified `PersistQueue`).*
 - **Depends on:** B (schema to talk to). **Blocks:** C, D, E, F.
 
 ### B. Schema & migrations (`Config/db/`) (§15)
@@ -125,24 +152,26 @@
 - **Masterplan refs:** §15 (schema inventory + catalog/balance boundary: stats/recipes/research/
   anomaly defs are **game data**, not SQL; SQL keeps canonical item ids + mutable state; transient
   sim state is **never normalized**, only in the `SimSnapshots` blob), R7 (Azure parity).
-- **Current state:** **already drafted** — `schema.sql` + migrations 001–003 define the full M5→M7
-  table set. M5 **reviews/finalizes the M5 subset** and adds migrations only for gaps the M3 loop
-  surfaces.
+- **Current state:** **landed** — `schema.sql` + migrations 001–003 define the full M5→M7 table set,
+  and the two M5 forward-only migrations are in place: **004** (`EconomyOutbox` idempotency key +
+  the `SimSnapshots.OutboxWatermark` column) and **005** (per-account PBKDF2 iteration cost). DDL is
+  authored; an apply against live SQL is the build-agent check.
 - **Work:**
-  - [ ] **Finalize the M5-active tables:** `Accounts`/`Sessions` (C), `Wallets`/`CurrencyLedger` (D),
+  - [~] **Finalize the M5-active tables:** `Accounts`/`Sessions` (C), `Wallets`/`CurrencyLedger` (D),
         `Bases`/`Ships`/itemized inventory/`BuildQueue` (D/E), `Regions`/universe rows, `EconomyOutbox`,
-        `SimSnapshots`. Confirm columns match the M3 sim state (cargo/storage/fuel/ownership/nav).
-  - [ ] **New forward-only migration** (e.g. `004_*`) for any column the M3 loop needs that 001–003
-        lack — never edit an existing migration (§15 forward-only rule).
-  - [ ] **Catalog/balance boundary check:** item/hull/module *stats*, recipes, research costs,
+        `SimSnapshots`. Columns match the M3 sim state; authored — confirm on the SQL apply.
+  - [x] **New forward-only migrations** — **004** (outbox `IdempotencyKey` UNIQUE filtered index +
+        `OutboxWatermark`) and **005** (`Accounts.Pbkdf2Iterations`) landed; existing migrations are
+        untouched (§15 forward-only rule). *(DDL authored; the live apply is the `[~]` test below.)*
+  - [~] **Catalog/balance boundary check:** item/hull/module *stats*, recipes, research costs,
         nav/economy tuning stay **game data** (`datacook`, §12.6) — SQL holds only canonical
         `ItemDefs` ids + mutable player/economy/universe state. Transient sim (NPCs, projectiles,
-        anomaly sites) is **not** normalized — it rides the `SimSnapshots` blob (F).
+        anomaly sites) is **not** normalized — it rides the `SimSnapshots` blob (F). *Authored.*
 - **Tests (`ERServerTest` + a migration apply check in CI):**
-  - [ ] Migrations apply cleanly from empty → current on the dev SQL instance; re-apply is a no-op
-        (idempotent / forward-only).
-  - [ ] A round-trip of each M5-active entity (account, wallet, base, ship, inventory line) matches
-        the sim's view.
+  - [~] Migrations apply cleanly from empty → current on the dev SQL instance; re-apply is a no-op
+        (idempotent / forward-only). *Windows + SQL.*
+  - [~] A round-trip of each M5-active entity (account, wallet, base, ship, inventory line) matches
+        the sim's view. *Windows + SQL.*
 - **Depends on:** nothing (DDL). **Blocks:** A, C, D, E, F.
 
 ### C. Accounts & authentication (real login) (§14)
@@ -154,32 +183,41 @@
 - **Masterplan refs:** §14 (full auth spec), §8.5 (login over the encrypted channel after ECDH +
   server-key verify → expiring session token), §15 (Accounts/Sessions rows), R6 (credential/MITM),
   R13 (handshake DoS — the stateless cookie already guards ECDH).
-- **Current state:** net-new auth; the **encrypted channel + handshake exist** (M1a). `CngCrypto`
-  wraps CNG but has **no PBKDF2 path** yet; `ServerHost` identifies by net id, not account.
+- **Current state:** **written** — the portable PBKDF2-HMAC-SHA512 reference (`Pbkdf2.h`) is
+  testrunner-verified; the CNG production path (`CngCrypto::Pbkdf2HmacSha512`) + `AccountStore`
+  (register/login/lockout/one-session) + the `ServerHost` account-bound auth flow are written,
+  Windows-unverified. `ServerHost` now gates gameplay on a logged-in account (not net id).
 - **Work:**
-  - [ ] **Password hashing** (`CngCrypto`/`persist`): **PBKDF2-HMAC-SHA512**, per-user random salt
-        + server **pepper** (from secret/env, never in SQL), **high tunable iteration count stored per
-        hash** (so cost can be raised later) — never plaintext, never reversible (§14).
-  - [ ] **Registration & login flow** over the encrypted channel (§8.5): credentials sent **only
-        after** ECDH + server-key verification; server verifies vs `Accounts` → issues an expiring
-        **session token** bound to the connection (`Sessions` row).
-  - [ ] **Abuse controls:** per-account **and** per-IP **rate-limit + lockout/backoff** to blunt
-        credential stuffing (§14, R6).
-  - [ ] **Session rules:** token validation on reliable traffic; **one active session per account**
-        (deny/kick the duplicate; reconnect handled **atomically** to avoid races, §14); login **binds
-        the session to the player's `Base`/entity** — replacing the cookie-time base spawn in
-        `ServerHost` with account-bound spawn/restore.
-  - [ ] **Persist the static server key** (§8.5 / `ERServer.cpp` note: M1a's key is ephemeral) so the
-        client's pinned key stays valid across restarts.
-  - [ ] **Keep the dev stub behind a flag** for M-series iteration (§14) — real auth is the default,
-        the stub is opt-in.
-- **Tests (`ERServerTest` + `NeuronCoreTest` for the hash; testrunner mirror for PBKDF2 vectors):**
-  - [ ] PBKDF2 produces stable, salt+pepper-dependent hashes; wrong password rejected; iteration
-        cost round-trips.
-  - [ ] Register → login → session token issued → token validates reliable traffic; expired/invalid
-        token rejected.
-  - [ ] Rate-limit/lockout trips after N failures (per-account and per-IP); one-session rule kicks the
-        duplicate atomically (no race double-spawn).
+  - [x] **Password hashing — algorithm:** PBKDF2-HMAC-SHA512 with per-user salt + iteration cost is
+        proved against FIPS-180 / RFC-4231 KATs and its own HMAC construction (`Pbkdf2Tests`,
+        salt+cost-sensitive). The **CNG** realisation `CngCrypto::Pbkdf2HmacSha512` must be byte-
+        identical to this reference (cross-checked in `ERServerTest`) — `[~]` (Windows).
+  - [~] **Registration & login flow** over the encrypted channel (§8.5): `ServerHost::OnAuthMessage`
+        handles register/login on the established secure channel via `AccountStore::Register`/`Login`
+        → an expiring 32-byte session token; credentials only flow after ECDH + server-key verify.
+        Carried on reliable `Command` frames with a 1-byte auth opcode because the §8.5 wire types +
+        the M1 `LoginRequest` body are frozen here (documented in `ServerHost.h`). *Windows.*
+  - [~] **Abuse controls:** per-account lockout (`Accounts.LoginFailures`/`LockedUntil`) + an in-process
+        per-IP rate limiter live in `AccountStore`; `ServerHost` records the §21 auth counters at the
+        login sites. *Written (the limiter/lockout are in the Windows-unverified store).*
+  - [~] **Session rules:** `ServerHost::ValidateSession` checks the token on reliable traffic;
+        **one active session per account** — `AccountStore::Login` revokes prior sessions atomically and
+        `ServerHost::KickExistingSessionForAccount` drops a duplicate live connection (no double-spawn);
+        login **binds the base** via spawn (first login) or re-attach to the restored entity
+        (`BindAccountBase` + `SetAccountBase`), replacing the cookie-time base spawn. *Windows.*
+  - [~] **Persist the static server key** (§8.5): `ERServer` now loads the stored
+        `BCRYPT_ECCPRIVATE_BLOB` (file-backed `er_server_key.bin`) or generates + writes one, replacing
+        M1a's ephemeral key, so the client's pinned key survives restarts. *Windows/CNG.*
+  - [x] **Keep the dev stub behind a flag** — `ServerHost` has `m_devAuthStub` (set via `SetPersistDeps`,
+        env `ER_DEV_AUTH_STUB=1`), **default OFF = real auth**; ON restores the M1-M4 cookie-time
+        "pick a name" base spawn. *(Flag + both code paths written; the real path is Windows-verified.)*
+- **Tests (`ERServerTest` + the testrunner mirror for PBKDF2 vectors):**
+  - [x] PBKDF2 produces stable, salt+cost-sensitive hashes; KATs match (`Pbkdf2Tests`). The CNG-vs-
+        reference byte-identity + wrong-password reject are `ERServerTest` (`[~]`, Windows).
+  - [~] Register → login → session token issued → token validates reliable traffic; expired/invalid
+        token rejected. *Windows + SQL.*
+  - [~] Rate-limit/lockout trips after N failures (per-account and per-IP); one-session rule kicks the
+        duplicate atomically (no race double-spawn). *Windows + SQL.*
 - **Depends on:** A, B. **Blocks:** G (reconnect uses the session token), D (economy is account-scoped).
 
 ### D. Write-through economy outbox (zero-loss) (§15)
@@ -190,24 +228,25 @@
 - **Masterplan refs:** §15 (write-through / transactional outbox; wallet + **append-only currency
   ledger**; "committed before considered authoritative — zero-loss"), §17 M5 Done ("**zero economy
   loss**"), R12.
-- **Current state:** net-new. M3 economy (cargo/storage/build queue) is **in-memory only**; there is
-  no ledger, no outbox.
+- **Current state:** **written** — the portable zero-loss/idempotent model (`Outbox.h`) is
+  testrunner-verified (`OutboxTests`); the SQL realisation (`EconomyStore`) + the `ERServer`
+  build-completion hook are written, Windows-unverified.
 - **Work:**
-  - [ ] **`EconomyOutbox` write path** (sim → persistence thread, area A): every economy mutation
-        appends an **ordered, durable** outbox row in the **same transaction** as the balance change;
-        the event is authoritative only once committed/staged (§15).
-  - [ ] **Wallet + append-only `CurrencyLedger`:** every balance change appends a ledger row in the
-        same transaction (anti-dupe audit) and mirrors to the outbox (per `schema.sql`).
-  - [ ] **Hook the M3 economy events:** build completion (`DrainBuildCompleted`), deposit/storage
-        changes, ownership — route through the outbox so they survive a restart. (Markets/insurance/
-        loot stay M6/M7, but the **mechanism** is proven here.)
-  - [ ] **Ordered drain:** the persistence thread drains the outbox **in order**; idempotent apply so
-        a crash mid-drain replays cleanly.
-- **Tests (`ERServerTest`):**
-  - [ ] A balance change + ledger row + outbox row commit atomically (all-or-nothing on a forced
-        failure).
-  - [ ] Crash *before* drain → on restart the outbox replays the economy event with **zero loss**;
-        replay is idempotent (no double-credit).
+  - [x] **Ordered, idempotent, zero-loss model:** `Outbox.h` (`Outbox`/`EconomyState`) proves append +
+        apply-in-one-transaction, ordered drain, and replay-with-no-double-credit by `idemKey`
+        (`OutboxTests`: `ApplyUpdatesWalletAndLedgerAtomically`, `ApplyIsIdempotentByIdemKey`,
+        `OrderedDrainAppliesAndAdvancesWatermark`, `CrashBeforeDrainReplaysWithZeroLossAndNoDoubleCredit`).
+  - [~] **`EconomyOutbox` write path (SQL):** `EconomyStore::AppendWriteThrough` commits the outbox row
+        + wallet + `CurrencyLedger` in ONE transaction; the `IdempotencyKey` UNIQUE index (migration
+        004) makes a replayed drain exactly-once. *Windows + SQL.*
+  - [~] **Hook the M3 economy events:** `ERServer` routes `ServerUniverse::DrainBuildCompleted` to
+        `PersistenceThread::EnqueueEconomy` (build completion), and `ServerHost` enqueues the first-login
+        wallet seed — both with deterministic `idemKey`s so a replay can't double-credit. *Windows.*
+  - [~] **Ordered drain:** the persistence thread drains the outbox in order, idempotently. *Windows.*
+- **Tests (`ERServerTest`; model mirrored on the testrunner):**
+  - [x] Zero-loss + idempotent replay + atomic apply — proved in the portable model (`OutboxTests`).
+  - [~] The SQL realisation commits atomically (forced-failure rollback) and replays with zero loss on
+        restart (no double-credit). *Windows + SQL.*
 - **Depends on:** A, B, C (account-scoped wallet). **Blocks:** I (restart drill measures zero-loss).
 
 ### E. Write-behind high-frequency state (bounded RPO) (§15)
@@ -217,19 +256,25 @@
   lost on hard crash; **never** an economy event).
 - **Masterplan refs:** §15 (write-behind, batched, stated RPO; "never an economy event"), §9 (DB out
   of the tick hot path), R12, §21 (RPO watermark telemetry).
-- **Current state:** net-new — positions live only in the in-memory sim.
+- **Current state:** **written** — `WriteBehindStore` + the bounded `PersistQueue` + the
+  `PersistenceThread` RPO-cadence flush are written, Windows-unverified. The bounded-queue
+  drop-oldest semantics are the testrunner-verified `PersistQueue` model.
 - **Work:**
-  - [ ] **Write-behind batcher** (sim → persistence thread, area A): periodically batch base/ship
-        `Pos`/`*Hp`/`State` rows (`Bases`/`Ships`, per `schema.sql`) at the **RPO cadence** (the §19
-        open question), `bcp`/TVP for big checkpoints (§15).
-  - [ ] **RPO watermark:** track the timestamp up to which high-frequency state is durable, exposed to
-        telemetry (area H) and asserted in the drill (I).
-  - [ ] **Strict separation from economy (D):** write-behind carries **no** economy event — the two
-        paths share the persistence thread but not the durability guarantee (§15).
+  - [~] **Write-behind batcher** (sim → persistence thread): `EnqueueWriteBehind` pushes `WriteBehindRow`
+        (pos / layered HP / state) to the bounded queue; `PersistenceThread::FlushWriteBehindIfDue`
+        coalesces latest-wins per entity and flushes at the RPO cadence via `WriteBehindStore::FlushBatch`
+        (per-row UPDATE in one transaction; TVP/bcp is the noted upgrade). *Windows + SQL.*
+  - [~] **RPO watermark:** the thread advances the RPO watermark exposed via `PersistCounters`
+        (`rpoWatermarkUnix`); `ERServer` feeds it into `PersistTelemetry::AdvanceRpoWatermark` (area H).
+        *Written; the monotonic-advance property is `PersistTelemetryTests`-verified.*
+  - [~] **Strict separation from economy (D):** the queue *kinds* make the asymmetry explicit
+        (`MpscZeroLossQueue` for economy, `MpscBoundedQueue` for write-behind); write-behind carries no
+        economy event. *Written (type-level + by inspection).*
 - **Tests (`ERServerTest`):**
-  - [ ] Batched position writes land within the RPO cadence; the watermark advances monotonically.
-  - [ ] Crash → restored position is within the stated RPO bound; **no economy event** ever rode the
-        write-behind path (separation invariant).
+  - [~] Batched position writes land within the RPO cadence; the watermark advances monotonically.
+        *Windows + SQL* (watermark monotonicity itself: `PersistTelemetryTests`).
+  - [~] Crash → restored position is within the stated RPO bound; **no economy event** ever rode the
+        write-behind path (separation invariant). *Windows + SQL.*
 - **Depends on:** A, B. **Blocks:** F (snapshot includes restored position), I.
 
 ### F. Warm-restart — snapshot blob + event log (§15, §9)
@@ -240,24 +285,33 @@
 - **Masterplan refs:** §15 (warm restart: snapshot blob + event log; ERServer stateless → recover
   from snapshot + log; transient sim state lives **only** in the blob), §9 (stateless server), §26
   (warm-restart correctness is an **uptime SLA**), R12/R22.
-- **Current state:** net-new. `SimSnapshots` table is drafted; `Serde.h`/`SimHash` exist; no
-  snapshot/restore code yet.
+- **Current state:** **written** — the portable blob codec (`WarmRestart.h`
+  `PersistState`/`EncodeState`/`DecodeState`/`StateHash`) and the `ServerUniverse`↔`PersistState`
+  capture/restore glue are testrunner-verified (`WarmRestartTests`, `WarmRestartCaptureTests`); the
+  `SimSnapshotStore` SQL + the `ERServer` restore/snapshot bootstrap are written, Windows-unverified.
 - **Work:**
-  - [ ] **Snapshot serializer:** serialize the authoritative `ServerUniverse` (bases, ships, cargo/
-        storage, build queue, fuel, nav, ownership, **transient** NPC/anomaly state) to a versioned
-        binary blob (§7.2) → `SimSnapshots`, on the **snapshot cadence** (the §19 open question).
-  - [ ] **Event log since snapshot:** the economy outbox (D) + a sim event log form the "since last
-        snapshot" stream; restart loads the latest blob and **replays the log onto it**.
-  - [ ] **Restore path** (`ERServer` startup): load latest snapshot + replay log → reconstruct the sim;
-        **verify with `SimHash`** (M3) that pre-crash and post-restart state match (modulo the
-        write-behind RPO for position).
-  - [ ] **Stateless ERServer:** confirm no durable state lives outside SQL — a fresh container restores
-        purely from snapshot + log (§9).
-- **Tests (`ERServerTest` + `ERHeadlessTest`):**
-  - [ ] Snapshot → restore round-trip reproduces the sim (economy exact; position within RPO);
-        `SimHash` matches for the economy/ownership subset.
-  - [ ] Snapshot + replayed log == continuous run for the same input (log replay is faithful).
-  - [ ] A second restart from the restored state is stable (idempotent recovery).
+  - [x] **Snapshot serializer (codec + capture):** `WarmRestart.h` versioned blob over the §7.2 serde
+        + `ServerUniverse::CaptureState`/`RestoreState` cover bases/ships/build/NPC; round-trips are
+        proved (`WarmRestartTests`: blob round-trip + `StateHash`, truncated/empty handling;
+        `WarmRestartCaptureTests`: capture covers every category, is deterministic,
+        Capture→Encode→Decode→Restore→Capture is stable incl. `SimHash`, restore rebinds ownership/
+        build and never collides net ids).
+  - [~] **Snapshot store + cadence (SQL):** `SimSnapshotStore::Save`/`LoadLatest` move the blob +
+        `OutboxWatermark` (migration 004) to/from `SimSnapshots`; `ERServer`'s capture callback runs on
+        the persistence thread at the snapshot cadence (`CaptureState` → `EncodeState`, watermark =
+        `EconomyStore::MaxOutboxId`). *Windows + SQL.*
+  - [~] **Event log since snapshot + restore path** (`ERServer` startup): `RestoreFromWarmRestart`
+        loads the latest snapshot (`LoadLatestSnapshotForRestore` → `DecodeState` → `RestoreState`),
+        then replays the post-watermark outbox rows (`ReadOutboxSince`); the model proves the replay is
+        zero-loss + faithful (`OutboxTests`, `WarmRestartTests::SnapshotPlusLogEqualsContinuousRunWithZeroLoss`).
+        *Windows + SQL.*
+  - [~] **Stateless ERServer:** a fresh process restores purely from snapshot + outbox log (no durable
+        state outside SQL except the file-backed static key). *Written; confirm on the build agent.*
+- **Tests (`ERServerTest` + `ERHeadlessTest`; portable halves on the testrunner):**
+  - [x] Snapshot → restore round-trip reproduces the sim; `SimHash` matches for the economy/ownership
+        subset; snapshot + replayed log == continuous run; a second restart is stable — proved in the
+        portable model (`WarmRestartTests` + `WarmRestartCaptureTests`).
+  - [~] The same end-to-end through the SQL `SimSnapshotStore` + the real outbox. *Windows + SQL.*
 - **Depends on:** D, E. **Blocks:** G, I.
 
 ### G. Reconnect & rolling-restart (24/7 uptime SLA) (§26, R22)
@@ -268,24 +322,26 @@
 - **Masterplan refs:** §26 (24/7, no scheduled downtime; rolling restarts rely on warm-restart;
   clients reconnect with backoff/jitter), §14 (session token + one-session reconnect, atomic), §8.5
   (handshake/clock-sync re-run on reconnect), R22.
-- **Current state:** net-new reconnect logic. `ServerHost::PruneStale` reaps idle/disconnected peers
-  (M1a); the client has no reconnect-with-backoff path; rolling restart is undrilled.
+- **Current state:** **written** — the portable backoff/jitter policy (`Reconnect.h`) is
+  testrunner-verified (`ReconnectTests`); the `NeuronClient` reconnect loop + the server-side atomic
+  re-bind are written/Windows-unverified (`ServerHost`'s one-session kick + `BindAccountBase`).
 - **Work:**
-  - [ ] **Client reconnect** (`NeuronClient` session): on disconnect/timeout, re-run the handshake
-        (§8.5) and re-present the **session token** (C) with **exponential backoff + jitter** (the §19
-        open question) to avoid a reconnect storm (R22); resume the snapshot loop from ∅ baseline (the
-        M4 cold-start path converges it).
-  - [ ] **Server-side atomic reconnect:** the **one-session rule** (C) handles a reconnect that races
-        the old session's reap — bind the restored session to the account's `Base`/entity atomically,
-        no double-spawn.
-  - [ ] **Rolling-restart playbook:** restart the shard (warm-restart F), clients reconnect — a brief
-        blip is acceptable; document the drill as the §26 uptime SLA.
-- **Tests (`ERHeadlessTest`):**
-  - [ ] A bot fleet survives a server warm-restart: reconnect with backoff/jitter, re-bind to the same
-        base, resume play (state restored by F).
-  - [ ] N bots reconnecting after a restart spread their attempts (no synchronized storm — backoff/
-        jitter assert, R22).
-  - [ ] Reconnect racing the reap binds one session, not two (one-session atomicity).
+  - [x] **Reconnect schedule:** `Reconnect.h` (`ReconnectPolicy` exponential ceiling + full-jitter
+        `DelayMs`, deterministic `JitterRng`) is proved anti-herd (`ReconnectTests`:
+        `CeilingGrowsExponentiallyThenCaps`, `FullJitterStaysWithinCeiling`, `AFleetSpreadsItsReconnects`,
+        `JitterIsDeterministicPerSeed`).
+  - [~] **Client reconnect** (`NeuronClient` session): re-run the handshake + re-present the session
+        token with the `Reconnect.h` schedule, resume from ∅ baseline (M4 cold-start). *Windows/client.*
+  - [~] **Server-side atomic reconnect:** the one-session rule handles a reconnect racing the reap —
+        `AccountStore::Login` revokes the prior session atomically and `ServerHost::KickExistingSession-
+        ForAccount` + `BindAccountBase` re-attach to the account's base with no double-spawn. *Windows.*
+  - [ ] **Rolling-restart playbook:** restart the shard (warm-restart F), clients reconnect; document
+        the drill as the §26 uptime SLA. *Pending the build agent.*
+- **Tests (`ERHeadlessTest`; policy mirrored on the testrunner):**
+  - [x] Backoff/jitter spreads a fleet's reconnects; the schedule is deterministic per seed
+        (`ReconnectTests`).
+  - [~] A bot fleet survives a warm-restart, re-binds to the same base, resumes; reconnect racing the
+        reap binds one session, not two. *Windows + SQL.*
 - **Depends on:** C, F. **Blocks:** I (the drill is part of the Done gate).
 
 ### H. Persistence & auth telemetry (§21)
@@ -294,16 +350,21 @@
   measurable — extending the M4 telemetry (§21) to the new subsystems.
 - **Masterplan refs:** §21 (outbox depth & drain latency; write-behind batch size/lag; **RPO
   watermark**; login attempts / lockouts / rate-limit hits), §16.3 (gates consumable by the harness).
-- **Current state:** net-new for persistence/auth (M4 added sim/net counters).
+- **Current state:** **written** — the aggregation core (`PersistTelemetry.h`) is testrunner-verified
+  (`PersistTelemetryTests`); the `ERServer`/`ServerHost` sampling sites + export are written,
+  Windows-unverified.
 - **Work:**
-  - [ ] **Persistence counters:** outbox depth + drain latency (D), write-behind batch size + lag +
-        **RPO watermark** (E).
-  - [ ] **Auth counters:** login attempts, lockouts, rate-limit hits (C).
-  - [ ] **Export** as structured logs + lightweight counters (MS-only), consumable by the ERHeadless
-        drill (§16.3) so the restart/zero-loss gate is automated.
-- **Tests (`ERServerTest`):**
-  - [ ] Outbox-depth / drain-latency / RPO-watermark gauges track the actual queue + write state;
-        auth counters increment on attempt/lockout.
+  - [x] **Persistence + auth counters (aggregation):** `PersistTelemetry` aggregates outbox depth +
+        drain-latency percentile (D), write-behind batch/lag + the monotonic **RPO watermark** (E), and
+        login attempts/failures/lockouts/rate-limit hits (C) — proved by `PersistTelemetryTests`
+        (`OutboxGaugesAndDrainPercentile`, `RpoWatermarkAdvancesMonotonically`, `AuthCountersIncrement`).
+  - [~] **Sampling sites:** `ServerHost::OnAuthMessage` records the auth counters at the login sites;
+        `ERServer` feeds outbox depth + RPO watermark from `PersistenceThread::Counters()` into
+        `PersistTelemetry` each loop and logs them on the heartbeat. *Windows.*
+  - [~] **Export** as structured logs + counters consumable by the ERHeadless drill (§16.3). *Windows.*
+- **Tests (`ERServerTest`; aggregation on the testrunner):**
+  - [x] Gauges/percentiles + auth counters aggregate correctly (`PersistTelemetryTests`).
+  - [~] The live gauges track the actual queue + write state on the running server. *Windows + SQL.*
 - **Depends on:** C, D, E. **Blocks:** I (the drill reads these).
 
 ### I. Integration — register/login + restart drill (the Done gate)
@@ -354,18 +415,53 @@ state stays **session-only** (never normalized, §15) and is recreated on reconn
 cold-start path. **Azure SQL + K8s + managed-identity auth are M6** (§20) — keep every statement
 Azure-SQL-compatible so that migration is a connection-string + auth change.
 
+## Remaining: `ERServer.cpp` `main()` bootstrap (Windows build agent)
+
+The components + their seams all exist; what's left is the entry-point glue, best written
+**with the compiler** (it ties together exact persist struct fields). Precise steps:
+
+```cpp
+// 1. Config + persistence thread (owns the ODBC pool; off the 30 Hz tick, §9).
+PersistConfig cfg = PersistConfig::LoadFromEnv();         // ER_DB_CONNSTR / ER_SERVER_PEPPER / cost
+PersistenceThread persist(cfg);
+persist.Start([&](int64_t nowUnix){ /* SnapshotRequest: CaptureState→EncodeState + watermark */ });
+AccountStore accounts(persist.Pool(), &crypto, cfg);
+PersistTelemetry persistTel;
+host.SetPersistDeps(&accounts, &persist, /*devAuthStub=*/false, &persistTel);
+
+// 2. Persist the CNG static server key (replace the ephemeral LoadOrGenerateStaticKey({})).
+// 3. Warm-restart on startup (stateless server):
+if (auto snap = persist.LoadLatestSnapshotForRestore()) {
+    PersistState st; if (DecodeState(snap->blob, st)) universe.RestoreState(st);
+    if (auto rows = persist.ReadOutboxSince(snap->outboxWatermark))
+        /* replay each economy row onto the restored EconomyState (idempotent, Outbox.h) */;
+}
+// 4. Per loop: host.SetUnixTime(std::time(nullptr)); feed acc.DilationFactor() to the clock echo;
+//    sample ServerTelemetry/PersistTelemetry. On shutdown: persist.Stop().
+```
+
+M4 perf items that ride here (Windows agent): swap the loop to the **IOCP listener** + per-connection
+lane affinity, and run snapshot encode via `EncodeClientsPooled` over a frozen post-tick view.
+
 ## Done gate (mirrors §17 "Done")
 
-- [ ] **Register/login works** — custom username/password, PBKDF2 + pepper + rate-limit, session
-      token over the encrypted channel (C).
-- [ ] **Kill & restart the ERServer container → universe + bases + economy restore** via warm-restart
-      (snapshot + log), ERServer stateless (F, A, B).
-- [ ] **Zero economy loss** across the restart — write-through outbox + append-only ledger, verified
-      (D, I).
-- [ ] **Connected clients reconnect cleanly** — session token + backoff/jitter, no storm, atomic
-      one-session re-bind (G, I).
-- [ ] High-frequency state restored **within the stated RPO**; economy never on the write-behind path
-      (E).
-- [ ] **§21 persistence/auth counters** wired and read by the automated drill (H).
-- [ ] All matching `<project>Test` suites green (§16.1) + Linux `testrunner` mirrors for the
-      platform-independent hashing/serde logic (§16.2); migrations apply cleanly in CI (§16.3).
+> Legend: `[x]` verified on the Linux testrunner · `[~]` written, Windows-unverified (no
+> MSBuild/ODBC/CNG/SQL here) · `[ ]` needs the Windows build agent + dev SQL Server.
+
+- [~] **Register/login works** — `ServerHost` auth flow + `AccountStore` (PBKDF2 + pepper +
+      per-account/IP rate-limit + one-session + session token) written (C); the PBKDF2 algorithm is
+      `[x]` (KAT-verified) and the CNG↔reference identity is gated by `ERServerTest`.
+- [~] **Kill & restart → universe + bases + economy restore** — `CaptureState`/`RestoreState` +
+      `SimSnapshotStore` written; the round-trip is `[x]` on the testrunner (`WarmRestartCaptureTests`),
+      the live container restart is `[ ]`.
+- [x]/[~] **Zero economy loss** — the outbox ordering/idempotent-replay contract is `[x]`
+      (`OutboxTests`) and enforced in SQL by migration 004; the live drill is `[ ]` (I).
+- [~] **Connected clients reconnect cleanly** — backoff/jitter is `[x]` (`ReconnectTests`); the
+      session-token re-bind + storm-free reconnect on a real restart is `[ ]` (G, I).
+- [~] High-frequency state restored **within RPO**; economy never on the write-behind path (E) —
+      write-behind store + RPO watermark written; bound verified on the live drill `[ ]`.
+- [x] **§21 persistence/auth counters** — `PersistTelemetry` `[x]` (`PersistTelemetryTests`);
+      live sampling sites in `ERServer.cpp` `[~]`.
+- [x] Linux `testrunner` mirrors green (§16.2) — **224 cases, 0 failed**. `[ ]` `ERServerTest` +
+      migrations-apply on the Windows agent / dev SQL (§16.3).
+- [ ] **The end-to-end kill/restart zero-loss + reconnect drill** (I) — Windows build agent + dev SQL.

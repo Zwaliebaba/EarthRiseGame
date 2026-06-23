@@ -44,7 +44,7 @@ changed, bump the masterplan first, then the plan).
 | M2 — Darwinia look + audio | [`M2-darwinia-audio.md`](M2-darwinia-audio.md) | ✅ |
 | **M3 — Core 4X loop, fleet command & navigation** | [`M3-core-4x-loop.md`](M3-core-4x-loop.md) | 🔨 **active** (areas A–H implemented; Windows client/headless glue unverified) |
 | M4 — Scale & interest | [`M4-scale-interest.md`](M4-scale-interest.md) | 🔨 pipeline complete (areas A–J platform-independent logic implemented + tested; Windows IOCP/ERServer integration + the live wall-clock perf gate remain) |
-| M5 — Accounts, auth & persistence | [`M5-accounts-persistence.md`](M5-accounts-persistence.md) | ⏳ drafted |
+| M5 — Accounts, auth & persistence | [`M5-accounts-persistence.md`](M5-accounts-persistence.md) | 🔨 implemented (portable cores verified on testrunner; ODBC/auth/warm-restart wiring written, Windows-unverified) |
 | M6 — Combat model & deployment | [`M6-combat-deployment.md`](M6-combat-deployment.md) | ⏳ drafted |
 | M7 — Sandbox: conquest, economy, PvE, onboarding | — | ⏳ |
 
