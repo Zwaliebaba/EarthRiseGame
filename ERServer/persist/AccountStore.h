@@ -19,13 +19,12 @@
 // before issuing the new token (the duplicate is kicked; reconnect is handled
 // atomically by re-binding the same account, §14).
 //
-// SCHEMA-ASSUMPTION (iteration count): Accounts has PasswordHash VARBINARY(64) +
-// PasswordSalt VARBINARY(32) but NO iterations column (schema.sql / migration 001).
-// §14 wants the cost "stored per hash so it can be raised later." Until a migration
-// adds an Iterations column, this store uses the configured constant
-// (PersistConfig.pbkdf2Iterations) for ALL hashes and records a TODO for a possible
-// migration 005 (do NOT edit Config/db here). Raising the cost without that column is
-// a one-time global rehash-on-next-login, not a per-hash bump — see VerifyAndMaybeRehash.
+// Iteration count (§14, "stored per hash so it can be raised later"):
+// Accounts.Pbkdf2Iterations (migration 005) holds the cost per account. Register
+// writes the current PersistConfig.pbkdf2Iterations; Login verifies with the account's
+// STORED cost, so raising the global default never invalidates existing hashes — a new
+// account gets the higher cost; an old one keeps verifying and can be rehashed on next
+// login (see VerifyAndMaybeRehash).
 
 #include "OdbcConnectionPool.h"
 #include "PersistConfig.h"

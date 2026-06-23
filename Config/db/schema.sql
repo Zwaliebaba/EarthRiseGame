@@ -43,6 +43,7 @@ CREATE TABLE Accounts (
     PasswordHash    VARBINARY(64)   NOT NULL,   -- PBKDF2-HMAC-SHA512 output
     PasswordSalt    VARBINARY(32)   NOT NULL,   -- per-account random salt
     -- Server pepper is applied in-process; never stored here.
+    Pbkdf2Iterations INT            NOT NULL DEFAULT 210000, -- §14 cost, stored per hash (raisable; migration 005)
     CreatedAt       DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
     LastLoginAt     DATETIME2       NULL,
     Status          TINYINT         NOT NULL DEFAULT 0,  -- 0=active 1=banned 2=suspended

@@ -125,11 +125,14 @@ AuthResult AccountStore::Register(std::string_view username, std::string_view pa
         SqlParam::Make(username),
         SqlParam::Make(std::span<const uint8_t>(hash.data(), hash.size())),
         SqlParam::Make(std::span<const uint8_t>(salt.data(), salt.size())),
+        SqlParam::Make(static_cast<int64_t>(m_cfg.pbkdf2Iterations)),
     };
-    // SCHEMA-ASSUMPTION: no Iterations column — see header TODO (migration 005). The
-    // configured constant is used for every hash for now.
+    // The PBKDF2 cost is stored PER ACCOUNT (§14, "high + tunable, stored per hash";
+    // Accounts.Pbkdf2Iterations, migration 005) so the global default can be raised
+    // later without invalidating existing hashes — Login verifies with the stored cost.
     auto accountId = lease->ExecInsertReturningIdentity(
-        "INSERT INTO Accounts (Username, PasswordHash, PasswordSalt) VALUES (?, ?, ?)",
+        "INSERT INTO Accounts (Username, PasswordHash, PasswordSalt, Pbkdf2Iterations) "
+        "VALUES (?, ?, ?, ?)",
         acctParams);
 
     if (!accountId) {
@@ -193,9 +196,9 @@ AuthResult AccountStore::Login(std::string_view username, std::string_view passw
         "SELECT AccountId, PasswordHash, PasswordSalt, Status, LoginFailures, "
         "       CASE WHEN LockedUntil IS NULL THEN 0 "
         "            ELSE DATEDIFF_BIG(SECOND, '1970-01-01', LockedUntil) END, "
-        "       CAST(TutorialDone AS INT) "
+        "       CAST(TutorialDone AS INT), Pbkdf2Iterations "
         "FROM Accounts WHERE Username = ?",
-        sel, 7);
+        sel, 8);
     if (!res)
         return AuthResult::DbUnavailable;
 
@@ -224,6 +227,7 @@ AuthResult AccountStore::Login(std::string_view username, std::string_view passw
     const int64_t status      = cellI64(3);
     const int64_t lockedUntil = cellI64(5);
     const bool    tutorialDone = cellI64(6) != 0;
+    const int64_t storedIters = cellI64(7); // per-account PBKDF2 cost (migration 005)
 
     if (status != 0) // 1=banned 2=suspended
         return AuthResult::AccountBanned;
@@ -236,7 +240,12 @@ AuthResult AccountStore::Login(std::string_view username, std::string_view passw
 
     // Verify the password. Re-hash the candidate with the stored salt + in-process
     // pepper and compare constant-time.
-    const auto candidate = HashPassword(password, storedSalt, m_cfg.pbkdf2Iterations);
+    // Verify with the account's STORED cost (not the current default), so raising the
+    // global cost never locks out existing users (§14). Fall back to the configured
+    // value only if the column is somehow absent/0.
+    const auto candidate = HashPassword(
+        password, storedSalt,
+        storedIters > 0 ? static_cast<uint32_t>(storedIters) : m_cfg.pbkdf2Iterations);
     const bool match = (storedHash.size() == kPwHashBytes) &&
                        ConstTimeEqual(std::span<const uint8_t>(candidate.data(), candidate.size()),
                                       storedHash);
