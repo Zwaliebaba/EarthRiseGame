@@ -1,10 +1,51 @@
 # M6 — Combat Model & Deployment (Implementation Plan)
 
 > Derived from [`../masterplan.md`](../masterplan.md) §17 (milestone **M6**).
-> **Status:** ⏳ Not started — **drafted ahead** (M5 is the next active plan). Per
-> [`README.md`](README.md) rule 2 this plan is **subordinate to the masterplan** and is
-> **re-confirmed against it when M6 goes active** — M5's actual landing (auth/persist surfaces,
-> the schema's final M6 columns) may shift details here.
+> **Status:** 🔨 **Combat track implemented** — the platform-independent **combat model
+> (areas A–G)** and the **balance-gate sim half (area M)** are landed in `NeuronCore` and
+> **green on the Linux `testrunner`** (§16.2). The **Windows / real-infra halves — client
+> VFX/SFX (H), optional prediction (I), Azure SQL (J), Kubernetes (K), the Store pass (L)**
+> and the **deployed-stack** half of the balance gate (M) — are **not started** (they
+> can't be compiled/exercised off a Windows agent). Per [`README.md`](README.md) rule 2
+> this plan stays **subordinate to the masterplan**.
+>
+> **Implementation status (this pass):**
+> - ✅ **A** Combat catalog as game data — `NeuronCore/CombatData.h` (model + versioned
+>   codec + `ValidateCombatCatalog`/`ValidateFit` rules + the authored first-pass
+>   `DefaultCombatCatalog`, the §15 catalog/balance boundary); shared primitives in
+>   `CombatTypes.h`. Tests: `CombatDataTests`. *(A bespoke text-DSL cook tool under
+>   `NeuronTools/datacook/` is deferred — the authored catalog + binary codec + validator
+>   already make balance data, not code; the cooked-blob loader `LoadCombatFromCooked` exists.)*
+> - ✅ **B** Layered defense + fitting ECS — `DefenseLayers`/`ResistProfile`/`Fitting`/
+>   `HullInfo`/`EwarStatus`/`Projectile`/`LootContainer`/`BaseCombat` components;
+>   `Health` kept as a synced derived **mirror** (= layer totals) so the wire/SimHash/HUD/
+>   M5-persistence surfaces are unchanged. `ServerUniverse::InstallFit` spawns from the
+>   catalog. Tests: `FittingTests`. *(Projectile/loot persistence across a warm restart is
+>   deferred — they are snapshot-shaped replicated entities but sub-second/transient, and
+>   extending the frozen M5 `PersistState` blob was out of scope; base `BaseState` IS
+>   persisted, area G.)*
+> - ✅ **C** Damage & defense sim rules — `NeuronCore/Combat.h` (`ApplyDamage` through three
+>   layers + resists, tracking/falloff, shield regen, remote rep), pure + deterministic.
+>   Tests: `CombatTests`.
+> - ✅ **D** Weapons & projectiles with local sub-stepping (ballistic, anti-tunneling).
+>   Tests: `ProjectileTests`.
+> - ✅ **E** EWAR & logistics — jam/web/warp-disrupt(tackle→interdiction)/sensor-damp +
+>   remote rep. Tests: `EwarLogiTests`.
+> - ✅ **F** PvE AI on the real model — fitted NPCs, target priority (primary the logi/EWAR),
+>   hull-threshold flee. Tests: `CombatScenarioTests` + the extended `FleetTests`.
+> - ✅ **G** Loot-on-kill + base disable-not-destroy — loot containers + killmail +
+>   cargo-loss as drainable economy events (→ M5 outbox), base retreats→disabled and is
+>   never destroyed, state persisted. Tests: `CombatScenarioTests`.
+> - ✅ **M (sim half)** Balance gates — composition > numbers, damage-type-vs-tank counter,
+>   logi sustain, swarm-vs-heavy size RPS, and a mistune-bites-the-gate check, run as
+>   deterministic focus-fire fleet sims on the `testrunner`. Tests: `BalanceTests`. *(The
+>   statistical N-sim win-rate BANDS run on the Windows ERHeadless agent against the
+>   deployed stack — that half is not started.)*
+> - ⏳ **H, I, J, K, L** and the deployed-stack half of **M** — **not started** (Windows /
+>   Azure / K8s / Store / live client, unverifiable in this Linux environment).
+>
+> The Windows MSTest projects get the new component **bindings** (so they still build); the
+> combat **test cases** live on the `testrunner` (the §16.2 mirror, the verifiable gate here).
 > **Plan style:** feature-area sections (see [`README.md`](README.md)).
 > **Verification:** M6 has two halves with different test homes. The **combat model** (areas
 > A–G) is platform-independent shared-sim logic → it lands with `NeuronCoreTest` + Linux

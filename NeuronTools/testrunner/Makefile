@@ -14,7 +14,9 @@ CXXFLAGS ?= -std=c++23 -Wall -Wextra -Wpedantic -O2 -g -I../../NeuronCore -I../.
 
 SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParseTests.cpp \
         CmoAnimationTests.cpp ShapeCatalogTests.cpp UiLayoutTests.cpp StringTableTests.cpp \
-        UniverseDataTests.cpp NavigationTests.cpp EconomyTests.cpp HarvestTests.cpp \
+        UniverseDataTests.cpp CombatDataTests.cpp CombatTests.cpp FittingTests.cpp \
+        ProjectileTests.cpp EwarLogiTests.cpp CombatScenarioTests.cpp BalanceTests.cpp \
+        NavigationTests.cpp EconomyTests.cpp HarvestTests.cpp \
         FleetTests.cpp ClientFleetTests.cpp DeterminismTests.cpp InterestTests.cpp \
         SnapshotDeltaTests.cpp SnapshotSchedulerTests.cpp SnapshotJobsTests.cpp \
         TimeDilationTests.cpp TelemetryTests.cpp ConnectionTableTests.cpp \

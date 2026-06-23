@@ -36,6 +36,15 @@ NEURON_DEFINE_COMPONENT(Neuron::Sim::HarvestOrder, Neuron::Sim::Slot_HarvestOrde
 NEURON_DEFINE_COMPONENT(Neuron::Sim::FleetOrder, Neuron::Sim::Slot_FleetOrder);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::Weapon, Neuron::Sim::Slot_Weapon);
 NEURON_DEFINE_COMPONENT(Neuron::Sim::NpcAi, Neuron::Sim::Slot_NpcAi);
+// M6 combat model (areas B–G).
+NEURON_DEFINE_COMPONENT(Neuron::Sim::DefenseLayers, Neuron::Sim::Slot_DefenseLayers);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::ResistProfile, Neuron::Sim::Slot_ResistProfile);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::Fitting, Neuron::Sim::Slot_Fitting);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::EwarStatus, Neuron::Sim::Slot_EwarStatus);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::Projectile, Neuron::Sim::Slot_Projectile);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::LootContainer, Neuron::Sim::Slot_LootContainer);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::BaseCombat, Neuron::Sim::Slot_BaseCombat);
+NEURON_DEFINE_COMPONENT(Neuron::Sim::HullInfo, Neuron::Sim::Slot_HullInfo);
 
 ER_TEST(ShapeCatalog, CountAndSequentialIds)
 {

@@ -37,19 +37,28 @@ namespace Neuron::Sim
     return alignSeconds + static_cast<float>(distance / static_cast<double>(warpSpeed));
 }
 
+// Step a bare position toward 'target' by up to 'maxStep' metres. Pure/deterministic;
+// used by projectile sub-stepping (Combat.h, M6 area D) and the Transform overload.
+// Returns true once it lands exactly on 'target' (the step covered the gap).
+inline bool StepToward(Neuron::Universe::UniversePos& pos, const Neuron::Universe::UniversePos& target,
+                       double maxStep) noexcept
+{
+    const double dist = UniverseDistance(pos, target);
+    if (dist <= 0.0) return true;
+    const double step = (maxStep >= dist) ? dist : maxStep;
+    const double frac = step / dist;
+    pos.x += static_cast<int64_t>(std::llround(static_cast<double>(target.x - pos.x) * frac));
+    pos.y += static_cast<int64_t>(std::llround(static_cast<double>(target.y - pos.y) * frac));
+    pos.z += static_cast<int64_t>(std::llround(static_cast<double>(target.z - pos.z) * frac));
+    return step >= dist;
+}
+
 // Step a Transform toward 'target' by up to 'maxStep' metres (sublight travel —
 // used by the harvest auto-pilot, area C). Snaps + clears the local offset on
 // arrival. Pure/deterministic.
 inline void StepToward(Transform& tr, const Neuron::Universe::UniversePos& target, double maxStep) noexcept
 {
-    const double dist = UniverseDistance(tr.pos, target);
-    if (dist <= 0.0) return;
-    const double step = (maxStep >= dist) ? dist : maxStep;
-    const double frac = step / dist;
-    tr.pos.x += static_cast<int64_t>(std::llround(static_cast<double>(target.x - tr.pos.x) * frac));
-    tr.pos.y += static_cast<int64_t>(std::llround(static_cast<double>(target.y - tr.pos.y) * frac));
-    tr.pos.z += static_cast<int64_t>(std::llround(static_cast<double>(target.z - tr.pos.z) * frac));
-    if (step >= dist) tr.localOffset = { 0.0f, 0.0f, 0.0f };
+    if (StepToward(tr.pos, target, maxStep)) tr.localOffset = { 0.0f, 0.0f, 0.0f };
 }
 
 // Why a jump request was rejected (server validation, §8.4).
