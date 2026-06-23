@@ -24,8 +24,10 @@ changed, bump the masterplan first, then the plan).
 2. **Scoped, not exhaustive.** A plan covers exactly one milestone's *Done* gate (§17). M4,
    M5 and M6 are **drafted ahead** (from §17 + the §8.4/§9/§13/§14/§15/§20/§25 specs) as
    forward-looking roadmaps; they stay subordinate to the masterplan and are **re-confirmed against
-   it when each goes active** (its predecessor's actual landing may shift details). Don't draft M7
-   until it's next.
+   it when each goes active** (its predecessor's actual landing may shift details). **M7 is now
+   also drafted ahead** (`M7-sandbox-conquest.md`) as a forward-looking roadmap on the same terms —
+   subordinate to the masterplan and re-confirmed against it (and against M6's landing) when it
+   goes active.
 3. **Every feature ships with its test in the same commit** (masterplan §16.1). Each work
    item names the `<project>Test` cases that gate it. A feature isn't done until its tests
    pass.
@@ -46,7 +48,7 @@ changed, bump the masterplan first, then the plan).
 | M4 — Scale & interest | [`M4-scale-interest.md`](M4-scale-interest.md) | 🔨 pipeline complete + all server-loop wiring written (areas A–J logic tested on testrunner; `ERServer`/`ServerHost` IOCP receive, pooled encode, dilation echo + telemetry sites written, Windows-unverified; only the live wall-clock contested-sector perf gate remains) |
 | M5 — Accounts, auth & persistence | [`M5-accounts-persistence.md`](M5-accounts-persistence.md) | 🔨 implemented (portable cores verified on testrunner; ODBC/auth/warm-restart wiring + the `ERServer` bootstrap written, Windows-unverified; only the live kill/restart zero-loss drill on the build agent + dev SQL remains) |
 | M6 — Combat model & deployment | [`M6-combat-deployment.md`](M6-combat-deployment.md) | ⏳ drafted |
-| M7 — Sandbox: conquest, economy, PvE, onboarding | — | ⏳ |
+| M7 — Sandbox: conquest, economy, PvE, onboarding | [`M7-sandbox-conquest.md`](M7-sandbox-conquest.md) | ⏳ drafted ahead |
 
 ### Side tracks
 
