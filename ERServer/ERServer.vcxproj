@@ -93,12 +93,30 @@
   <ItemGroup>
     <ClCompile Include="ERServer.cpp" />
     <ClCompile Include="IocpUdpListener.cpp" />
+    <!-- M5 persistence layer (ODBC, area A/C/D/E/F) — Windows/ODBC, unverified on Linux. -->
+    <ClCompile Include="persist\PersistConfig.cpp" />
+    <ClCompile Include="persist\OdbcConnection.cpp" />
+    <ClCompile Include="persist\OdbcConnectionPool.cpp" />
+    <ClCompile Include="persist\AccountStore.cpp" />
+    <ClCompile Include="persist\EconomyStore.cpp" />
+    <ClCompile Include="persist\WriteBehindStore.cpp" />
+    <ClCompile Include="persist\SimSnapshotStore.cpp" />
+    <ClCompile Include="persist\PersistenceThread.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="IocpUdpListener.h" />
+    <ClInclude Include="persist\PersistConfig.h" />
+    <ClInclude Include="persist\OdbcConnection.h" />
+    <ClInclude Include="persist\OdbcConnectionPool.h" />
+    <ClInclude Include="persist\PersistQueue.h" />
+    <ClInclude Include="persist\AccountStore.h" />
+    <ClInclude Include="persist\EconomyStore.h" />
+    <ClInclude Include="persist\WriteBehindStore.h" />
+    <ClInclude Include="persist\SimSnapshotStore.h" />
+    <ClInclude Include="persist\PersistenceThread.h" />
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>
