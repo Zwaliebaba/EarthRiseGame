@@ -27,7 +27,7 @@ namespace Neuron::Render
 class DeviceResources
 {
 public:
-    static constexpr UINT kFrameCount = 2; // double-buffered
+    static constexpr UINT kFrameCount = 3; // triple-buffered (frames in flight = 3, §11.1)
 
     bool Initialize(IUnknown* coreWindow, UINT width, UINT height);
     void Resize(UINT width, UINT height);
