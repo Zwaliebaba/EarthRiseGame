@@ -99,6 +99,21 @@ public:
                 uint32_t iterations,
                 std::span<uint8_t> out) override;
 
+    // M5 area C (§14): raw PBKDF2-HMAC-SHA512 with NO pepper handling — the exact
+    // RFC-2898 KDF. This is the CNG (BCryptDeriveKeyPBKDF2 + BCRYPT_SHA512_ALG_HANDLE)
+    // production path that MUST be byte-identical to the verified portable reference
+    // Neuron::Crypto::Pbkdf2HmacSha512 (NeuronCore/Pbkdf2.h) for the same
+    // (password, salt, iterations, dkLen) — cross-checked in ERServerTest so the two
+    // implementations can never silently diverge. The server pepper is applied by the
+    // caller (AccountStore appends it to the password before calling), never here and
+    // never stored (§14). Unlike the legacy ICrypto::Pbkdf2 above (which *prepends* a
+    // pepper argument), this method takes the password verbatim.
+    [[nodiscard]] std::vector<uint8_t>
+    Pbkdf2HmacSha512(std::span<const uint8_t> password,
+                     std::span<const uint8_t> salt,
+                     uint32_t iterations,
+                     size_t dkLen);
+
     void RandomBytes(std::span<uint8_t> out) override;
 
     // Tag/nonce layout constants (documented; used by the connection layer too).
