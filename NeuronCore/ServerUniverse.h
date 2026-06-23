@@ -12,6 +12,8 @@
 // exactly one TU per executable: SimComponents.cpp for ERServer/ERHeadless, and
 // the test TU for the test runner.
 
+#include "Combat.h"
+#include "CombatData.h"
 #include "Command.h"
 #include "Components.h"
 #include "Economy.h"
@@ -70,6 +72,15 @@ public:
         m_world.RegisterComponent<FleetOrder>();
         m_world.RegisterComponent<Weapon>();
         m_world.RegisterComponent<NpcAi>();
+        // M6 combat model (areas B–G).
+        m_world.RegisterComponent<DefenseLayers>();
+        m_world.RegisterComponent<ResistProfile>();
+        m_world.RegisterComponent<Fitting>();
+        m_world.RegisterComponent<EwarStatus>();
+        m_world.RegisterComponent<Projectile>();
+        m_world.RegisterComponent<LootContainer>();
+        m_world.RegisterComponent<BaseCombat>();
+        m_world.RegisterComponent<HullInfo>();
         if (seedDemoContent) {
             SpawnScenery();
             SpawnDemoSeed();
@@ -109,7 +120,6 @@ public:
         v.metresPerSecond = ClampSpeed(vel, kMaxBaseSpeed);
         m_world.AddComponent<NetId>(e).value = netId;
         m_world.AddComponent<BaseTag>(e);
-        m_world.AddComponent<Health>(e) = { 1000, 1000 };
         m_world.AddComponent<ShapeId>(e) = { BaseShapeId(), EntityKind::Base };
         m_world.AddComponent<Fuel>(e)    = { m_nav.baseFuelMax, m_nav.baseFuelMax };
         m_world.AddComponent<NavState>(e);
@@ -117,6 +127,10 @@ public:
         m_world.AddComponent<Storage>(e).capacity = m_economy.storageCapacity;
         m_world.AddComponent<BuildQueue>(e);
         m_world.AddComponent<Sensor>(e).range     = m_economy.sensorRangeBase;
+        m_world.AddComponent<BaseCombat>(e);                  // disable-not-destroy state (§13.1)
+        // The capital fit = fire-support + light defensive weapons (§13.1 first pass);
+        // installs layered HP + resists + the fitting grid + the synced Health mirror.
+        InstallFit(e, "base-firesupport");
         m_netIdToEntity[netId] = e;
         return netId;
     }
@@ -198,6 +212,33 @@ public:
         return true;
     }
 
+    // --- combat catalog (M6 area A) -----------------------------------------
+
+    // Replace the active combat catalog (hulls/modules/fits). This is the §26
+    // live-ops HOT-RELOAD hook: balance/pacing can change without a code change or a
+    // redeploy. Only AFFECTS units spawned afterward (existing fits are immutable).
+    void LoadCombat(CombatCatalog c) { m_combat = std::move(c); }
+
+    // Decode + load a cooked combat catalog (NeuronTools combat datacook output).
+    bool LoadCombatFromCooked(std::span<const uint8_t> blob)
+    {
+        auto c = DecodeCombatCatalog(blob);
+        if (!c) return false;
+        m_combat = std::move(*c);
+        return true;
+    }
+    [[nodiscard]] const CombatCatalog& Combat() const noexcept { return m_combat; }
+
+    // Combat tunables (the §19 open questions; area-M balance gates sweep them).
+    void SetProjectileSubSteps(int n) noexcept { m_projectileSubSteps = n < 1 ? 1 : n; }
+    [[nodiscard]] int  ProjectileSubSteps() const noexcept { return m_projectileSubSteps; }
+    void SetBaseRetreatHullFrac(float f) noexcept { m_baseRetreatHullFrac = f; }
+    void SetBaseRetreatSeconds(float s) noexcept { m_baseRetreatSeconds = s; }
+    // Disable the combat systems (weapons/EWAR/projectiles/regen/retreat) — used by the
+    // M4 replication load harness, which packs many mutually-hostile bases into one
+    // sector purely to stress the snapshot pipeline, not to fight.
+    void SetCombatEnabled(bool on) noexcept { m_combatEnabled = on; }
+
     // Begin a server-validated warp to a universe position. False if the unit
     // can't warp now (unknown id / already travelling).
     bool BeginWarpTo(uint32_t netId, Neuron::Universe::UniversePos dest)
@@ -268,6 +309,16 @@ public:
     // new net id, or 0 if the player is already at cap.
     uint32_t SpawnFleetShip(uint32_t player, uint16_t shapeId, Neuron::Universe::UniversePos pos)
     {
+        return SpawnFleetShipFit(player, shapeId, pos, kDefaultShipFit);
+    }
+
+    // Spawn a ship owned by 'player' with a NAMED catalog fit (area A/B/F). The fit
+    // installs the layered HP + resists + the fitting grid + the derived weapon
+    // summary + the synced Health mirror (combat-balance.md §6). Returns 0 at cap or
+    // if the fit/hull is unknown (server-authoritative — no over-budget fit, §8.4).
+    uint32_t SpawnFleetShipFit(uint32_t player, uint16_t shapeId, Neuron::Universe::UniversePos pos,
+                               std::string_view fitName)
+    {
         if (OwnedShipCount(player) >= m_economy.fleetCap) return 0;
         const ShapeDef* def = ShapeById(shapeId);
         const uint32_t netId = m_nextNetId++;
@@ -283,9 +334,8 @@ public:
         m_world.AddComponent<NavState>(e);
         m_world.AddComponent<Sensor>(e).range     = m_economy.sensorRangeShip;
         m_world.AddComponent<FleetMember>(e);
-        m_world.AddComponent<Health>(e)  = { kShipHp, kShipHp };
         m_world.AddComponent<FleetOrder>(e);
-        m_world.AddComponent<Weapon>(e)  = { kShipWeaponRange, kShipWeaponDps }; // placeholder (M6)
+        if (!InstallFit(e, fitName)) InstallFit(e, kDefaultShipFit); // resilient to a bad name
         m_netIdToEntity[netId] = e;
         return netId;
     }
@@ -362,13 +412,72 @@ public:
     [[nodiscard]] NpcAi*      NpcAiOf(uint32_t netId)      { return m_world.GetComponent<NpcAi>(EntityOf(netId)); }
     [[nodiscard]] Weapon*     WeaponOf(uint32_t netId)     { return m_world.GetComponent<Weapon>(EntityOf(netId)); }
 
+    // --- combat accessors (M6 areas B–G; tests / diagnostics) ----------------
+    [[nodiscard]] DefenseLayers* DefenseOf(uint32_t netId) { return m_world.GetComponent<DefenseLayers>(EntityOf(netId)); }
+    [[nodiscard]] ResistProfile* ResistOf(uint32_t netId)  { return m_world.GetComponent<ResistProfile>(EntityOf(netId)); }
+    [[nodiscard]] Fitting*       FittingOf(uint32_t netId) { return m_world.GetComponent<Fitting>(EntityOf(netId)); }
+    [[nodiscard]] EwarStatus*    EwarOf(uint32_t netId)    { return m_world.GetComponent<EwarStatus>(EntityOf(netId)); }
+    [[nodiscard]] HullInfo*      HullInfoOf(uint32_t netId){ return m_world.GetComponent<HullInfo>(EntityOf(netId)); }
+    [[nodiscard]] BaseCombat*    BaseCombatOf(uint32_t netId){ return m_world.GetComponent<BaseCombat>(EntityOf(netId)); }
+    [[nodiscard]] LootContainer* LootOf(uint32_t netId)    { return m_world.GetComponent<LootContainer>(EntityOf(netId)); }
+
+    // Net ids of all live loot containers (overview / claim UI / tests).
+    [[nodiscard]] std::vector<uint32_t> LootContainerIds()
+    {
+        std::vector<uint32_t> out;
+        m_world.ForEach<LootContainer, NetId>([&](LootContainer&, NetId& id) { out.push_back(id.value); });
+        return out;
+    }
+    // Net ids of a unit's projectiles in flight (R16 cap evidence / tests).
+    [[nodiscard]] size_t ProjectileCount()
+    {
+        size_t n = 0;
+        m_world.ForEach<Projectile>([&](Projectile&) { ++n; });
+        return n;
+    }
+
+    // Recover a loot container into a claimer's cargo (an economy event → outbox, §15).
+    // Transfers up to the claimer's free cargo space; removes the container; emits one
+    // LootClaim event (zero-loss / idempotent reconciliation is the M5 outbox's job).
+    bool ClaimLoot(uint32_t claimerNetId, uint32_t containerNetId)
+    {
+        LootContainer* lc = m_world.GetComponent<LootContainer>(EntityOf(containerNetId));
+        Cargo*         cg = m_world.GetComponent<Cargo>(EntityOf(claimerNetId));
+        if (!lc || !cg) return false;
+        int32_t value = 0;
+        for (int i = 0; i < kResourceSlots; ++i) {
+            float used = 0.0f; for (int j = 0; j < kResourceSlots; ++j) used += cg->amount[j];
+            const float space = cg->capacity - used;
+            const float take  = std::min(lc->items[i], std::max(0.0f, space));
+            cg->amount[i] += take;
+            lc->items[i]  -= take;
+            value += static_cast<int32_t>(take);
+        }
+        DestroyUnit(containerNetId);
+        m_econEvents.push_back({ EconEventType::LootClaim, containerNetId, claimerNetId, value, m_tick });
+        return true;
+    }
+
+    // --- economy events + killmails (area G; ERServer feeds the M5 outbox) ----
+    enum class EconEventType : uint8_t { LootDrop = 0, LootClaim = 1, Killmail = 2, CargoLost = 3 };
+    struct EconEvent { EconEventType type; uint32_t aNetId; uint32_t bNetId; int32_t value; uint32_t tick; };
+    struct Killmail  { uint32_t victimNetId; uint32_t killerNetId; uint8_t victimKind; int32_t value; uint32_t tick; };
+
+    // Drain the loot/kill/cargo-loss economy events since the last call (→ M5 write-
+    // through outbox, zero-loss, §15) and the killmail log (→ KillmailLog + §24 notify).
+    [[nodiscard]] std::vector<EconEvent> DrainEconEvents() { return std::exchange(m_econEvents, {}); }
+    [[nodiscard]] std::vector<Killmail>  DrainKillmails()  { return std::exchange(m_killmails, {}); }
+    // Drain base low-hull → retreat alerts (area H client SFX/UI hook, §11.3).
+    [[nodiscard]] std::vector<uint32_t>  DrainLowHullAlerts() { return std::exchange(m_lowHullAlerts, {}); }
+
     // --- basic PvE NPC site (§13.7; area F) ----------------------------------
 
     // Spawn a hand-placed guardian site: 'count' NPC units in a deterministic ring
     // of 'radius' around 'center', each defending the site. Returns a site id; the
     // site is "cleared" once every guardian is destroyed (DrainClearedSites). NPCs
     // are server ECS entities (OwnerId.player == 0), distinct from ERHeadless bots.
-    uint16_t SpawnNpcSite(Neuron::Universe::UniversePos center, int count, float radius = 1200.0f)
+    uint16_t SpawnNpcSite(Neuron::Universe::UniversePos center, int count, float radius = 1200.0f,
+                          std::string_view fitName = kNpcFit)
     {
         const uint16_t siteId = m_nextSiteId++;
         int& alive = m_siteAlive[siteId];
@@ -379,7 +488,7 @@ public:
             const int64_t ox = static_cast<int64_t>(std::llround(std::cos(ang) * static_cast<double>(radius)));
             const int64_t oz = static_cast<int64_t>(std::llround(std::sin(ang) * static_cast<double>(radius)));
             const Neuron::Universe::UniversePos pos{ center.x + ox, center.y, center.z + oz };
-            SpawnNpcGuardian(pos, siteId);
+            SpawnNpcGuardian(pos, siteId, fitName);
             ++alive;
         }
         return siteId;
@@ -480,17 +589,30 @@ public:
     }
 
     // Advance the simulation one fixed step. Order is fixed for determinism (§7.2):
-    // AI sets NPC orders, fleet orders steer, combat applies damage + removes the
-    // dead, then movement/navigation/economy integrate.
+    // AI sets NPC orders + target priority; EWAR/logistics apply debuffs + remote rep;
+    // fleet orders steer (web-slowed); weapons fire (hitscan + projectiles); projectiles
+    // sub-step and resolve; shields regen + EWAR decays; the base disable-not-destroy
+    // check runs; then movement/navigation/economy integrate; finally the Health mirror
+    // is synced and replication/interest are stamped.
     void Step(float dtSeconds)
     {
         AiSystem(dtSeconds);
-        FleetOrderSystem(dtSeconds);
-        CombatSystem(dtSeconds);
+        if (m_combatEnabled) {        // the M4 replication load harness runs combat-free
+            EwarLogiSystem(dtSeconds);    // EWAR debuffs + remote rep (area E)
+            FleetOrderSystem(dtSeconds);  // steer (web-slowed)
+            CombatSystem(dtSeconds);      // weapons fire → hitscan damage / projectile spawn (area D)
+            ProjectileSystem(dtSeconds);  // advance projectiles, sub-step intercept → damage (area D)
+            RegenSystem(dtSeconds);       // shield regen + EWAR-timer decay (area C/E)
+            BaseRetreatSystem();          // disable-not-destroy (area G)
+        } else {
+            FleetOrderSystem(dtSeconds);  // steering still runs (movement is not combat)
+        }
         MovementSystem(m_world, dtSeconds);
         NavigationSystem(m_world, m_nav, dtSeconds);
         HarvestSystem(dtSeconds);
         BuildSystem(dtSeconds);
+        SyncHealthMirror();           // Health mirror ← DefenseLayers (areas B/C)
+        m_simTime += static_cast<double>(dtSeconds);
         ++m_tick;
         StampReplication();
         UpdateInterest();
@@ -843,7 +965,11 @@ public:
                     for (int i = 0; i < kResourceSlots; ++i) b.storage[i] = st->amount[i];
                 if (const Fuel* f = GetC<Fuel>(id.value)) b.fuel = f->current;
                 if (const NavState* n = GetC<NavState>(id.value)) b.navPhase = static_cast<uint8_t>(n->phase);
-                b.baseState = 0; // disable-not-destroy state is M6; active at M3
+                // Disable-not-destroy state (§13.1, area G) — persisted so a restart keeps
+                // a retreating/disabled base in that state (the Health mapping above stays
+                // the M5 mirror convention: hullHp = total cur, shield/armor = total max).
+                const BaseCombat* bc = GetC<BaseCombat>(id.value);
+                b.baseState = bc ? static_cast<uint8_t>(bc->state) : 0;
                 s.bases.push_back(b);
             });
 
@@ -908,6 +1034,10 @@ public:
         m_known.clear();
         m_lastSent.clear();
         m_buildCompleted.clear();
+        m_econEvents.clear();
+        m_killmails.clear();
+        m_lowHullAlerts.clear();
+        m_simTime = 0.0;
 
         m_tick = static_cast<uint32_t>(state.tick);
         uint32_t maxNetId = 0;
@@ -918,7 +1048,6 @@ public:
             m_world.AddComponent<Velocity>(e);
             m_world.AddComponent<NetId>(e).value = b.netId;
             m_world.AddComponent<BaseTag>(e);
-            m_world.AddComponent<Health>(e) = { b.hullHp, b.shieldHp }; // shield seeded == maxHp
             m_world.AddComponent<ShapeId>(e) = { BaseShapeId(), EntityKind::Base };
             auto& fuel = m_world.AddComponent<Fuel>(e);
             fuel = { b.fuel, m_nav.baseFuelMax };
@@ -937,6 +1066,13 @@ public:
                     break;
                 }
             }
+            // Combat: the disable-not-destroy state + the capital fit, then restore the
+            // persisted Health mirror over the fit's full defaults (the layered split is
+            // not separately persisted under the M5 mirror convention, §15 — a restarted
+            // base recovers combat HP on its first tick; baseState IS preserved).
+            m_world.AddComponent<BaseCombat>(e).state = static_cast<BaseState>(b.baseState);
+            InstallFit(e, "base-firesupport");
+            if (Health* h = m_world.GetComponent<Health>(e)) { h->hp = b.hullHp; h->maxHp = b.shieldHp; }
             m_netIdToEntity[b.netId] = e;
             maxNetId = std::max(maxNetId, b.netId);
         }
@@ -956,9 +1092,9 @@ public:
             m_world.AddComponent<NavState>(e);
             m_world.AddComponent<Sensor>(e).range = m_economy.sensorRangeShip;
             m_world.AddComponent<FleetMember>(e);
-            m_world.AddComponent<Health>(e) = { sh.hp, kShipHp };
             m_world.AddComponent<FleetOrder>(e);
-            m_world.AddComponent<Weapon>(e) = { kShipWeaponRange, kShipWeaponDps };
+            InstallFit(e, kDefaultShipFit); // layered HP + resists + fitting + Health mirror
+            if (Health* h = m_world.GetComponent<Health>(e)) h->hp = sh.hp; // restore mirror cur
             m_netIdToEntity[sh.netId] = e;
             maxNetId = std::max(maxNetId, sh.netId);
         }
@@ -973,9 +1109,9 @@ public:
             m_world.AddComponent<ShipTag>(e).shipType = 0;
             m_world.AddComponent<ShapeId>(e) = { ShipShapeId(), EntityKind::NpcUnit };
             m_world.AddComponent<OwnerId>(e).player = 0;
-            m_world.AddComponent<Health>(e) = { n.hp, kNpcHp };
             m_world.AddComponent<FleetOrder>(e);
-            m_world.AddComponent<Weapon>(e) = { kNpcWeaponRange, kNpcWeaponDps };
+            InstallFit(e, kNpcFit);
+            if (Health* h = m_world.GetComponent<Health>(e)) h->hp = n.hp; // restore mirror cur
             auto& ai = m_world.AddComponent<NpcAi>(e);
             ai.state      = static_cast<AiState>(n.aiState);
             ai.home       = { n.x, n.y, n.z };
@@ -992,19 +1128,15 @@ public:
 
     static constexpr float kMaxBaseSpeed = 50.0f; // m/s cap (server validates intents)
 
-    // Placeholder fleet/combat balance (§13.7) — flat damage to Health, no fitting/
-    // resists; the real model + data-driven tuning land at M6. Kept as named code
-    // constants on purpose: M3 only needs "a fleet can clear a basic NPC site".
-    static constexpr float   kFleetMoveSpeed  = 2000.0f; // m/s commanded-ship sublight
-    static constexpr int32_t kShipHp          = 500;
-    static constexpr float   kShipWeaponRange = 1500.0f;
-    static constexpr float   kShipWeaponDps   = 60.0f;
-    static constexpr int32_t kNpcHp           = 300;
-    static constexpr float   kNpcWeaponRange  = 1400.0f;
-    static constexpr float   kNpcWeaponDps    = 20.0f;
+    // Movement / AI constants. The combat BALANCE is now game data (CombatData.h, §15);
+    // these are sim-shape constants (fallback speed, NPC sensing), not balance literals.
+    static constexpr float   kFleetMoveSpeed  = 2000.0f; // fallback m/s if a unit has no HullInfo
     static constexpr float   kNpcAggroRange   = 6000.0f;
     static constexpr float   kNpcFleeHpFrac   = 0.15f;
     static constexpr float   kScanSeconds     = 3.0f; // dwell to reveal a contact (area E)
+    // Default catalog fits (combat-balance.md §6) referenced by spawns / bots by name.
+    static constexpr std::string_view kDefaultShipFit = "fighter-kin";
+    static constexpr std::string_view kNpcFit         = "fighter-kin";
 
 private:
     [[nodiscard]] Neuron::ECS::EntityHandle EntityOf(uint32_t netId) const
@@ -1152,9 +1284,16 @@ private:
     // Fleet.h; this sequences it across targets looked up by net id.
     void FleetOrderSystem(float dt)
     {
-        const double maxStep = static_cast<double>(kFleetMoveSpeed) * static_cast<double>(dt);
         m_world.ForEach<FleetOrder, Transform, NetId>([&](FleetOrder& fo, Transform& tr, NetId& selfId) {
             FleetOrderEntry& o = fo.current;
+            // Per-unit sublight speed from the hull (fast lights / slow heavies), scaled
+            // by any active web (EWAR slows the target — area E). Falls back to the M3
+            // fleet speed if the unit has no HullInfo (e.g. a legacy spawn).
+            const HullInfo*   hi  = m_world.GetComponent<HullInfo>(EntityOf(selfId.value));
+            const EwarStatus* es  = m_world.GetComponent<EwarStatus>(EntityOf(selfId.value));
+            const float       spd = (hi && hi->maxSpeed > 0.0f ? hi->maxSpeed : kFleetMoveSpeed)
+                                    * (es ? es->webFactor : 1.0f);
+            const double maxStep = static_cast<double>(spd) * static_cast<double>(dt);
             switch (o.type) {
             case OrderType::Idle:
                 return;
@@ -1187,36 +1326,445 @@ private:
         return w ? w->range * 0.9f : 0.0f;
     }
 
-    // Apply weapon damage from every unit whose current order is Attack to its
-    // target (if a live target is within weapon range). Dead targets are removed
-    // after the pass (so the ECS isn't mutated mid-ForEach); NPC deaths decrement
-    // their site's alive count and fire the "cleared" hook.
-    void CombatSystem(float dt)
-    {
-        struct Hit { uint32_t target; int32_t dmg; };
-        std::vector<Hit> hits;
-        m_world.ForEach<FleetOrder, Weapon, Transform, NetId>(
-            [&](FleetOrder& fo, Weapon& w, Transform& tr, NetId&) {
-                if (fo.current.type != OrderType::Attack) return;
-                const auto tgt = EntityOf(fo.current.targetNetId);
-                Transform* tt = m_world.GetComponent<Transform>(tgt);
-                Health*    th = m_world.GetComponent<Health>(tgt);
-                if (!tt || !th || !m_world.IsAlive(tgt)) return;
-                if (!InWeaponRange(w, tr.pos, tt->pos)) return;
-                const int32_t dmg = WeaponDamage(w, dt); // advances fractional 'pending'
-                if (dmg > 0) hits.push_back({ fo.current.targetNetId, dmg });
-            });
+    // --- fitting install (area B) -------------------------------------------
 
-        std::vector<uint32_t> killed;
-        for (const Hit& h : hits) {
-            Health* th = m_world.GetComponent<Health>(EntityOf(h.target));
-            if (th && th->hp > 0 && ApplyDamage(*th, h.dmg)) killed.push_back(h.target);
-        }
-        for (uint32_t netId : killed) DestroyUnit(netId);
+    // Add a component if absent, then assign — so InstallFit can (re)fit an entity.
+    template <typename T>
+    T& AddOrSet(Neuron::ECS::EntityHandle e, T val)
+    {
+        T* c = m_world.GetComponent<T>(e);
+        if (!c) c = &m_world.AddComponent<T>(e);
+        *c = std::move(val);
+        return *c;
     }
 
-    // Remove a destroyed unit; if it was an NPC guardian, decrement its site and
-    // record the site as cleared once its last guardian dies. (Loot-on-kill is M6.)
+    // Derived single-weapon summary (range = longest weapon reach, dps = Σ dmg×rof) —
+    // used by FleetOrderSystem stand-off + the AI target heuristics, NOT for damage.
+    [[nodiscard]] static Weapon DeriveWeaponSummary(const Fitting& fit) noexcept
+    {
+        Weapon w; float range = 0.0f, dps = 0.0f;
+        for (const auto& mi : fit.modules) {
+            if (mi.def.kind != ModuleKind::Weapon) continue;
+            range = std::max(range, mi.def.optimal + mi.def.falloff);
+            dps  += mi.def.baseDamage * mi.def.rateOfFire;
+        }
+        w.range = range; w.dps = dps; w.pending = 0.0f;
+        return w;
+    }
+
+    // Install a named catalog fit's combat components (DefenseLayers + ResistProfile +
+    // Fitting + HullInfo + EwarStatus + Weapon summary + the synced Health mirror).
+    // False if the fit/hull is unknown. ValidateFit gated the catalog, so the fit is
+    // never over-budget (§8.4 — server-authoritative).
+    bool InstallFit(Neuron::ECS::EntityHandle e, std::string_view fitName)
+    {
+        const FitTemplate* ft = m_combat.FindFit(fitName);
+        if (!ft) return false;
+        const HullClass* hull = m_combat.FindHull(ft->hull);
+        if (!hull) return false;
+        std::vector<const ModuleDef*> mods;
+        mods.reserve(ft->modules.size());
+        for (const auto& code : ft->modules)
+            if (const ModuleDef* m = m_combat.FindModule(code)) mods.push_back(m);
+        InstallFitDirect(e, *hull, mods);
+        return true;
+    }
+
+    void InstallFitDirect(Neuron::ECS::EntityHandle e, const HullClass& hull,
+                          const std::vector<const ModuleDef*>& mods)
+    {
+        // First pass: passive Low/Mid bonuses, baked into layer HP + weapon instances.
+        float dmgAmp = 0.0f, trackAmp = 0.0f, shieldBoost = 0.0f;
+        int32_t plateArmor = 0;
+        for (const ModuleDef* m : mods) {
+            switch (m->kind) {
+            case ModuleKind::DamageAmp:        dmgAmp      += m->strength;                       break;
+            case ModuleKind::TrackingEnhancer: trackAmp    += m->strength;                       break;
+            case ModuleKind::ShieldBooster:    shieldBoost += m->strength;                       break;
+            case ModuleKind::ArmorPlate:       plateArmor  += static_cast<int32_t>(m->strength); break;
+            default: break;
+            }
+        }
+
+        DefenseLayers d;
+        d.shield = { hull.shieldHp, hull.shieldHp };
+        d.armor  = { hull.armorHp + plateArmor, hull.armorHp + plateArmor };
+        d.hull   = { hull.hullHp, hull.hullHp };
+        d.shieldRegenPerSec = hull.shieldRegenPerSec + shieldBoost;
+
+        Fitting fit;
+        fit.pgMax = hull.pgMax; fit.cpuMax = hull.cpuMax;
+        fit.slots[0] = hull.slotsHigh; fit.slots[1] = hull.slotsMid; fit.slots[2] = hull.slotsLow;
+        for (const ModuleDef* m : mods) {
+            fit.pgUsed += m->pgCost; fit.cpuUsed += m->cpuCost;
+            ModuleInstance mi; mi.def = *m;
+            if (m->kind == ModuleKind::Weapon) { // bake the Low-slot passive bonuses in
+                mi.def.baseDamage *= (1.0f + dmgAmp);
+                mi.def.tracking   += trackAmp;
+            }
+            fit.modules.push_back(std::move(mi));
+        }
+
+        AddOrSet<DefenseLayers>(e, d);
+        AddOrSet<ResistProfile>(e, hull.resists);
+        HullInfo hi; hi.signature = hull.signature; hi.maxSpeed = hull.maxSpeed; hi.size = hull.size;
+        AddOrSet<HullInfo>(e, hi);
+        if (!m_world.HasComponent<EwarStatus>(e)) m_world.AddComponent<EwarStatus>(e);
+        AddOrSet<Weapon>(e, DeriveWeaponSummary(fit));
+        AddOrSet<Fitting>(e, std::move(fit));
+        AddOrSet<Health>(e, Health{ d.TotalCur(), d.TotalMax() }); // synced mirror
+    }
+
+    // --- IFF helpers (areas D/E/F) ------------------------------------------
+
+    // NPC = owner 0 (one faction); players are hostile across different ids.
+    [[nodiscard]] static bool Hostile(uint32_t oa, uint32_t ob) noexcept
+    {
+        if (oa == 0 && ob == 0) return false;     // NPC vs NPC — same faction
+        if (oa == 0 || ob == 0) return true;      // NPC vs player
+        return oa != ob;                          // player vs different player
+    }
+    [[nodiscard]] static bool Ally(uint32_t oa, uint32_t ob) noexcept
+    {
+        if (oa == 0 && ob == 0) return true;      // NPCs rep their own
+        return oa != 0 && oa == ob;
+    }
+
+    // Nearest hostile (alive, has DefenseLayers) to 'pos' within 'range'; 0 if none.
+    [[nodiscard]] uint32_t NearestHostileInRange(uint32_t selfNetId, const Neuron::Universe::UniversePos& pos,
+                                                 uint32_t selfOwner, double range)
+    {
+        uint32_t best = 0; double bestDist = 0.0;
+        m_world.ForEach<DefenseLayers, Transform, OwnerId, NetId>(
+            [&](DefenseLayers& dl, Transform& t, OwnerId& o, NetId& id) {
+                if (id.value == selfNetId || dl.hull.cur <= 0) return;
+                if (!Hostile(selfOwner, o.player)) return;
+                const double dd = UniverseDistance(pos, t.pos);
+                if (dd > range) return;
+                if (best == 0 || dd < bestDist || (dd == bestDist && id.value < best)) { best = id.value; bestDist = dd; }
+            });
+        return best;
+    }
+
+    // Most-damaged ally within 'range' whose 'layer' can still take a rep; 0 if none.
+    [[nodiscard]] uint32_t FindRepTarget(uint32_t selfNetId, uint32_t selfOwner,
+                                         const Neuron::Universe::UniversePos& pos, double range, DefenseLayer layer)
+    {
+        uint32_t best = 0; float bestFrac = 2.0f;
+        m_world.ForEach<DefenseLayers, Transform, OwnerId, NetId>(
+            [&](DefenseLayers& dl, Transform& t, OwnerId& o, NetId& id) {
+                if (id.value == selfNetId) return;           // remote rep can't self-target
+                if (!Ally(selfOwner, o.player)) return;
+                if (dl.hull.cur <= 0) return;
+                const LayerHp& l = (layer == DefenseLayer::Shield) ? dl.shield
+                                 : (layer == DefenseLayer::Armor)  ? dl.armor : dl.hull;
+                if (l.max <= 0 || l.cur >= l.max) return; // that layer is full
+                if (UniverseDistance(pos, t.pos) > range) return;
+                const float frac = static_cast<float>(l.cur) / static_cast<float>(l.max);
+                if (best == 0 || frac < bestFrac || (frac == bestFrac && id.value < best)) { best = id.value; bestFrac = frac; }
+            });
+        return best;
+    }
+
+    // --- combat: EWAR + logistics (area E) ----------------------------------
+    //
+    // For each fitted unit, apply its non-weapon active modules: remote rep heals the
+    // most-damaged ally in range; jam/web/warp-disrupt/sensor-damp debuff the unit's
+    // current target (its Attack target, else the nearest hostile in module range — so
+    // a fire-support base still projects EWAR). A JAMMED ship can run no targeted module
+    // at all (ECM breaks the lock — weapons in CombatSystem, EWAR/logi here).
+    void EwarLogiSystem(float dt)
+    {
+        m_world.ForEach<Fitting, Transform, OwnerId, NetId>(
+            [&](Fitting& fit, Transform& tr, OwnerId& owner, NetId& selfId) {
+                EwarStatus* selfEwar = m_world.GetComponent<EwarStatus>(EntityOf(selfId.value));
+                if (selfEwar && IsJammed(*selfEwar)) return; // jammed — no targeted modules
+                const uint32_t attackTarget = AttackTargetOf(selfId.value);
+                for (auto& mi : fit.modules) {
+                    const ModuleDef& m = mi.def;
+                    if (m.kind == ModuleKind::RemoteRep) {
+                        const uint32_t ally = FindRepTarget(selfId.value, owner.player, tr.pos,
+                                                            static_cast<double>(m.range), m.effectLayer);
+                        if (!ally) continue;
+                        mi.pending += m.strength * dt; // accumulate sub-1 rep (HP is integer)
+                        if (mi.pending >= 1.0f) {
+                            const int32_t amt = static_cast<int32_t>(mi.pending);
+                            mi.pending -= static_cast<float>(amt);
+                            if (DefenseLayers* ad = m_world.GetComponent<DefenseLayers>(EntityOf(ally)))
+                                RemoteRep(*ad, m.effectLayer, amt);
+                        }
+                        continue;
+                    }
+                    if (m.kind == ModuleKind::Jammer || m.kind == ModuleKind::Web ||
+                        m.kind == ModuleKind::WarpDisruptor || m.kind == ModuleKind::SensorDamp) {
+                        // Offensive EWAR follows the unit's Attack target; only a base
+                        // (no FleetOrder) auto-projects it onto the nearest hostile —
+                        // so a commandable ship EWARs what it is told to, not everything.
+                        uint32_t tgt = 0;
+                        if (attackTarget && Hostile(owner.player, OwnerOf(attackTarget))) tgt = attackTarget;
+                        else if (!m_world.HasComponent<FleetOrder>(EntityOf(selfId.value)))
+                            tgt = NearestHostileInRange(selfId.value, tr.pos, owner.player, static_cast<double>(m.range));
+                        if (!tgt) continue;
+                        Transform* tt = m_world.GetComponent<Transform>(EntityOf(tgt));
+                        EwarStatus* te = m_world.GetComponent<EwarStatus>(EntityOf(tgt));
+                        if (!tt || !te) continue;
+                        if (UniverseDistance(tr.pos, tt->pos) > static_cast<double>(m.range)) continue;
+                        switch (m.kind) {
+                        case ModuleKind::Jammer:        ApplyJam(*te, m.duration); break;
+                        case ModuleKind::Web:           ApplyWeb(*te, m.strength, m.duration); break;
+                        case ModuleKind::WarpDisruptor: ApplyTackle(*te, m.duration);
+                                                        if (NavState* nv = m_world.GetComponent<NavState>(EntityOf(tgt))) nv->interdicted = true;
+                                                        break;
+                        case ModuleKind::SensorDamp:    ApplySensorDamp(*te, m.strength, m.duration); break;
+                        default: break;
+                        }
+                    }
+                }
+            });
+    }
+
+    // --- combat: weapons + projectiles (area D) -----------------------------
+
+    struct PendingProjectile { uint32_t src; uint32_t tgt; Neuron::Universe::UniversePos origin; DirectX::XMFLOAT3 vel; ModuleDef def; };
+    struct KillCand { uint32_t victim; uint32_t killer; };
+
+    // Tick a unit's weapon cooldowns down (used when it has no valid target this tick).
+    void TickWeaponCooldowns(Neuron::ECS::EntityHandle e, float dt)
+    {
+        if (Fitting* f = m_world.GetComponent<Fitting>(e))
+            for (auto& mi : f->modules)
+                if (mi.def.kind == ModuleKind::Weapon) mi.cooldown = std::max(0.0f, mi.cooldown - dt);
+    }
+
+    // Fire every ready weapon on 'self' at 'targetNetId': hitscan resolves immediately,
+    // projectile weapons queue a ballistic shot. Cooldowns cycle even when jammed/out of
+    // range. Hostility/validity is the caller's responsibility (Attack order or defense).
+    void FireWeapons(Neuron::ECS::EntityHandle self, uint32_t selfNetId,
+                     const Neuron::Universe::UniversePos& selfPos, uint32_t /*selfOwner*/,
+                     uint32_t targetNetId, float dt,
+                     std::vector<PendingProjectile>& projOut, std::vector<KillCand>& kills)
+    {
+        Fitting* fit = m_world.GetComponent<Fitting>(self);
+        if (!fit) return;
+        const EwarStatus* es = m_world.GetComponent<EwarStatus>(self);
+        const bool  jammed = es && IsJammed(*es);
+        const float damp   = es ? es->sensorDampFactor : 1.0f; // damp on the SHOOTER cuts reach
+
+        const auto te = EntityOf(targetNetId);
+        Transform*     tt  = m_world.GetComponent<Transform>(te);
+        DefenseLayers* td  = m_world.GetComponent<DefenseLayers>(te);
+        ResistProfile* trp = m_world.GetComponent<ResistProfile>(te);
+        if (!tt || !td || !trp || !m_world.IsAlive(te)) { TickWeaponCooldowns(self, dt); return; }
+
+        const double      dist = UniverseDistance(selfPos, tt->pos);
+        const HullInfo*   thi  = m_world.GetComponent<HullInfo>(te);
+        const EwarStatus* tes  = m_world.GetComponent<EwarStatus>(te);
+        const float tgtSig   = thi ? thi->signature : 100.0f;
+        const float tgtSpeed = (thi ? thi->maxSpeed : 0.0f) * (tes ? tes->webFactor : 1.0f);
+
+        for (auto& mi : fit->modules) {
+            if (mi.def.kind != ModuleKind::Weapon) continue;
+            mi.cooldown = std::max(0.0f, mi.cooldown - dt);
+            if (jammed || mi.cooldown > 0.0f) continue;
+            if (!InEngagementRange(mi.def, dist, damp)) continue;
+            mi.cooldown = (mi.def.rateOfFire > 0.0f) ? (1.0f / mi.def.rateOfFire) : 1.0f;
+            if (mi.def.projectileSpeed <= 0.0f) {
+                // Hitscan (instant): resolve damage now (area C formula).
+                const float eff = ResolveShotDamage(mi.def.damageType, mi.def.baseDamage, dist,
+                                                     mi.def.optimal, mi.def.falloff, mi.def.tracking, tgtSig, tgtSpeed);
+                if (ApplyTypedDamage(*td, *trp, mi.def.damageType, eff) == DamageOutcome::Killed)
+                    kills.push_back({ targetNetId, selfNetId });
+            } else {
+                // Ballistic: queue a projectile aimed at the target's current position.
+                PendingProjectile p; p.src = selfNetId; p.tgt = targetNetId; p.origin = selfPos; p.def = mi.def;
+                const double dx = static_cast<double>(tt->pos.x - selfPos.x);
+                const double dy = static_cast<double>(tt->pos.y - selfPos.y);
+                const double dz = static_cast<double>(tt->pos.z - selfPos.z);
+                const double len = std::sqrt(dx * dx + dy * dy + dz * dz);
+                if (len > 0.0) {
+                    const double s = static_cast<double>(mi.def.projectileSpeed) / len;
+                    p.vel = { static_cast<float>(dx * s), static_cast<float>(dy * s), static_cast<float>(dz * s) };
+                }
+                projOut.push_back(std::move(p));
+            }
+        }
+    }
+
+    // Spawn a ballistic projectile entity (replicated via the M4 interest pipeline, D).
+    void SpawnProjectileEntity(const PendingProjectile& p)
+    {
+        const uint32_t id = m_nextNetId++;
+        auto e = m_world.CreateEntity();
+        m_world.AddComponent<Transform>(e).pos = p.origin;
+        m_world.AddComponent<NetId>(e).value   = id;
+        m_world.AddComponent<ShapeId>(e)       = { ProjShapeId(), EntityKind::Projectile };
+        Projectile pr;
+        pr.sourceNetId = p.src; pr.targetNetId = p.tgt; pr.damageType = p.def.damageType;
+        pr.baseDamage  = p.def.baseDamage; pr.vel = p.vel; pr.origin = p.origin;
+        pr.optimal = p.def.optimal; pr.falloff = p.def.falloff; pr.tracking = p.def.tracking;
+        const float reach = p.def.optimal + p.def.falloff;
+        pr.ttl = (p.def.projectileSpeed > 0.0f) ? (reach / p.def.projectileSpeed) * 1.5f + 0.1f : 0.1f;
+        m_world.AddComponent<Projectile>(e) = pr;
+        m_netIdToEntity[id] = e;
+    }
+
+    // Weapons fire from fleet units (Attack order) + bases (defensive auto-target).
+    void CombatSystem(float dt)
+    {
+        std::vector<PendingProjectile> projs;
+        std::vector<KillCand>          kills;
+
+        m_world.ForEach<FleetOrder, Fitting, Transform, NetId>(
+            [&](FleetOrder& fo, Fitting&, Transform& tr, NetId& id) {
+                const auto e = EntityOf(id.value);
+                if (fo.current.type != OrderType::Attack || fo.current.targetNetId == 0) { TickWeaponCooldowns(e, dt); return; }
+                const OwnerId* o = m_world.GetComponent<OwnerId>(e);
+                FireWeapons(e, id.value, tr.pos, o ? o->player : 0, fo.current.targetNetId, dt, projs, kills);
+            });
+
+        // Bases have no FleetOrder; while Active they fire defensively at the nearest
+        // hostile in range (§13.1 fire-support + light defensive weapons).
+        m_world.ForEach<BaseTag, BaseCombat, Transform, NetId, Weapon>(
+            [&](BaseTag&, BaseCombat& bc, Transform& tr, NetId& id, Weapon& w) {
+                const auto e = EntityOf(id.value);
+                if (bc.state != BaseState::Active) { TickWeaponCooldowns(e, dt); return; }
+                const OwnerId* o = m_world.GetComponent<OwnerId>(e);
+                const uint32_t tgt = NearestHostileInRange(id.value, tr.pos, o ? o->player : 0, static_cast<double>(w.range));
+                if (tgt) FireWeapons(e, id.value, tr.pos, o ? o->player : 0, tgt, dt, projs, kills);
+                else     TickWeaponCooldowns(e, dt);
+            });
+
+        for (const auto& p : projs) SpawnProjectileEntity(p);
+        ProcessKills(kills);
+    }
+
+    // Advance every projectile in N local sub-steps; on intercept resolve damage (C),
+    // else expire on ttl/miss. Anti-tunneling: the swept intercept catches a fast shot
+    // that a single tick-boundary check would skip past (area D).
+    void ProjectileSystem(float dt)
+    {
+        std::vector<uint32_t> expired;
+        std::vector<KillCand> kills;
+        m_world.ForEach<Projectile, Transform, NetId>([&](Projectile& pr, Transform& tr, NetId& id) {
+            const auto te = EntityOf(pr.targetNetId);
+            Transform*     tt  = m_world.GetComponent<Transform>(te);
+            DefenseLayers* td  = m_world.GetComponent<DefenseLayers>(te);
+            ResistProfile* trp = m_world.GetComponent<ResistProfile>(te);
+            if (!tt || !td || !trp || !m_world.IsAlive(te)) {
+                // Target gone — keep flying ballistically until ttl lapses, then expire.
+                tr.pos.x += static_cast<int64_t>(std::llround(static_cast<double>(pr.vel.x) * dt));
+                tr.pos.y += static_cast<int64_t>(std::llround(static_cast<double>(pr.vel.y) * dt));
+                tr.pos.z += static_cast<int64_t>(std::llround(static_cast<double>(pr.vel.z) * dt));
+                pr.ttl -= dt;
+                if (pr.ttl <= 0.0f) expired.push_back(id.value);
+                return;
+            }
+            const HullInfo* thi = m_world.GetComponent<HullInfo>(te);
+            const double hitRadius = std::max<double>(thi ? static_cast<double>(thi->signature) : 100.0, 80.0);
+            const SubStepResult r = StepProjectile(tr.pos, pr.vel, tt->pos, tt->pos, pr.ttl, dt, hitRadius, m_projectileSubSteps);
+            if (r.hit) {
+                const EwarStatus* tes = m_world.GetComponent<EwarStatus>(te);
+                const float tgtSig   = thi ? thi->signature : 100.0f;
+                const float tgtSpeed = (thi ? thi->maxSpeed : 0.0f) * (tes ? tes->webFactor : 1.0f);
+                const double dist = UniverseDistance(pr.origin, tr.pos);
+                const float eff = ResolveShotDamage(pr.damageType, pr.baseDamage, dist, pr.optimal, pr.falloff,
+                                                    pr.tracking, tgtSig, tgtSpeed);
+                if (ApplyTypedDamage(*td, *trp, pr.damageType, eff) == DamageOutcome::Killed)
+                    kills.push_back({ pr.targetNetId, pr.sourceNetId });
+                expired.push_back(id.value);
+            } else if (pr.ttl <= 0.0f) {
+                expired.push_back(id.value);
+            }
+        });
+        for (uint32_t pid : expired) DestroyUnit(pid); // projectiles aren't NPCs → just removed
+        ProcessKills(kills);
+    }
+
+    // Resolve queued kills once (deduped: a victim destroyed by the first blow is skipped
+    // for later overkill entries). Bases are NEVER killed (disable-not-destroy, area G).
+    void ProcessKills(const std::vector<KillCand>& kills)
+    {
+        for (const auto& k : kills) {
+            const auto e = EntityOf(k.victim);
+            if (!m_world.IsAlive(e)) continue;
+            const DefenseLayers* d = m_world.GetComponent<DefenseLayers>(e);
+            if (!d || d->hull.cur > 0) continue; // not actually dead
+            OnUnitKilled(k.victim, k.killer);
+        }
+    }
+
+    // --- combat: shield regen + EWAR decay (area C/E) -----------------------
+    void RegenSystem(float dt)
+    {
+        m_world.ForEach<DefenseLayers>([&](DefenseLayers& d) { RegenDefenses(d, dt); });
+        m_world.ForEach<EwarStatus>([&](EwarStatus& s) { TickEwar(s, dt); });
+    }
+
+    // --- combat: base disable-not-destroy (area G, §13.1) -------------------
+    void BaseRetreatSystem()
+    {
+        m_world.ForEach<BaseTag, BaseCombat, DefenseLayers, Storage, NetId>(
+            [&](BaseTag&, BaseCombat& bc, DefenseLayers& d, Storage& st, NetId& id) {
+                if (bc.state == BaseState::Active && d.HullFrac() <= m_baseRetreatHullFrac) {
+                    // Forced emergency jump: retreat, stabilise hull (never destroyed),
+                    // lose cargo (an economy event, outbox), raise the low-hull alert.
+                    bc.state        = BaseState::Retreating;
+                    bc.retreatUntil = static_cast<float>(m_simTime) + m_baseRetreatSeconds;
+                    d.hull.cur      = std::max(d.hull.cur, d.hull.max / 4); // survives the jump
+                    if (!bc.cargoLost) {
+                        int32_t lost = 0;
+                        for (int i = 0; i < kResourceSlots; ++i) { lost += static_cast<int32_t>(st.amount[i]); st.amount[i] = 0.0f; }
+                        bc.cargoLost = true;
+                        m_econEvents.push_back({ EconEventType::CargoLost, id.value, 0, lost, m_tick });
+                    }
+                    m_lowHullAlerts.push_back(id.value); // area H — base low-hull → retreat alert
+                } else if (bc.state == BaseState::Retreating && static_cast<float>(m_simTime) >= bc.retreatUntil) {
+                    bc.state = BaseState::Disabled; // jump complete; inert but never removed
+                }
+            });
+    }
+
+    // --- combat: loot-on-kill + killmail (area G, §13.2/§15/§24) ------------
+    void OnUnitKilled(uint32_t victimNetId, uint32_t killerNetId)
+    {
+        const auto e = EntityOf(victimNetId);
+        if (m_world.HasComponent<BaseTag>(e)) return; // bases are never destroyed (§13.1)
+
+        // Killmail on every kill → KillmailLog row + an offline notification (§24), and
+        // an economy event for the outbox (§15).
+        uint8_t kind = 0; int32_t value = 0;
+        if (const ShapeId* s = m_world.GetComponent<ShapeId>(e)) kind = static_cast<uint8_t>(s->kind);
+        if (const DefenseLayers* d = m_world.GetComponent<DefenseLayers>(e)) value = d->TotalMax();
+        m_killmails.push_back({ victimNetId, killerNetId, kind, value, m_tick });
+        m_econEvents.push_back({ EconEventType::Killmail, victimNetId, killerNetId, value, m_tick });
+
+        // Loot-on-kill: a destroyed SHIP drops a recoverable container (economy event).
+        if (m_world.HasComponent<ShipTag>(e)) SpawnLoot(victimNetId);
+        DestroyUnit(victimNetId);
+    }
+
+    void SpawnLoot(uint32_t victimNetId)
+    {
+        const auto e = EntityOf(victimNetId);
+        const Transform* t = m_world.GetComponent<Transform>(e);
+        if (!t) return;
+        LootContainer lc;
+        float value = 0.0f;
+        if (const Cargo* c = m_world.GetComponent<Cargo>(e))
+            for (int i = 0; i < kResourceSlots; ++i) { lc.items[i] = c->amount[i] * m_lootFraction; value += lc.items[i]; }
+        lc.expiresAt = static_cast<float>(m_simTime) + m_lootExpireSeconds;
+        const uint32_t lootId = m_nextNetId++;
+        auto le = m_world.CreateEntity();
+        m_world.AddComponent<Transform>(le).pos = t->pos;
+        m_world.AddComponent<NetId>(le).value   = lootId;
+        m_world.AddComponent<ShapeId>(le)       = { LootShapeId(), EntityKind::LootContainer };
+        m_world.AddComponent<LootContainer>(le) = lc;
+        m_netIdToEntity[lootId] = le;
+        m_econEvents.push_back({ EconEventType::LootDrop, lootId, victimNetId, static_cast<int32_t>(value), m_tick });
+    }
+
+    // Remove a destroyed unit; if an NPC guardian, decrement its site and fire the
+    // "cleared" hook once the last guardian dies. Low-level (loot/killmail is OnUnitKilled).
     void DestroyUnit(uint32_t netId)
     {
         const auto e = EntityOf(netId);
@@ -1233,9 +1781,42 @@ private:
         m_repl.Remove(netId);     // drop replication version (area B)
     }
 
+    // The net id a unit is currently ordered to Attack (0 = none). Used by EWAR target
+    // selection (area E) so a fleet's EWAR follows its primary call.
+    [[nodiscard]] uint32_t AttackTargetOf(uint32_t netId)
+    {
+        const FleetOrder* fo = m_world.GetComponent<FleetOrder>(EntityOf(netId));
+        return (fo && fo->current.type == OrderType::Attack) ? fo->current.targetNetId : 0;
+    }
+    [[nodiscard]] uint32_t OwnerOf(uint32_t netId)
+    {
+        const OwnerId* o = m_world.GetComponent<OwnerId>(EntityOf(netId));
+        return o ? o->player : 0;
+    }
+
+    // Shape for a small loot container (a crate). Projectiles are sim-only; the client
+    // maps EntityKind::Projectile → a tracer VFX (area H), so any shape id works.
+    static uint16_t LootShapeId()
+    {
+        const uint16_t id = ShapeIdByName("Crate01");
+        return id != kInvalidShapeId ? id : 0;
+    }
+    static uint16_t ProjShapeId() { return 0; }
+
+    // Sync the single-layer Health MIRROR to the layered defense totals (the wire,
+    // SimHash, HUD and the M5 persistence mapping read Health; DefenseLayers is the
+    // truth). Deterministic, once per Step before replication is stamped.
+    void SyncHealthMirror()
+    {
+        m_world.ForEach<DefenseLayers, Health>([&](DefenseLayers& d, Health& h) {
+            h.hp = d.TotalCur(); h.maxHp = d.TotalMax();
+        });
+    }
+
     // --- NPC AI (area F) -----------------------------------------------------
 
-    uint32_t SpawnNpcGuardian(Neuron::Universe::UniversePos pos, uint16_t siteId)
+    uint32_t SpawnNpcGuardian(Neuron::Universe::UniversePos pos, uint16_t siteId,
+                              std::string_view fitName = kNpcFit)
     {
         const uint32_t netId = m_nextNetId++;
         auto e = m_world.CreateEntity();
@@ -1245,9 +1826,9 @@ private:
         m_world.AddComponent<ShipTag>(e).shipType = 0;
         m_world.AddComponent<ShapeId>(e) = { ShipShapeId(), EntityKind::NpcUnit };
         m_world.AddComponent<OwnerId>(e).player = 0; // unowned = NPC
-        m_world.AddComponent<Health>(e)  = { kNpcHp, kNpcHp };
         m_world.AddComponent<FleetOrder>(e);
-        m_world.AddComponent<Weapon>(e)  = { kNpcWeaponRange, kNpcWeaponDps };
+        // NPCs fight with REAL fits (area F): difficulty scales by which fit is spawned.
+        if (!InstallFit(e, fitName)) InstallFit(e, kNpcFit);
         auto& ai = m_world.AddComponent<NpcAi>(e);
         ai.state      = AiState::Defend;
         ai.home       = pos;
@@ -1258,37 +1839,57 @@ private:
         return netId;
     }
 
-    // Drive every NPC: pick the nearest hostile (player-owned) unit, update the
-    // patrol/aggro/flee/defend state (pure NextAiState), and write the NPC's
-    // FleetOrder so the shared movement + combat systems carry it out.
+    // Combat target priority (combat-balance.md §4): a hostile carrying logistics is
+    // the primary (2), then EWAR (1), then anything else (0) — so NPCs "primary the
+    // logi/EWAR" the same way the balance gate rewards a player fleet for doing.
+    [[nodiscard]] int TargetCombatPriority(uint32_t netId)
+    {
+        const Fitting* f = m_world.GetComponent<Fitting>(EntityOf(netId));
+        if (!f) return 0;
+        bool logi = false, ewar = false;
+        for (const auto& mi : f->modules) {
+            if (mi.def.kind == ModuleKind::RemoteRep) logi = true;
+            else if (mi.def.kind == ModuleKind::Jammer || mi.def.kind == ModuleKind::Web ||
+                     mi.def.kind == ModuleKind::WarpDisruptor || mi.def.kind == ModuleKind::SensorDamp) ewar = true;
+        }
+        return logi ? 2 : (ewar ? 1 : 0);
+    }
+
+    // Drive every NPC with the FULL combat model (area F): pick a primary by target
+    // priority (logi → EWAR → nearest), update patrol/aggro/flee/defend (flee on the
+    // HULL danger threshold, not a flat bar), and write the NPC's FleetOrder so the
+    // shared EWAR/logi + weapon + movement systems carry it out with real fits.
     void AiSystem(float dt)
     {
         (void)dt;
-        // Snapshot all player-owned combat targets (pos by net id).
-        struct Target { uint32_t netId; Neuron::Universe::UniversePos pos; };
+        struct Target { uint32_t netId; Neuron::Universe::UniversePos pos; int prio; };
         std::vector<Target> targets;
-        m_world.ForEach<OwnerId, Transform, NetId, Health>(
-            [&](OwnerId& o, Transform& t, NetId& id, Health& h) {
-                if (o.player != 0 && h.hp > 0) targets.push_back({ id.value, t.pos });
+        m_world.ForEach<OwnerId, Transform, NetId, DefenseLayers>(
+            [&](OwnerId& o, Transform& t, NetId& id, DefenseLayers& d) {
+                if (o.player != 0 && d.hull.cur > 0) targets.push_back({ id.value, t.pos, TargetCombatPriority(id.value) });
             });
 
-        m_world.ForEach<NpcAi, Transform, Health, FleetOrder>(
-            [&](NpcAi& ai, Transform& tr, Health& hp, FleetOrder& fo) {
-                // Nearest hostile.
-                uint32_t bestId = 0; double bestDist = 0.0;
+        m_world.ForEach<NpcAi, Transform, DefenseLayers, FleetOrder>(
+            [&](NpcAi& ai, Transform& tr, DefenseLayers& d, FleetOrder& fo) {
+                uint32_t nearestId = 0; double nearestDist = 0.0;
+                uint32_t primaryId = 0; int primaryPrio = -1; double primaryDist = 0.0;
                 for (const Target& t : targets) {
-                    const double d = UniverseDistance(tr.pos, t.pos);
-                    if (bestId == 0 || d < bestDist) { bestId = t.netId; bestDist = d; }
+                    const double dd = UniverseDistance(tr.pos, t.pos);
+                    if (nearestId == 0 || dd < nearestDist) { nearestId = t.netId; nearestDist = dd; }
+                    if (dd <= static_cast<double>(ai.aggroRange) &&
+                        (t.prio > primaryPrio || (t.prio == primaryPrio && (primaryId == 0 || dd < primaryDist)))) {
+                        primaryId = t.netId; primaryPrio = t.prio; primaryDist = dd;
+                    }
                 }
-                const bool hasTarget    = bestId != 0;
-                const bool targetInAggro = hasTarget && bestDist <= static_cast<double>(ai.aggroRange);
-                const float hpFrac = hp.maxHp > 0 ? static_cast<float>(hp.hp) / static_cast<float>(hp.maxHp) : 0.0f;
+                const bool  hasTarget     = nearestId != 0;
+                const bool  targetInAggro = primaryId != 0;
+                const float hullFrac      = d.HullFrac(); // flee on hull, not a flat bar
 
-                ai.state = NextAiState(ai, hasTarget, targetInAggro, hpFrac);
-                ai.targetNetId = targetInAggro ? bestId : 0;
+                ai.state = NextAiState(ai, hasTarget, targetInAggro, hullFrac);
+                ai.targetNetId = targetInAggro ? primaryId : 0;
                 switch (ai.state) {
                 case AiState::Aggro:
-                    fo.current = { OrderType::Attack, bestId, {}, 0.0f };
+                    fo.current = { OrderType::Attack, primaryId, {}, 0.0f };
                     break;
                 case AiState::Flee:
                 case AiState::Defend:
@@ -1518,6 +2119,18 @@ private:
     // Fog (area E): per-player permanently-revealed contacts + in-progress scan dwell.
     std::unordered_map<uint32_t, std::unordered_set<uint32_t>> m_revealed;
     std::unordered_map<uint64_t, float>        m_scanDwell; // (player<<32 | target) → seconds
+    // M6 combat model (areas A–G).
+    CombatCatalog          m_combat{ DefaultCombatCatalog() }; // active balance data (area A)
+    double                 m_simTime{ 0.0 };                   // accumulated sim seconds (loot/retreat clocks)
+    int                    m_projectileSubSteps{ 4 };          // area D — local sub-steps/tick (tunable)
+    float                  m_baseRetreatHullFrac{ 0.15f };     // area G — base retreats below this hull frac
+    float                  m_baseRetreatSeconds{ 30.0f };      // area G — retreat → disabled cooldown
+    float                  m_lootFraction{ 0.5f };             // area G — victim cargo fraction dropped
+    float                  m_lootExpireSeconds{ 300.0f };
+    bool                   m_combatEnabled{ true };            // M4 load harness sets false
+    std::vector<EconEvent> m_econEvents;   // loot/kill/cargo-loss → M5 outbox (drained, §15)
+    std::vector<Killmail>  m_killmails;     // KillmailLog rows + §24 notifications (drained)
+    std::vector<uint32_t>  m_lowHullAlerts; // base low-hull → retreat alerts (area H, drained)
     uint32_t m_nextNetId{ 1 };
     uint32_t m_tick{ 0 };
 };

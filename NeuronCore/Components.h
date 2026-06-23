@@ -7,6 +7,7 @@
 // and the client's replica TU). Keep IDs stable — they are part of the wire
 // contract for snapshots.
 
+#include "CombatData.h" // M6 area A — combat catalog types (ModuleDef) + CombatTypes
 #include "Ecs.h"
 #include "UniversePos.h"
 
@@ -41,6 +42,15 @@ enum ComponentSlot : uint8_t
     Slot_FleetOrder      = 18,
     Slot_Weapon          = 19,
     Slot_NpcAi           = 20,
+    // M6 combat model (areas B–G).
+    Slot_DefenseLayers   = 21,
+    Slot_ResistProfile   = 22,
+    Slot_Fitting         = 23,
+    Slot_EwarStatus      = 24,
+    Slot_Projectile      = 25,
+    Slot_LootContainer   = 26,
+    Slot_BaseCombat      = 27,
+    Slot_HullInfo        = 28,
 };
 
 // Entity kinds carried in snapshots (matches §13 entity list). The first seven
@@ -208,6 +218,112 @@ struct NpcAi
     float                         fleeHpFrac{ 0.0f }; // flee below this fraction of maxHp
     uint32_t                      targetNetId{ 0 };
     uint16_t                      siteId{ 0 };        // which NPC site this guardian belongs to
+};
+
+// --- combat: layered defense + fitting (§13.2; M6 area B) -------------------
+
+struct LayerHp { int32_t cur{ 0 }; int32_t max{ 0 }; };
+
+// The three defense layers, depleted outside-in (combat-balance.md §2.1). This is
+// the AUTHORITATIVE combat HP for ships / NPCs / the base. The single-layer Health
+// (above) is kept as a synced derived MIRROR (= total cur/max) so the snapshot wire,
+// SimHash, HUD and the M5 persistence mapping stay unchanged. Field order shield→
+// armor→hull matches the depletion order and the schema's Shield/Armor/HullHp cols.
+struct DefenseLayers
+{
+    LayerHp shield{}, armor{}, hull{};
+    float   shieldRegenPerSec{ 0.0f };  // armor/hull have no passive regen (§2.1)
+    float   regenPending{ 0.0f };        // sub-1 regen carry (HP is integer; server-internal)
+
+    [[nodiscard]] int32_t TotalCur() const noexcept { return shield.cur + armor.cur + hull.cur; }
+    [[nodiscard]] int32_t TotalMax() const noexcept { return shield.max + armor.max + hull.max; }
+    [[nodiscard]] float   HullFrac() const noexcept
+    {
+        return hull.max > 0 ? static_cast<float>(hull.cur) / static_cast<float>(hull.max) : 0.0f;
+    }
+};
+
+// ResistProfile (CombatTypes.h) is registered directly as the per-entity resist
+// component — the per-layer × damage-type reduction the damage rule (Combat.h) reads.
+
+// A fitted module instance: the resolved catalog def (copied at fit time so the pure
+// combat rules + snapshots never chase the catalog) + per-instance runtime state.
+struct ModuleInstance
+{
+    ModuleDef def{};            // resolved CombatData def (area A)
+    float     cooldown{ 0.0f }; // seconds until a weapon can fire again
+    float     pending{ 0.0f };  // sub-1 carry for continuous effects (remote rep), HP is integer
+};
+
+// Per-unit hull combat profile (combat-balance.md §3): signature (hit size — small =
+// hard for big guns to track) + max sublight speed (drives both commanded movement and
+// the tracking speed model — the size rock-paper-scissors). Read by Combat.h.
+struct HullInfo
+{
+    float    signature{ 100.0f };
+    float    maxSpeed{ 0.0f };
+    HullSize size{ HullSize::Medium };
+};
+
+// A hull's fitting grid + PG/CPU budget (combat-balance.md §5). ValidateFit (area A)
+// gates what gets here; the server never installs an over-budget fit (§8.4).
+struct Fitting
+{
+    std::vector<ModuleInstance> modules;
+    float   pgUsed{ 0.0f }, pgMax{ 0.0f };
+    float   cpuUsed{ 0.0f }, cpuMax{ 0.0f };
+    uint8_t slots[kSlotTypeCount]{}; // High/Mid/Low capacities
+};
+
+// Active EWAR debuffs on a unit (§13.2). Each is a countdown; the EWAR system sets
+// them, the combat/movement/nav systems read them, and they tick down each step.
+struct EwarStatus
+{
+    float jammedFor{ 0.0f };         // > 0 → weapons suppressed (can't fire)
+    float tackledFor{ 0.0f };        // > 0 → cannot warp (interdiction §13.12)
+    float webFactor{ 1.0f };         // max-speed multiplier (1 = unaffected)
+    float webFor{ 0.0f };
+    float sensorDampFactor{ 1.0f };  // optimal-range multiplier (1 = unaffected)
+    float sensorDampFor{ 0.0f };
+};
+
+// --- combat: projectiles & loot (§13.11; M6 areas D/G) ----------------------
+
+// A short-lived BALLISTIC projectile entity (§13.11). Transient → lives only in the
+// snapshot stream + the warm-restart blob, never normalized (§15). It travels in a
+// straight line at 'vel' (it does NOT home — a homing/clamped shot could never tunnel,
+// which is the whole point of area D's sub-stepping). Carries the resolved weapon stats
+// so a hit resolves with no catalog lookup; 'origin' anchors the falloff distance and
+// 'targetNetId' lets sub-stepping test intercept against the target's swept position.
+struct Projectile
+{
+    uint32_t                      sourceNetId{ 0 };
+    uint32_t                      targetNetId{ 0 };
+    DamageType                    damageType{ DamageType::Kinetic };
+    float                         baseDamage{ 0.0f };
+    DirectX::XMFLOAT3             vel{ 0.0f, 0.0f, 0.0f }; // m/s, straight-line
+    Neuron::Universe::UniversePos origin{};                // firing position (falloff anchor)
+    float                         ttl{ 0.0f };             // seconds left before it expires (a miss)
+    float                         optimal{ 0.0f }, falloff{ 0.0f }, tracking{ 0.0f };
+};
+
+// A recoverable loot drop from a destroyed ship (§13.2 loot-on-kill). Items are an
+// itemised fraction of the victim's cargo/fit value over the §13.4 resource slots;
+// recovery transfers them to the looter's cargo (area G). expiresAt despawns it.
+struct LootContainer
+{
+    float items[kResourceSlots]{};
+    float expiresAt{ 0.0f }; // sim-seconds after which it despawns
+};
+
+// Base capital combat state (§13.1 disable-not-destroy). Mirrors Bases.BaseState /
+// RetreatUntil — a base is forced to retreat at low hull and is NEVER destroyed.
+enum class BaseState : uint8_t { Active = 0, Retreating = 1, Disabled = 2 };
+struct BaseCombat
+{
+    BaseState state{ BaseState::Active };
+    float     retreatUntil{ 0.0f }; // sim-seconds the retreat/disable cooldown ends
+    bool      cargoLost{ false };   // emergency-jump cargo loss applied once
 };
 
 } // namespace Neuron::Sim

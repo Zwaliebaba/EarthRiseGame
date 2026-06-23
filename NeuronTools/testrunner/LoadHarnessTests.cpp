@@ -40,6 +40,10 @@ namespace
     ScaleResult RunScenario(ServerUniverse& su, const std::vector<uint32_t>& clients,
                             size_t cap, int maxTicks)
     {
+        // This harness stresses the replication pipeline with many mutually-hostile
+        // bases packed into one sector; combat (M6) would make them fight and never go
+        // idle, so disable it — the contested *replication* case is what's under test.
+        su.SetCombatEnabled(false);
         su.SetVisibleCap(cap);
         su.Step(0.1f); // stamp + interest before the run (counters wired first, §17)
 

@@ -47,7 +47,7 @@ changed, bump the masterplan first, then the plan).
 | **M3 — Core 4X loop, fleet command & navigation** | [`M3-core-4x-loop.md`](M3-core-4x-loop.md) | 🔨 **active** (areas A–H implemented; Windows client/headless glue unverified) |
 | M4 — Scale & interest | [`M4-scale-interest.md`](M4-scale-interest.md) | 🔨 pipeline complete + all server-loop wiring written (areas A–J logic tested on testrunner; `ERServer`/`ServerHost` IOCP receive, pooled encode, dilation echo + telemetry sites written, Windows-unverified; only the live wall-clock contested-sector perf gate remains) |
 | M5 — Accounts, auth & persistence | [`M5-accounts-persistence.md`](M5-accounts-persistence.md) | 🔨 implemented (portable cores verified on testrunner; ODBC/auth/warm-restart wiring + the `ERServer` bootstrap written, Windows-unverified; only the live kill/restart zero-loss drill on the build agent + dev SQL remains) |
-| M6 — Combat model & deployment | [`M6-combat-deployment.md`](M6-combat-deployment.md) | ⏳ drafted |
+| M6 — Combat model & deployment | [`M6-combat-deployment.md`](M6-combat-deployment.md) | 🔨 combat track (areas A–G + balance-sim M) implemented & `testrunner`-green; Windows/infra halves (H/I/J/K/L + deployed M) not started |
 | M7 — Sandbox: conquest, economy, PvE, onboarding | [`M7-sandbox-conquest.md`](M7-sandbox-conquest.md) | ⏳ drafted ahead |
 
 ### Side tracks
