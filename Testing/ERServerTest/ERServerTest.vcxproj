@@ -239,8 +239,8 @@
   <ItemGroup>
     <ClCompile Include="ERServerTest.cpp" />
     <!-- Win32 TUs under test (compiled directly; this DLL test does not link a lib).
-         They #include "pch.h" which (this project's pch.h) pulls in NeuronCore.h →
-         <Windows.h>, so they build against the same prerequisites as in ERServer. -->
+         They #include "pch.h" first; this project's pch.h provides a lean <Windows.h>
+         so their <bcrypt.h>/<sql.h> have their prerequisites. -->
     <ClCompile Include="..\..\NeuronCore\CngCrypto.cpp">
       <PrecompiledHeader>Use</PrecompiledHeader>
     </ClCompile>
