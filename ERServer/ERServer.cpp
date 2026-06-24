@@ -58,6 +58,7 @@
 
 // ERServer (Windows/ODBC — M4/M5)
 #include "IocpUdpListener.h"
+#include "ServerConfig.h"
 #include "persist/PersistConfig.h"
 #include "persist/OdbcConnectionPool.h"
 #include "persist/PersistenceThread.h"
@@ -98,26 +99,21 @@ namespace
     return e.ip + ":" + std::to_string(e.port);
   }
 
-  uint16_t ListenPortFromEnv()
+  // Resolve the config-file path: the value of a "--config <path>" (or
+  // "--config=<path>") command-line argument, else the default filename in the
+  // working directory. The daemon reads ALL of its settings from this one JSON
+  // file (§20) — no process-environment variables are consulted.
+  std::string ConfigPathFromArgs(int argc, char* argv[])
   {
-    char buf[16]{};
-    DWORD n = GetEnvironmentVariableA("ER_LISTEN_PORT", buf, sizeof(buf));
-    if (n > 0 && n < sizeof(buf))
+    for (int i = 1; i < argc; ++i)
     {
-      const int p = std::atoi(buf);
-      if (p > 0 && p < 65536)
-        return static_cast<uint16_t>(p);
+      const std::string_view arg = argv[i];
+      if (arg == "--config" && i + 1 < argc)
+        return argv[i + 1];
+      if (arg.rfind("--config=", 0) == 0)
+        return std::string(arg.substr(std::string_view("--config=").size()));
     }
-    return 7777;
-  }
-
-  // M5 area C dev flag: ER_DEV_AUTH_STUB=1 keeps the M1-M4 "pick a name" identity
-  // (base spawned at cookie time, no credentials). Default OFF = real account auth.
-  bool DevAuthStubFromEnv()
-  {
-    char buf[8]{};
-    const DWORD n = GetEnvironmentVariableA("ER_DEV_AUTH_STUB", buf, sizeof(buf));
-    return n == 1 && buf[0] == '1';
+    return Neuron::Server::DEFAULT_CONFIG_FILENAME;
   }
 
   // M5 (§8.5 / §14): persist the pinned static server signing key so the client's
@@ -248,11 +244,26 @@ namespace
   }
 } // namespace
 
-int main()
+int main(int argc, char* argv[])
 {
   SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
-  const uint16_t port = ListenPortFromEnv();
-  const bool devAuthStub = DevAuthStubFromEnv();
+
+  // Load every setting from the JSON config file (§20) — nothing from the env.
+  const std::string configPath = ConfigPathFromArgs(argc, argv);
+  Neuron::Server::ServerConfig cfg;
+  std::string configError;
+  if (!Neuron::Server::ServerConfig::Load(configPath, cfg, &configError))
+  {
+    ConsoleLog("[ERROR] Could not load config '{}': {}\n", configPath, configError);
+    ConsoleLog("[ERROR] Pass --config <path>, or place '{}' in the working directory. "
+               "See Config/erserver.config.example.json for the schema.\n",
+               Neuron::Server::DEFAULT_CONFIG_FILENAME);
+    return 1;
+  }
+  ConsoleLog("[INFO] Loaded config from '{}'.\n", configPath);
+
+  const uint16_t port = cfg.listenPort;
+  const bool devAuthStub = cfg.devAuthStub;
   ConsoleLog("[INFO] ERServer starting (M4 scale + M5 persist) - 30 Hz sim, 20 Hz "
              "snapshots, auth={}.\n", devAuthStub ? "DEV-STUB" : "real");
 
@@ -319,12 +330,12 @@ int main()
   Neuron::Sim::ServerUniverse universe;
 
   // --- M5 persistence init (areas A/C/D/E/F, §15/§20) -------------------------------
-  // Read every secret/tunable from the environment (§20); construct the pool +
-  // persistence thread + account store. On a host with no ER_DB_CONNSTR (e.g. a local
-  // smoke run), the config's connString is empty and Start() returns false → the server
-  // runs in degraded "no persist" mode (the §16.3 graceful-skip path): the sim still
-  // runs, auth reports DbUnavailable, no snapshots/outbox.
-  Neuron::Persist::PersistConfig persistCfg = Neuron::Persist::PersistConfig::LoadFromEnv();
+  // Every secret/tunable came from the JSON config (§20); construct the pool +
+  // persistence thread + account store. On a host with no database.connectionString
+  // (e.g. a local smoke run), the config's connString is empty and Start() returns
+  // false → the server runs in degraded "no persist" mode (the §16.3 graceful-skip
+  // path): the sim still runs, auth reports DbUnavailable, no snapshots/outbox.
+  Neuron::Persist::PersistConfig persistCfg = cfg.persist;
   Neuron::Persist::PersistenceThread persist(persistCfg);
   Neuron::Persist::AccountStore accounts(persist.Pool(), &crypto, persistCfg);
 
@@ -372,13 +383,14 @@ int main()
   }
   else
   {
-    ConsoleLog("[INFO] No ER_DB_CONNSTR set - running WITHOUT persistence (sim only; auth "
-               "reports DbUnavailable). Set ER_DB_CONNSTR + ER_SERVER_PEPPER to enable M5.\n");
+    ConsoleLog("[INFO] No database.connectionString in config - running WITHOUT persistence "
+               "(sim only; auth reports DbUnavailable). Set database.connectionString + "
+               "auth.serverPepper to enable M5.\n");
   }
 
   if (!devAuthStub && !persistCfg.HasPepper())
-    ConsoleLog("[WARN] Real auth selected but ER_SERVER_PEPPER is unset - registrations "
-               "will hash without a pepper (§14 recommends one). Set ER_SERVER_PEPPER.\n");
+    ConsoleLog("[WARN] Real auth selected but auth.serverPepper is empty - registrations "
+               "will hash without a pepper (§14 recommends one). Set auth.serverPepper.\n");
 
   // --- ServerHost: inject the persist deps + telemetry (M5 area C) -------------------
   Neuron::Net::ServerHost host(&crypto, staticPriv, serverSecret, &universe);

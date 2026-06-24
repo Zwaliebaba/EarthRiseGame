@@ -1,14 +1,16 @@
 # ERServer — Windows Server Core container (§20 of the masterplan).
 #
 # Build context: repo root
-# Usage:
+# Usage (mount a JSON config holding the connection string + pepper at runtime):
 #   docker build -f Config/deploy/Dockerfile -t earthrise-server .
 #   docker run --rm -p 7777:7777/udp \
-#       -e ER_DB_CONNSTR="Server=host.docker.internal,1433;Database=EarthRise;User Id=...;Password=...;Encrypt=yes" \
-#       -e ER_SERVER_PEPPER="<base64-pepper>" \
+#       -v C:\secrets\erserver.config.json:C:\app\erserver.config.json:ro \
 #       earthrise-server
 #
 # Notes:
+#   - ERServer reads ALL settings from erserver.config.json (§20) — no env vars.
+#     Mount the real config (DB connection string + server pepper) as a file /
+#     k8s Secret volume; see Config/erserver.config.example.json for the schema.
 #   - SQL Server is an EXTERNAL network service — never containerised (§20).
 #   - The ODBC Driver 18 is installed below from the official Microsoft package.
 #   - Production: one pod per shard, UDP LoadBalancer, Windows node pool (§20).
@@ -53,9 +55,8 @@ COPY --from=build C:\src\x64\Release\ERServer.exe .
 # UDP port for client connections.
 EXPOSE 7777/udp
 
-# Connection string and server pepper injected at runtime via env / k8s Secret.
-ENV ER_DB_CONNSTR=""
-ENV ER_SERVER_PEPPER=""
-ENV ER_LISTEN_PORT=7777
-
+# ERServer reads erserver.config.json from its working directory (C:\app). The real
+# config (with the DB connection string + server pepper) is injected at runtime as a
+# read-only mount / k8s Secret volume — it is NOT baked into the image. Override the
+# path with --config if you mount it elsewhere.
 ENTRYPOINT ["C:\\app\\ERServer.exe"]

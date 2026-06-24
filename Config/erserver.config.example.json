@@ -1,0 +1,43 @@
+{
+  "_comment": [
+    "ERServer configuration. Copy this file to 'erserver.config.json' next to the",
+    "ERServer executable (or pass --config <path>) and fill in the real values.",
+    "ERServer reads ALL of its settings from this file - no environment variables.",
+    "This file holds SECRETS (database.password, auth.serverPepper): keep the real",
+    "erserver.config.json out of source control (it is gitignored) and protect it",
+    "with filesystem permissions / a mounted secret.",
+    "Every key is optional; omitted keys fall back to the documented defaults."
+  ],
+
+  "server": {
+    "listenPort": 7777,
+    "devAuthStub": false
+  },
+
+  "database": {
+    "_comment": "Empty connectionString => run WITHOUT persistence (sim only). The base string carries NO credentials; user/password are appended for SQL-login auth.",
+    "connectionString": "Driver={ODBC Driver 18 for SQL Server};Server=tcp:localhost,1433;Database=EarthRise;Encrypt=yes;TrustServerCertificate=yes",
+    "user": "er_app",
+    "password": "ChangeMe_Strong!1",
+    "authMode": "sql"
+  },
+
+  "auth": {
+    "_comment": "serverPepper is applied in-process and NEVER stored in SQL. Generate a strong random value once and keep it stable.",
+    "serverPepper": "REPLACE_WITH_A_STRONG_RANDOM_BASE64_VALUE",
+    "pbkdf2Iterations": 210000,
+    "maxLoginFailures": 5,
+    "lockoutSeconds": 900,
+    "sessionTtlSeconds": 86400
+  },
+
+  "durability": {
+    "writeBehindRpoMs": 2000,
+    "snapshotMs": 60000
+  },
+
+  "pool": {
+    "min": 1,
+    "max": 4
+  }
+}

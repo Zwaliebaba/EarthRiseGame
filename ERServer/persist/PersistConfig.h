@@ -3,18 +3,22 @@
 //
 // PersistConfig.h — central persistence/auth configuration (M5 areas A/C/E/F, §15/§20).
 //
-// Every secret and tunable the persist layer needs is read from the **environment /
-// a secret store, never hard-coded** (§20): the DB connection string, the App→DB auth
-// mode (SQL login now → managed identity / Entra ID on Azure SQL, area J), the server
+// Every secret and tunable the persist layer needs is read from the **JSON config
+// file, never hard-coded** (§20): the DB connection string, the App→DB auth mode
+// (SQL login now → managed identity / Entra ID on Azure SQL, area J), the server
 // pepper (§14), the PBKDF2 iteration count (§14, "high + tunable, stored per hash"),
-// and the write-behind RPO / snapshot cadence (§15, §19 open questions).
+// and the write-behind RPO / snapshot cadence (§15, §19 open questions). The config
+// file replaces the former process-environment loading (the host no longer reads any
+// ER_* environment variable); ServerConfig::Load() owns reading the file, and this
+// struct is filled from the parsed JSON via FromJson() below.
 //
 // The struct is plain data so the platform-independent stores can take it by value and
-// be unit-tested with literal values; LoadFromEnv() (in PersistConfig.cpp, Win32) is
-// the only piece that touches the process environment.
+// be unit-tested with literal values; FromJson() is the only config-aware entry point.
 
 #include <cstdint>
 #include <string>
+
+#include "Json.h"
 
 namespace Neuron::Persist
 {
@@ -54,13 +58,13 @@ struct PersistConfig
     // The full ODBC connection string sans credentials/auth, e.g.
     //   "Driver={ODBC Driver 18 for SQL Server};Server=tcp:host,1433;Database=earthrise;Encrypt=yes;TrustServerCertificate=no"
     // OdbcConnection appends the credential/auth fragment for the chosen DbAuthMode.
-    std::string connString;       // ER_DB_CONNSTR
-    std::string sqlUser;          // ER_DB_USER  (SqlLogin / EntraPassword)
-    std::string sqlPassword;      // ER_DB_PASSWORD (SqlLogin / EntraPassword) — secret
-    DbAuthMode  authMode{ DbAuthMode::SqlLogin }; // ER_DB_AUTH = sql|msi|entra
+    std::string connString;       // database.connectionString
+    std::string sqlUser;          // database.user  (SqlLogin / EntraPassword)
+    std::string sqlPassword;      // database.password (SqlLogin / EntraPassword) — secret
+    DbAuthMode  authMode{ DbAuthMode::SqlLogin }; // database.authMode = sql|msi|entra
 
     // -- auth (§14) -------------------------------------------------------------
-    std::string pepper;           // ER_SERVER_PEPPER — applied in-process, NEVER stored in SQL
+    std::string pepper;           // auth.serverPepper — applied in-process, NEVER stored in SQL
     uint32_t    pbkdf2Iterations{ kDefaultPbkdf2Iterations };
     uint32_t    maxLoginFailures{ kDefaultMaxLoginFailures };
     uint64_t    lockoutSeconds{ kDefaultLockoutSeconds };
@@ -77,10 +81,12 @@ struct PersistConfig
     [[nodiscard]] bool HasConnString() const noexcept { return !connString.empty(); }
     [[nodiscard]] bool HasPepper()     const noexcept { return !pepper.empty(); }
 
-    // Read the whole config from the process environment (Win32, in the .cpp). On a
-    // pure-Linux/CI run with no DB the connString is empty → callers skip the live
-    // persist paths gracefully (the §16.3 "skip if absent" behaviour).
-    [[nodiscard]] static PersistConfig LoadFromEnv();
+    // Fill the persist config from a parsed JSON config document (the whole root
+    // object). Reads the "database", "auth", "durability" and "pool" sections; any
+    // missing key keeps the default above. With no "database.connectionString" the
+    // connString stays empty → callers skip the live persist paths gracefully (the
+    // §16.3 "skip if absent" behaviour, e.g. a local smoke run with no DB).
+    [[nodiscard]] static PersistConfig FromJson(const Neuron::Json::Value& root);
 };
 
 } // namespace Neuron::Persist

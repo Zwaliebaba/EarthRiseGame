@@ -108,6 +108,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="IocpUdpListener.h" />
+    <ClInclude Include="ServerConfig.h" />
     <ClInclude Include="persist\PersistConfig.h" />
     <ClInclude Include="persist\OdbcConnection.h" />
     <ClInclude Include="persist\OdbcConnectionPool.h" />

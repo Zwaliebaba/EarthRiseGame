@@ -130,27 +130,63 @@ sqlcmd -S localhost -E -d EarthRise -Q "CREATE USER er_app FOR LOGIN er_app; ALT
 
 ---
 
-## 4. Configure the server (environment variables)
+## 4. Configure the server (JSON config file)
 
-`ERServer` reads **every secret and tunable from the process environment** (see
+`ERServer` reads **every secret and tunable from a single JSON config file** (see
+[`ERServer/ServerConfig.h`](../ERServer/ServerConfig.h),
 [`ERServer/persist/PersistConfig.cpp`](../ERServer/persist/PersistConfig.cpp) and
-[`ERServer/ERServer.cpp`](../ERServer/ERServer.cpp)). Nothing is hard-coded or read from a
-config file.
-
-### 4.1 The connection string is assembled in two pieces
-
-- `ER_DB_CONNSTR` is the **base** string **without credentials**.
-- `ER_DB_USER` + `ER_DB_PASSWORD` are appended by the server as `;UID=…;PWD=…;` for the
-  default SQL-login auth mode (`OdbcConnection::BuildAuthFragment`).
-
-So set them separately:
+[`ERServer/ERServer.cpp`](../ERServer/ERServer.cpp)). **No environment variables are
+consulted.** On startup the daemon looks for `erserver.config.json` in its working
+directory, or the path given by `--config <path>`:
 
 ```bat
-rem --- Database connection (base string has NO credentials) ---
-set "ER_DB_CONNSTR=Driver={ODBC Driver 18 for SQL Server};Server=tcp:localhost,1433;Database=EarthRise;Encrypt=yes;TrustServerCertificate=yes"
-set "ER_DB_USER=er_app"
-set "ER_DB_PASSWORD=ChangeMe_Strong!1"
-rem ER_DB_AUTH defaults to "sql" (SQL login); leave unset for dev.
+cd x64\Release
+ERServer.exe                         rem loads .\erserver.config.json
+ERServer.exe --config C:\secrets\er.json
+```
+
+Copy the template and fill it in:
+
+```bat
+copy ..\..\Config\erserver.config.example.json x64\Release\erserver.config.json
+```
+
+> **This file holds secrets** (`database.password`, `auth.serverPepper`). The real
+> `erserver.config.json` is **gitignored** — keep it out of source control and protect it
+> with filesystem permissions / a mounted secret. Commit only the `*.example.json` template.
+
+A full config looks like this (every key is optional and falls back to the default shown):
+
+```jsonc
+{
+  "server": {
+    "listenPort": 7777,        // UDP port clients connect to
+    "devAuthStub": false       // true = legacy "pick a name" identity, BYPASSES real auth
+  },
+  "database": {
+    // Base connection string WITHOUT credentials; user/password are appended by the
+    // server as ;UID=…;PWD=…; for the default SQL-login auth mode.
+    "connectionString": "Driver={ODBC Driver 18 for SQL Server};Server=tcp:localhost,1433;Database=EarthRise;Encrypt=yes;TrustServerCertificate=yes",
+    "user": "er_app",
+    "password": "ChangeMe_Strong!1",
+    "authMode": "sql"          // sql | msi | entra
+  },
+  "auth": {
+    "serverPepper": "<stable-base64-pepper>",  // applied in-process, NEVER stored in SQL
+    "pbkdf2Iterations": 210000,                // KDF cost (floor 100000)
+    "maxLoginFailures": 5,
+    "lockoutSeconds": 900,
+    "sessionTtlSeconds": 86400
+  },
+  "durability": {
+    "writeBehindRpoMs": 2000,  // position write-behind flush cadence (bounded loss)
+    "snapshotMs": 60000        // warm-restart snapshot cadence
+  },
+  "pool": {
+    "min": 1,
+    "max": 4                   // ODBC connection-pool sizing
+  }
+}
 ```
 
 > **`Encrypt=yes` + the certificate.** Driver 18 encrypts by default and validates the
@@ -158,38 +194,17 @@ rem ER_DB_AUTH defaults to "sql" (SQL login); leave unset for dev.
 > use `TrustServerCertificate=yes` for local dev (as above). For anything beyond your own
 > machine, install a trusted cert and set `TrustServerCertificate=no` instead.
 
-### 4.2 The server pepper (required for real auth)
-
-Auth is PBKDF2-HMAC-SHA512 with a per-user salt **plus a server-side pepper applied
-in-process and never stored in SQL**. Generate a strong random value once and keep it stable
-(changing it invalidates all existing password hashes):
-
-```powershell
-# PowerShell — 32 random bytes, base64
-[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
-```
-
-```bat
-set "ER_SERVER_PEPPER=<paste-the-generated-value>"
-```
-
-> If `ER_SERVER_PEPPER` is unset, the server still runs but logs a warning and hashes
+> **The server pepper.** Auth is PBKDF2-HMAC-SHA512 with a per-user salt **plus** the
+> server-side `auth.serverPepper`. Generate a strong random value once and keep it stable
+> (changing it invalidates all existing password hashes):
+> ```powershell
+> [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+> ```
+> If `auth.serverPepper` is empty the server still runs but logs a warning and hashes
 > **without** a pepper — fine for a throwaway smoke test, **not** for anything you'll keep.
 
-### 4.3 Other useful variables (all optional, sane defaults)
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `ER_LISTEN_PORT` | `7777` | UDP port clients connect to |
-| `ER_DB_AUTH` | `sql` | `sql` \| `msi` \| `entra` (use `sql` for this guide) |
-| `ER_PBKDF2_ITERATIONS` | `210000` | KDF cost (floor `100000`); raise to taste |
-| `ER_SESSION_TTL_SECONDS` | `86400` | Session-token lifetime |
-| `ER_LOGIN_MAX_FAILURES` | `5` | Failures before lockout |
-| `ER_LOGIN_LOCKOUT_SECONDS` | `900` | Lockout duration |
-| `ER_WRITEBEHIND_RPO_MS` | `2000` | Position write-behind flush cadence (bounded loss) |
-| `ER_SNAPSHOT_MS` | `60000` | Warm-restart snapshot cadence |
-| `ER_DB_POOL_MIN` / `ER_DB_POOL_MAX` | `1` / `4` | ODBC connection-pool sizing |
-| `ER_DEV_AUTH_STUB` | unset (off) | `1` = legacy "pick a name" identity, **bypasses real auth** — leave OFF for M5 |
+> **No database?** Leave `database.connectionString` empty (or omit the `database`
+> section) for a sim-only smoke run with no persistence.
 
 ---
 
@@ -213,9 +228,10 @@ On a healthy M5 startup you should see, in order:
 - `Persistence thread started (write-through outbox + write-behind + snapshot cadence …)`.
 - `Listening on UDP 0.0.0.0:7777 via IOCP …`.
 
-**Diagnosing the DB connection:** if `ER_DB_CONNSTR` is set but unreachable/misconfigured,
-you'll see `Persistence thread failed to start - degraded no-persist mode.` If it's **unset**
-you'll see `No ER_DB_CONNSTR set - running WITHOUT persistence`. Both mean the sim runs but
+**Diagnosing the DB connection:** if `database.connectionString` is set but
+unreachable/misconfigured, you'll see `Persistence thread failed to start - degraded
+no-persist mode.` If it's **empty/absent** you'll see `No database.connectionString in config
+- running WITHOUT persistence`. Both mean the sim runs but
 **nothing is saved and login reports `DbUnavailable`** — so for M5 you want neither of those
 messages. Fix the connection string / credentials / TCP-1433 reachability until you get
 `Persistence thread started`.
@@ -314,38 +330,42 @@ creates.
 
 | Symptom (server log) | Likely cause / fix |
 | --- | --- |
-| `Persistence thread failed to start - degraded no-persist mode.` | DB unreachable or creds wrong. Check TCP/IP enabled + port 1433, `ER_DB_USER`/`ER_DB_PASSWORD`, and that `er_app` has access to `EarthRise`. |
-| `No ER_DB_CONNSTR set - running WITHOUT persistence` | `ER_DB_CONNSTR` not set in this console. Env vars set with `set` only apply to the current `cmd` session. |
+| `Could not load config '…'` | The config file is missing or malformed. Copy `Config/erserver.config.example.json` to `erserver.config.json` in the working dir, or pass `--config <path>`. The message includes the parse error's line:column. |
+| `Persistence thread failed to start - degraded no-persist mode.` | DB unreachable or creds wrong. Check TCP/IP enabled + port 1433, `database.user`/`database.password`, and that `er_app` has access to `EarthRise`. |
+| `No database.connectionString in config - running WITHOUT persistence` | `database.connectionString` is empty/absent in the config file. |
 | Connection fails with a TLS/cert error | Driver 18 validates the cert by default. For local dev add `TrustServerCertificate=yes`; for real hosts install a trusted cert. |
 | `Crypto self-test FAILED` | CNG path broken — clients can't complete the handshake. Investigate before anything else (don't proceed). |
-| `Failed to start the IOCP UDP listener on port 7777 - is it in use?` | Another process owns the port, or `ER_LISTEN_PORT` collides. Pick a free port. |
-| `No datagrams received yet` warning | Client/bot not reaching the server: check Windows Firewall (UDP `ER_LISTEN_PORT`) and that the bot targets the right host:port. For the **UWP** client specifically, loopback needs an exemption (Debug deploys add one). |
+| `Failed to start the IOCP UDP listener on port 7777 - is it in use?` | Another process owns the port, or `server.listenPort` collides. Pick a free port. |
+| `No datagrams received yet` warning | Client/bot not reaching the server: check Windows Firewall (UDP `server.listenPort`) and that the bot targets the right host:port. For the **UWP** client specifically, loopback needs an exemption (Debug deploys add one). |
 | Login reports `DbUnavailable` even though the server is up | You're in no-persist/degraded mode — see the first two rows. Real auth requires a working DB. |
-| Want the old "pick a name" identity for a quick non-DB smoke run | Set `ER_DEV_AUTH_STUB=1` and leave `ER_DB_CONNSTR` unset. (Not M5 persistence — just the loop.) |
+| Want the old "pick a name" identity for a quick non-DB smoke run | Set `"devAuthStub": true` and leave `database.connectionString` empty. (Not M5 persistence — just the loop.) |
 
 ---
 
 ## 9. Quick start (copy-paste, after the one-time install in §§1–3)
 
 ```bat
-rem One-time DB prep (§3) is already done. Each new console:
-set "ER_DB_CONNSTR=Driver={ODBC Driver 18 for SQL Server};Server=tcp:localhost,1433;Database=EarthRise;Encrypt=yes;TrustServerCertificate=yes"
-set "ER_DB_USER=er_app"
-set "ER_DB_PASSWORD=ChangeMe_Strong!1"
-set "ER_SERVER_PEPPER=<your-stable-base64-pepper>"
-
+rem One-time DB prep (§3) is already done, and erserver.config.json is filled in (§4).
 cd x64\Release
+copy ..\..\Config\erserver.config.example.json erserver.config.json   rem first time only — then edit it
 start ERServer.exe
 rem ...wait for "Persistence thread started" + "Listening on UDP", then:
 ERHeadless.exe
 ```
 
+> `ERHeadless` defaults to `127.0.0.1:7777` / 3 bots. To point it elsewhere, copy
+> `Config/erheadless.config.example.json` to `erheadless.config.json` beside the exe
+> (or pass `--config <path>`) and set `server.host` / `server.port`.
+
 ---
 
 ### References
 
-- [`ERServer/ERServer.cpp`](../ERServer/ERServer.cpp) — startup sequence, env reads, warm-restart, logs.
-- [`ERServer/persist/PersistConfig.{h,cpp}`](../ERServer/persist/PersistConfig.cpp) — every env var + default.
+- [`ERServer/ERServer.cpp`](../ERServer/ERServer.cpp) — startup sequence, config load, warm-restart, logs.
+- [`ERServer/ServerConfig.h`](../ERServer/ServerConfig.h) — the JSON config schema + `--config` resolution.
+- [`ERServer/persist/PersistConfig.{h,cpp}`](../ERServer/persist/PersistConfig.cpp) — every persist/auth config key + default.
+- [`Config/erserver.config.example.json`](../Config/erserver.config.example.json) — the server config template.
+- [`NeuronCore/Json.h`](../NeuronCore/Json.h) — the small JSON parser the loaders sit on.
 - [`ERServer/persist/OdbcConnection.cpp`](../ERServer/persist/OdbcConnection.cpp) — how the connection string + credentials are assembled.
 - [`Config/db/schema.sql`](../Config/db/schema.sql) — canonical schema + the durability/data-boundary notes quoted above.
 - [`docs/implementation/M5-accounts-persistence.md`](implementation/M5-accounts-persistence.md) — M5 status (`[~]` = written, Windows-unverified) and the Done gate.
