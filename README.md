@@ -211,10 +211,22 @@ exercise:
 | Click the radar (lower-left) | Issue a smart command (move/attack/warp) to the selection |
 | `A` / `B` / `S` | Select all own ships / build a ship at base / stop selection |
 | `Ctrl+#` then `#` | Set / recall a control group |
+| `F3` | Toggle the **server-status overlay** (debug builds only) |
 
 > An amber **objective banner** (top-left) walks a new player through select → engage →
 > clear the guardian site. Selected units show a green bracket; combat units show an
 > IFF-coloured health bar.
+
+> **Server-status overlay (debug only).** A debug client build (`_DEBUG`) can press
+> **`F3`** to toggle a top-right panel that reads live status from the server over a
+> **separate, read-only diagnostic UDP port** (number of connections, objects spawned,
+> sim/encode p99, time-dilation, cumulative network bytes, plus the server's listen
+> port / auth mode / persistence). Enable it server-side by setting `server.statusPort`
+> in the ERServer config (0 = disabled) and point the client at the same port. The
+> whole feature — the `ERServer` endpoint and the client overlay — is compiled out of
+> **retail** builds via `#ifdef _DEBUG`; the port is for a trusted operator network
+> only. The platform-independent core (wire format + poller) is covered by
+> `ServerStatusTests` on the Linux `testrunner`.
 
 > **UWP loopback:** for local client↔server testing on one machine, UWP is sandboxed off
 > loopback by default. Visual Studio adds a loopback exemption in Debug; test the

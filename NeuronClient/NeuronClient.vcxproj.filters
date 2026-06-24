@@ -35,6 +35,9 @@
     <ClInclude Include="HudOverlay.h">
       <Filter>Control</Filter>
     </ClInclude>
+    <ClInclude Include="ServerStatusClient.h">
+      <Filter>Control</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Project Files">

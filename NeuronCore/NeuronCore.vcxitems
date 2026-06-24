@@ -53,6 +53,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)SequenceMath.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Serde.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ServerHost.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)ServerStatus.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ServerUniverse.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ShapeCatalog.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Snapshot.h" />

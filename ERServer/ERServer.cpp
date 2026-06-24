@@ -59,6 +59,10 @@
 // ERServer (Windows/ODBC — M4/M5)
 #include "IocpUdpListener.h"
 #include "ServerConfig.h"
+#ifdef _DEBUG
+#include "ServerStatus.h"    // §21 status record (separate diagnostic port; debug only)
+#include "StatusEndpoint.h"
+#endif
 #include "persist/PersistConfig.h"
 #include "persist/OdbcConnectionPool.h"
 #include "persist/PersistenceThread.h"
@@ -443,6 +447,25 @@ int main(int argc, char* argv[])
   ConsoleLog("[INFO] Listening on UDP 0.0.0.0:{} via IOCP ({} lanes). Waiting for clients "
              "(Ctrl+C to stop)...\n", port, listener.LaneCount());
 
+#ifdef _DEBUG
+  // --- Optional out-of-band diagnostic status port (§21; debug builds only) ----------
+  // A SEPARATE UDP socket (distinct from the IOCP game listener) that answers the fixed
+  // status query token with a read-only JSON snapshot of the live server status, for the
+  // debug client's server-status overlay. Off by default (statusPort 0); never on the
+  // 30 Hz hot loop. Compiled out entirely in retail builds.
+  const int64_t startUnix = NowUnix(); // boot time, for the uptime gauge
+  Neuron::Server::StatusEndpoint statusEndpoint;
+  if (cfg.statusPort != 0)
+  {
+    if (statusEndpoint.Start(cfg.statusPort))
+      ConsoleLog("[INFO] Debug status endpoint listening on UDP 0.0.0.0:{} (separate "
+                 "read-only diagnostic port; debug build only).\n", cfg.statusPort);
+    else
+      ConsoleLog("[WARN] Could not open the debug status port {} (in use?) - the server "
+                 "status overlay will be unavailable.\n", cfg.statusPort);
+  }
+#endif
+
   // OS thread-pool width for the M4 area-F snapshot encode (read-only, frozen post-tick
   // state). EncodeClientsPooled partitions clients across this many workers; the gathered
   // output is partition-count-independent (byte-identical to the serial reference).
@@ -580,6 +603,33 @@ int main(int argc, char* argv[])
       (void)ac; // exported via pTel at the login sites (ServerHost); mirrored here for logs
     }
 
+#ifdef _DEBUG
+    // 4d) Answer any pending diagnostic status queries (debug builds only). The status
+    //     record is built lazily (only when a query arrives) from the same §21 telemetry
+    //     the heartbeat logs, plus the live connection/object counts and static config.
+    statusEndpoint.Poll([&]() {
+      Neuron::Net::ServerStatus s;
+      s.uptimeSeconds      = static_cast<uint64_t>(NowUnix() - startUnix);
+      s.simTick            = simTick;
+      s.connectionsPending = static_cast<uint32_t>(host.ConnectionCount());
+      s.connectionsActive  = static_cast<uint32_t>(host.ConnectedCount());
+      s.objectsSpawned     = universe.World().EntityCount();
+      s.projectiles        = static_cast<uint64_t>(universe.ProjectileCount());
+      s.simP99Ms           = tel.SimP99();
+      s.encodeP99Ms        = tel.EncodeP99();
+      s.dilation           = tel.Dilation();
+      s.downstreamBytes    = tel.Net().downstreamBytes;
+      s.upstreamBytes      = tel.Net().upstreamBytes;
+      s.datagramsIn        = tel.Net().datagramsIn;
+      s.datagramsOut       = tel.Net().datagramsOut;
+      s.baselineBytes      = tel.BaselineBytes();
+      s.listenPort         = port;
+      s.devAuthStub        = devAuthStub;
+      s.persistenceEnabled = dbAvailable;
+      return s;
+    });
+#endif
+
     // 5) Log connection-state transitions immediately (the interesting events).
     const int connections = static_cast<int>(host.ConnectionCount());
     const int connected = static_cast<int>(host.ConnectedCount());
@@ -618,6 +668,9 @@ int main(int argc, char* argv[])
 
   // --- Shutdown: stop receive, flush persistence, clean up --------------------------
   ConsoleLog("[INFO] Shutting down - stopping listener + persistence...\n");
+#ifdef _DEBUG
+  statusEndpoint.Stop();
+#endif
   listener.Stop();
   if (dbAvailable)
   {
