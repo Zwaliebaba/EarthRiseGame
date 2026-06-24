@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "DeviceResources.h"
 #include "TextureGpu.h"
 
 struct ID3D12DescriptorHeap;
@@ -34,8 +35,6 @@ struct ID3D12RootSignature;
 
 namespace Neuron::Render
 {
-
-class DeviceResources;
 
   class ParticleRenderer
   {
@@ -74,7 +73,7 @@ class DeviceResources;
                 float rightX, float rightY, float rightZ,
                 float upX, float upY, float upZ);
 
-    static constexpr UINT kFrameCount = 2;
+    static constexpr UINT kFrameCount = DeviceResources::kFrameCount;
     static constexpr UINT kMaxParticles = 1500;      // ambient dust field
     static constexpr UINT kMaxEmitParticles = 1024;  // emitter-spawned glow
     static constexpr UINT kMaxVerts = (kMaxParticles + kMaxEmitParticles) * 6;

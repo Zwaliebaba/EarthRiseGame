@@ -70,6 +70,14 @@
 static constexpr uint16_t kServerPort = 7777;
 static constexpr float kInterpAlpha = 0.0f; // M1b: snap-on-ack (alpha unused)
 
+// M5 real-auth credentials (§14). The server (server.devAuthStub = false) only spawns
+// and replicates a player's world after a successful account login, so the client must
+// authenticate. These dev defaults auto-register on first run and log in thereafter.
+// TODO(M6 UX): replace with a login/registration screen that collects these from the
+// player (SessionImpl::SetCredentials + LastAuthResult() already expose the seam).
+static constexpr const char* kDevAuthUser     = "player1";
+static constexpr const char* kDevAuthPassword = "player1-devpass";
+
 // Read a file packaged with the app (relative to the install location) into a
 // byte buffer. Read-only access to the package folder is permitted on UWP.
 // Returns empty on any failure (callers fail-safe).
@@ -235,7 +243,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_socket = std::make_unique<Neuron::Net::DatagramSocketAdapter>();
     check_bool(m_socket->Open(0)); // ephemeral port
 
-    m_session = std::make_unique<Neuron::Client::SessionImpl>(&m_crypto, m_pinnedPub, m_socket.get(), "player1");
+    m_session = std::make_unique<Neuron::Client::SessionImpl>(&m_crypto, m_pinnedPub, m_socket.get());
+    // Real account auth (§14): bind to an account so the server spawns + replicates our
+    // world. Requires the server to run real auth (server.devAuthStub = false); for a
+    // dev-stub server, drop this line and pass a name to the ctor instead.
+    m_session->SetCredentials(kDevAuthUser, kDevAuthPassword);
   }
 
   void SetWindow(const Windows::UI::Core::CoreWindow& window)

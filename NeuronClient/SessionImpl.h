@@ -37,6 +37,22 @@ public:
         , m_loginName(std::move(loginName))
     {}
 
+    // M5 real auth (§14): connect bound to an account (username + password) instead of
+    // the dev-stub name-only login. Call before Connect(). The client logs in, auto-
+    // registering on first run. Selecting this requires the server to run real auth
+    // (server.devAuthStub = false); against a dev-stub server, use the name-only ctor.
+    void SetCredentials(std::string username, std::string password)
+    {
+        m_loginName   = std::move(username);
+        m_password    = std::move(password);
+        m_useRealAuth = true;
+    }
+
+    // Last auth verdict (Neuron::Net::kAuthResult* wire codes; 0xFF until the server
+    // answers) — a login screen reads this to show "wrong password / locked / ...".
+    [[nodiscard]] uint8_t LastAuthResult() const noexcept
+        { return m_conn ? m_conn->LastAuthResult() : 0xFF; }
+
     // -----------------------------------------------------------------------
     // Session interface
     // -----------------------------------------------------------------------
@@ -44,7 +60,8 @@ public:
     {
         m_serverEp = Neuron::Net::Endpoint{ std::string(host), port };
         m_conn = std::make_unique<Neuron::Net::ClientConnection>(m_crypto, m_pinnedPub);
-        if (!m_loginName.empty()) m_conn->SetLoginName(m_loginName);
+        if (m_useRealAuth) m_conn->SetCredentials(m_loginName, m_password);
+        else if (!m_loginName.empty()) m_conn->SetLoginName(m_loginName);
         m_state = SessionState::Handshaking;
         const uint64_t nowUs = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
@@ -99,9 +116,16 @@ public:
                 m_lastKeepalive = now;
             }
         } else if (m_state != SessionState::Disconnected) {
-            std::vector<std::vector<uint8_t>> rs;
-            m_conn->ResendPending(rs);
-            for (auto& d : rs) m_socket->SendTo(m_serverEp, d);
+            // Retransmit the pending handshake/auth frame, but throttled — auth re-sends
+            // re-run the server's PBKDF2 (§14), so firing every tick would flood expensive
+            // login attempts while a reply is in flight. ~5/s is ample for loss recovery.
+            const auto now = std::chrono::steady_clock::now();
+            if (now - m_lastResend >= std::chrono::milliseconds(200)) {
+                std::vector<std::vector<uint8_t>> rs;
+                m_conn->ResendPending(rs);
+                for (auto& d : rs) m_socket->SendTo(m_serverEp, d);
+                m_lastResend = now;
+            }
         }
     }
 
@@ -151,12 +175,15 @@ private:
     Neuron::Net::EcPubKey                          m_pinnedPub;
     Neuron::Net::ISocket*                          m_socket;
     std::string                                    m_loginName;
+    std::string                                    m_password;
+    bool                                           m_useRealAuth{ false };
     std::unique_ptr<Neuron::Net::ClientConnection> m_conn;
     Neuron::Net::Endpoint                          m_serverEp;
     SessionState                                   m_state{ SessionState::Disconnected };
     std::queue<std::vector<uint8_t>>               m_snapQueue;
     std::array<uint8_t, 2048>                      m_recvBuf{};
     std::chrono::steady_clock::time_point          m_lastKeepalive{};
+    std::chrono::steady_clock::time_point          m_lastResend{};
 };
 
 } // namespace Neuron::Client

@@ -120,7 +120,7 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
     rd.Height = rd.DepthOrArraySize = rd.MipLevels = 1;
     rd.SampleDesc.Count = 1;
     rd.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    for (UINT i = 0; i < kFrameCount; ++i)
     {
         winrt::check_hresult(m_device->CreateCommittedResource(
             &hpUpload, D3D12_HEAP_FLAG_NONE, &rd,
@@ -134,7 +134,7 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
 
 void CanvasRenderer::Uninitialize()
 {
-    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    for (UINT i = 0; i < kFrameCount; ++i)
         if (m_vtxBuf[i] && m_vtxPtr[i]) { m_vtxBuf[i]->Unmap(0, nullptr); m_vtxPtr[i] = nullptr; }
 }
 

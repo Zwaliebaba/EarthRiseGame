@@ -459,11 +459,10 @@ private:
     // see the header note on why this isn't a new MsgType). Request bodies carry
     // [opcode u8][u16 userLen][user][u16 passLen][pass]; the token reply rides an
     // existing LoginResponse-shaped Command frame echoing a session-token digest.
-    enum : uint8_t {
-        kAuthOpcodeRegister = 0xA0, // register a new account, then auto-login
-        kAuthOpcodeLogin    = 0xA1, // login to an existing account
-        kAuthOpcodeResult   = 0xA2, // server → client: [opcode][AuthResult u8][netId u32][tokenLo u64]
-    };
+    // Opcodes live in Protocol.h (Neuron::Net::AuthOpcode) so the client matches them.
+    static constexpr uint8_t kAuthOpcodeRegister = Neuron::Net::kAuthOpcodeRegister;
+    static constexpr uint8_t kAuthOpcodeLogin    = Neuron::Net::kAuthOpcodeLogin;
+    static constexpr uint8_t kAuthOpcodeResult   = Neuron::Net::kAuthOpcodeResult;
     [[nodiscard]] static bool IsAuthOpcode(uint8_t b) noexcept
     {
         return b == kAuthOpcodeRegister || b == kAuthOpcodeLogin;
@@ -525,6 +524,7 @@ private:
         // bound to the AccountId (§14 "login binds the session to the Base/entity").
         const uint32_t netId = BindAccountBase(session);
         entry.conn->SetPlayerNetId(netId);
+        entry.conn->MarkConnected(); // auth done → flip to Connected so snapshots flow (§14)
         entry.playerNetId  = netId;
         entry.authed       = true;
         entry.accountId    = session.accountId;

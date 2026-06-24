@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "DeviceResources.h"
 #include "FontAtlasLayout.h"
 #include "TextureGpu.h"
 
@@ -37,8 +38,6 @@ struct ID3D12RootSignature;
 
 namespace Neuron::Render
 {
-
-class DeviceResources;
 
 class CanvasRenderer
 {
@@ -77,7 +76,7 @@ public:
 
     void Render(ID3D12GraphicsCommandList* cl, UINT screenWidth, UINT screenHeight);
 
-    static constexpr UINT kFrameCount = 2;
+    static constexpr UINT kFrameCount = DeviceResources::kFrameCount;
     static constexpr UINT kMaxQuads = 4096;
     static constexpr UINT kMaxVerts = kMaxQuads * 6;
     static constexpr UINT kMaxTextures = 16; // SRV-heap slots (font + chrome + ...)

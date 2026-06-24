@@ -125,7 +125,7 @@ namespace Neuron::Render
     rd.Height = rd.DepthOrArraySize = rd.MipLevels = 1;
     rd.SampleDesc.Count = 1;
     rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    for (UINT i = 0; i < kFrameCount; ++i)
     {
       if (FAILED(m_device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd,
                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
@@ -160,7 +160,7 @@ namespace Neuron::Render
 
   void ParticleRenderer::Uninitialize()
   {
-    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    for (UINT i = 0; i < kFrameCount; ++i)
       if (m_vb[i] && m_vbPtr[i]) { m_vb[i]->Unmap(0, nullptr); m_vbPtr[i] = nullptr; }
   }
 
@@ -252,6 +252,7 @@ namespace Neuron::Render
   {
     if (!m_tex.valid()) return;
     const UINT fi = m_dr->FrameIndex();
+    if (fi >= kFrameCount) return;
     if (!m_vbPtr[fi]) return;
 
     NEURON_PIX_SCOPED(cl, PixColors::Scene, "Particles");

@@ -365,9 +365,13 @@ public:
     {
         DeltaSnapshot snap;
         if (!DecodeDeltaSnapshot(body, snap)) return false;
+        if (snap.tick > m_latestTick) m_latestTick = snap.tick;
         for (const DeltaRecord& r : snap.records) ApplyRecord(snap.tick, r);
         return true;
     }
+
+    // Highest tick applied so far (the accumulated state's logical time).
+    [[nodiscard]] uint32_t LatestTick() const noexcept { return m_latestTick; }
 
     [[nodiscard]] const SnapshotEntity* Find(uint32_t netId) const
     {
@@ -410,6 +414,7 @@ private:
 
     std::unordered_map<uint32_t, SnapshotEntity> m_entities;
     std::unordered_map<uint32_t, uint32_t>       m_lastTick; // netId → last applied tick (LWW)
+    uint32_t                                     m_latestTick{ 0 };
 };
 
 } // namespace Neuron::Sim

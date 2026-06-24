@@ -19,20 +19,26 @@ namespace Neuron::Client
 class ReplicaManager
 {
 public:
-    // Update from an encoded snapshot body. Returns false on decode failure.
+    // Update from an encoded delta-snapshot body. Returns false on decode failure.
+    // The server's live path ships the M4 quantized delta wire format (§8.4), so we
+    // feed each body into the stateful decoder, which reconstructs full entity state
+    // (last-writer-wins by tick, idempotent under reorder/dup) and then project the
+    // accumulated set into render space.
     // playerNetId: the local player's network entity ID (used to track the
-    // floating origin sector; 0 = unknown, use entity[0] as fallback).
+    // floating origin sector; 0 = unknown, use any entity as fallback).
     bool Update(std::span<const uint8_t> snapshotBytes, uint32_t playerNetId)
     {
-        Neuron::Sim::Snapshot snap;
-        if (!Neuron::Sim::DecodeSnapshot(snapshotBytes, snap)) return false;
+        if (!m_decode.Apply(snapshotBytes)) return false;
 
-        m_tick = snap.tick;
+        m_tick = m_decode.LatestTick();
         m_current.Clear();
 
-        // First pass: rebase floating origin to the tracked player's sector.
-        for (const auto& e : snap.entities) {
-            if (e.netId == playerNetId || (playerNetId == 0 && !snap.entities.empty())) {
+        const auto& ents = m_decode.Entities();
+
+        // First pass: rebase floating origin to the tracked player's sector (or any
+        // entity if the player isn't known/visible yet).
+        for (const auto& [netId, e] : ents) {
+            if (netId == playerNetId || playerNetId == 0) {
                 const auto sec = Neuron::Universe::UniverseToSector(e.pos);
                 m_floatingOrigin.RebaseToSector(sec);
                 break;
@@ -40,7 +46,7 @@ public:
         }
 
         // Second pass: project every entity into render space.
-        for (const auto& e : snap.entities) {
+        for (const auto& [netId, e] : ents) {
             if (m_current.count >= ReplicaSet::kMaxEntities) break;
 
             // Combine base UniversePos with the sub-metre localOffset before projection.
@@ -75,6 +81,7 @@ public:
 
 private:
     ReplicaSet                          m_current;
+    Neuron::Sim::DeltaDecodeState       m_decode;       // accumulates full state from deltas
     Neuron::Universe::FloatingOriginHelper m_floatingOrigin{};
     uint32_t                            m_tick{ 0 };
 };

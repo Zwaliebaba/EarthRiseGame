@@ -91,6 +91,30 @@ enum class MsgType : uint8_t
 };
 
 // ---------------------------------------------------------------------------
+// M5 account auth sub-protocol (§14). The credential exchange rides reliable
+// MsgType::Command frames whose first body byte is one of these opcodes (the
+// §8.5 wire MsgType set is frozen, so auth is layered on Command, not a new
+// type — see ServerHost's header note). Both ServerHost (server) and
+// ClientConnection (client) reference these so the wire format can't drift.
+//   request  (client → server): [opcode u8][u16 userLen LE][user][u16 passLen LE][pass]
+//   result   (server → client): [kAuthOpcodeResult][AuthResult u8][netId u32 LE][tokenLo u64 LE]
+enum AuthOpcode : uint8_t
+{
+    kAuthOpcodeRegister = 0xA0, // register a new account, then auto-login
+    kAuthOpcodeLogin    = 0xA1, // login to an existing account
+    kAuthOpcodeResult   = 0xA2, // server → client auth result
+};
+
+// Wire values of Persist::AuthResult the client needs to branch on. Kept in sync
+// with ERServer/persist/AccountStore.h (NeuronCore must not depend on the persist
+// layer, so the two on-the-wire codes the client reacts to are mirrored here).
+enum AuthResultWire : uint8_t
+{
+    kAuthResultOk                 = 0, // success → bound to a base, enter snapshot loop
+    kAuthResultInvalidCredentials = 2, // no such account / wrong password (also "doesn't exist yet")
+};
+
+// ---------------------------------------------------------------------------
 // Datagram header (Appendix A) — serialized in clear, authenticated as AAD.
 // ---------------------------------------------------------------------------
 struct PacketHeader

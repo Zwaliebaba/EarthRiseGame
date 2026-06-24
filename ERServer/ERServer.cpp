@@ -379,7 +379,19 @@ int main(int argc, char* argv[])
                  "+ snapshot cadence {} ms, RPO {} ms; continuing from outbox watermark "
                  "{}).\n", persistCfg.snapshotMs, persistCfg.writeBehindRpoMs, outboxWatermark);
     else
-      ConsoleLog("[WARN] Persistence thread failed to start - degraded no-persist mode.\n");
+    {
+      // A database.connectionString IS configured, so the operator intends persistence —
+      // failing to connect is a hard error, NOT a silent degrade. Refuse to boot rather
+      // than run a server that looks healthy but persists nothing (data loss on restart).
+      ConsoleLog("[ERROR] database.connectionString is set but the DB connection FAILED - "
+                 "refusing to start (would otherwise run with NO persistence). Check that "
+                 "SQL Server is reachable at the configured Server=, the database/login "
+                 "exist, and the ODBC Driver 18 is installed. Connection string: \"{}\". "
+                 "To run sim-only on purpose, clear database.connectionString in the config.\n",
+                 persistCfg.connString);
+      Neuron::Net::WinsockSocket::GlobalCleanup();
+      return 1;
+    }
   }
   else
   {
@@ -596,10 +608,6 @@ int main(int argc, char* argv[])
                    pTel.OutboxDepth(), pTel.RpoWatermarkMs(), ac.loginSuccess,
                    ac.loginFailures, ac.lockouts, ac.rateLimited);
       }
-      if (rxDatagrams == 0)
-        ConsoleLog("[WARN] No datagrams received yet. If a client is running, check: UWP "
-                   "loopback exemption, Windows Firewall, and that the client targets UDP {}.\n",
-                   port);
       lastLogTick = simTick;
     }
 
