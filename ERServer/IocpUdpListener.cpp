@@ -267,6 +267,14 @@ namespace Neuron::Server
 IocpUdpListener::IocpUdpListener()  : impl_(new IocpUdpListenerImpl) {}
 IocpUdpListener::~IocpUdpListener() { Stop(); delete impl_; impl_ = nullptr; }
 
+void IocpUdpListener::SetLaneCount(unsigned lanes)
+{
+    if (!impl_ || impl_->running.load())
+        return;
+
+    impl_->laneCount = lanes;
+}
+
 void IocpUdpListener::SetRecvCallback(RecvCallback cb)
 {
     impl_->callback = std::move(cb);
@@ -327,6 +335,20 @@ bool IocpUdpListener::Start(uint16_t port, unsigned numThreads)
 
     impl_->running.store(true, std::memory_order_release);
 
+    const unsigned resolvedLaneCount = (impl_->laneCount != 0)
+        ? impl_->laneCount
+        : (std::thread::hardware_concurrency() != 0 ? std::thread::hardware_concurrency() : 1u);
+
+    impl_->lanes.clear();
+    impl_->lanes.reserve(resolvedLaneCount);
+    for (unsigned i = 0; i < resolvedLaneCount; ++i) {
+        auto lane = std::make_unique<Lane>();
+        lane->running.store(true, std::memory_order_release);
+        lane->thread = std::thread([this, rawLane = lane.get()] { impl_->LaneLoop(rawLane); });
+        impl_->lanes.push_back(std::move(lane));
+    }
+    impl_->laneCount = resolvedLaneCount;
+
     // Pre-post the receive pool.
     impl_->recvOps.reserve(kRecvPoolSize);
     for (int i = 0; i < kRecvPoolSize; ++i) {
@@ -373,6 +395,15 @@ void IocpUdpListener::Stop()
             t.join();
     impl_->workers.clear();
 
+    for (auto& lane : impl_->lanes) {
+        lane->running.store(false, std::memory_order_release);
+        lane->cv.notify_one();
+    }
+    for (auto& lane : impl_->lanes)
+        if (lane->thread.joinable())
+            lane->thread.join();
+    impl_->lanes.clear();
+
     for (auto* op : impl_->recvOps)
         delete op;
     impl_->recvOps.clear();
@@ -416,6 +447,11 @@ int IocpUdpListener::SendTo(const Neuron::Net::Endpoint& to, std::span<const uin
 uint16_t IocpUdpListener::LocalPort() const
 {
     return impl_ ? impl_->port : 0;
+}
+
+unsigned IocpUdpListener::LaneCount() const
+{
+    return impl_ ? impl_->laneCount : 0;
 }
 
 } // namespace Neuron::Server
