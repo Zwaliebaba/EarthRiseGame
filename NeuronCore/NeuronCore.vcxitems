@@ -38,6 +38,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)ICrypto.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Interest.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)ISocket.h" />
+    <ClInclude Include="$(MSBuildThisFileDirectory)Json.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)LoopbackNetwork.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)MathCommon.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Movement.h" />

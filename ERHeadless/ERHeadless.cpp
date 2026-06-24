@@ -10,8 +10,13 @@
 //
 // Bots != PvE NPCs. Bots are client sessions; PvE NPCs are server-side AI.
 //
-// Pinning: bots load the server's static public key from 'er_server_pub.bin'
-// (written by ERServer on startup) — overridable via ER_SERVER_PUB.
+// Pinning: bots load the server's static public key from the file named by
+// server.pinnedPublicKeyFile in the JSON config (default 'er_server_pub.bin',
+// written by ERServer on startup).
+//
+// Config: all connection settings come from a JSON file (§20), not the process
+// environment. Looks for 'erheadless.config.json' in the working directory, or a
+// path passed via --config <path>. See Config/erheadless.config.example.json.
 
 #include "pch.h"
 #include <array>
@@ -23,6 +28,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Debug.h"
@@ -32,22 +38,41 @@
 #include "Command.h"
 #include "Snapshot.h"
 #include "UniversePos.h"
+#include "ClientConfig.h"
 
 namespace
 {
-constexpr uint32_t kDefaultBotCount = 3;
-
-std::string EnvOr(const char* name, const char* fallback)
+// Resolve the config-file path from a "--config <path>" / "--config=<path>"
+// argument, else the default filename in the working directory.
+std::string ConfigPathFromArgs(int argc, char* argv[])
 {
-    char buf[256]{};
-    DWORD n = GetEnvironmentVariableA(name, buf, sizeof(buf));
-    if (n > 0 && n < sizeof(buf)) return std::string(buf, n);
-    return fallback;
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string_view arg = argv[i];
+        if (arg == "--config" && i + 1 < argc)
+            return argv[i + 1];
+        if (arg.rfind("--config=", 0) == 0)
+            return std::string(arg.substr(std::string_view("--config=").size()));
+    }
+    return Neuron::Client::DEFAULT_CONFIG_FILENAME;
 }
 
-bool LoadPinnedPub(Neuron::Net::EcPubKey& out)
+// First positional (non-flag) argument, if any — kept for the legacy
+// "ERHeadless.exe <botCount>" invocation, which overrides headless.botCount.
+const char* FirstPositionalArg(int argc, char* argv[])
 {
-    const std::string path = EnvOr("ER_SERVER_PUB", "er_server_pub.bin");
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string_view arg = argv[i];
+        if (arg == "--config") { ++i; continue; } // skip the flag's value
+        if (arg.rfind("--", 0) == 0) continue;     // skip other flags
+        return argv[i];
+    }
+    return nullptr;
+}
+
+bool LoadPinnedPub(const std::string& path, Neuron::Net::EcPubKey& out)
+{
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;
     f.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(out.size()));
@@ -107,10 +132,25 @@ void SendFleet(Bot& b, const Neuron::Net::Endpoint& serverEp, const Neuron::Sim:
 
 int main(int argc, char* argv[])
 {
-    const uint32_t botCount = (argc >= 2) ? static_cast<uint32_t>(std::atoi(argv[1]))
-                                          : kDefaultBotCount;
-    const std::string host = EnvOr("ER_SERVER_HOST", "127.0.0.1");
-    const uint16_t    port = static_cast<uint16_t>(std::atoi(EnvOr("ER_SERVER_PORT", "7777").c_str()));
+    // All connection settings come from the JSON config (§20). A missing config
+    // file is non-fatal here — the defaults (localhost:7777, 3 bots) are exactly
+    // what a local smoke run wants — but a malformed file is worth surfacing.
+    const std::string configPath = ConfigPathFromArgs(argc, argv);
+    Neuron::Client::ClientConfig cfg;
+    std::string configError;
+    if (Neuron::Client::ClientConfig::Load(configPath, cfg, &configError))
+        EARTHRISE_LOG_INFO("ERHeadless: loaded config from '{}'.\n", configPath.c_str());
+    else
+        EARTHRISE_LOG_INFO("ERHeadless: no usable config ({}) - using defaults.\n",
+                           configError.c_str());
+
+    // Legacy positional override: "ERHeadless.exe <botCount>" still works.
+    if (const char* botArg = FirstPositionalArg(argc, argv))
+        cfg.botCount = static_cast<uint32_t>(std::atoi(botArg));
+
+    const uint32_t    botCount = cfg.botCount;
+    const std::string host     = cfg.host;
+    const uint16_t    port     = cfg.port;
 
     EARTHRISE_LOG_INFO("ERHeadless (M1a) — {} bots -> {}:{}.\n", botCount, host, port);
 
@@ -126,8 +166,9 @@ int main(int argc, char* argv[])
     }
 
     Neuron::Net::EcPubKey pinnedPub{};
-    if (!LoadPinnedPub(pinnedPub)) {
-        EARTHRISE_LOG_ERROR("Could not load pinned key (er_server_pub.bin). Start ERServer first.\n");
+    if (!LoadPinnedPub(cfg.pinnedPublicKeyFile, pinnedPub)) {
+        EARTHRISE_LOG_ERROR("Could not load pinned key ({}). Start ERServer first.\n",
+                            cfg.pinnedPublicKeyFile.c_str());
         return 1;
     }
 

@@ -5,7 +5,9 @@
 #   - Docker Desktop with Windows containers mode
 #   - A SQL Server instance on the host (Developer edition is free)
 #     with a database named 'EarthRise' and schema from Config/db/schema.sql applied.
-#   - Set ER_DB_CONNSTR and ER_SERVER_PEPPER in a .env file (never commit secrets).
+#   - Create a real erserver.config.json (copy Config/erserver.config.example.json
+#     and fill in the connection string + server pepper). It is gitignored — never
+#     commit secrets. The compose file mounts it into the container read-only.
 #
 # Usage:
 #   docker compose -f Config/deploy/docker-compose.dev.yml up
@@ -22,11 +24,11 @@ services:
     image: earthrise-server:dev
     ports:
       - "7777:7777/udp"
-    environment:
-      # Override via .env or inline
-      ER_DB_CONNSTR: "${ER_DB_CONNSTR:?Set ER_DB_CONNSTR in .env}"
-      ER_SERVER_PEPPER: "${ER_SERVER_PEPPER:?Set ER_SERVER_PEPPER in .env}"
-      ER_LISTEN_PORT: "7777"
+    volumes:
+      # Mount the real (gitignored) config holding the connection string + pepper.
+      # ERServer reads it from its working directory (C:\app). ${ER_CONFIG:-...}
+      # lets you point at a different host path; the default is repo-root local.
+      - "${ER_CONFIG:-../../erserver.config.json}:C:/app/erserver.config.json:ro"
     # host.docker.internal resolves to the host machine on Docker Desktop
     extra_hosts:
       - "host.docker.internal:host-gateway"

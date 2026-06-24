@@ -368,3 +368,10 @@ FodyWeavers.xsd
 
 # Environment config (contains credentials)
 .env
+
+# Server/client JSON config (contains credentials: DB password, server pepper).
+# Commit only the *.example.json templates under Config/, never the real files.
+erserver.config.json
+erheadless.config.json
+**/erserver.config.json
+**/erheadless.config.json

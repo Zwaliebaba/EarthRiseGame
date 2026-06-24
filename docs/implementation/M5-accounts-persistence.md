@@ -14,8 +14,8 @@
 > - **Written, Windows-unverified:** the `ERServer/persist/*` ODBC layer (A), `CngCrypto::Pbkdf2HmacSha512`
 >   (C — must match the portable reference, gated by the `ERServerTest` cross-check), `ServerHost`
 >   account-bound auth flow (C), write-behind (E) + `SimSnapshotStore` (F) SQL, **and now the
->   `ERServer.cpp` `main()` bootstrap** that wires them together: `PersistConfig::LoadFromEnv` →
->   `OdbcConnectionPool` + `PersistenceThread` + `AccountStore` injected into `ServerHost`
+>   `ERServer.cpp` `main()` bootstrap** that wires them together: `ServerConfig::Load` (JSON) →
+>   `PersistConfig::FromJson` → `OdbcConnectionPool` + `PersistenceThread` + `AccountStore` injected into `ServerHost`
 >   (`SetPersistDeps`); the persisted static server key (file-backed, replacing the M1a ephemeral
 >   key); startup warm-restart restore (`LoadLatestSnapshotForRestore` → `DecodeState` →
 >   `ServerUniverse::RestoreState`, then `ReadOutboxSince` replay); the periodic snapshot capture
@@ -126,7 +126,7 @@
 - **Work:**
   - [~] **`ERServer/persist/` ODBC wrapper:** `OdbcConnection` connects (`SQLDriverConnect`, Driver 18,
         `Encrypt=yes`), with parameterized statements, result binding + error mapping; the connection
-        string + credentials come from `PersistConfig::LoadFromEnv` (§20), never hard-coded.
+        string + credentials come from the JSON config via `PersistConfig::FromJson` (§20), never hard-coded.
         *Written; validate on the build agent.*
   - [~] **Connection pooling** + a **persistence thread**: `OdbcConnectionPool` + `PersistenceThread`
         own both durability paths (D outbox drain, E write-behind batch) via the `PersistQueue` MPSC
@@ -427,7 +427,9 @@ the shape below; the only remaining work is the live kill/restart drill (area I)
 
 ```cpp
 // 1. Config + persistence thread (owns the ODBC pool; off the 30 Hz tick, §9).
-PersistConfig cfg = PersistConfig::LoadFromEnv();         // ER_DB_CONNSTR / ER_SERVER_PEPPER / cost
+ServerConfig srv;                                        // from erserver.config.json (--config)
+ServerConfig::Load(configPath, srv);                     // JSON: database.* / auth.* / durability.* / pool.*
+PersistConfig cfg = srv.persist;
 PersistenceThread persist(cfg);
 persist.Start([&](int64_t nowUnix){ /* SnapshotRequest: CaptureState→EncodeState + watermark */ });
 AccountStore accounts(persist.Pool(), &crypto, cfg);

@@ -33,6 +33,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
+    <ClInclude Include="ServerConfig.h" />
     <ClInclude Include="IocpUdpListener.h">
       <Filter>NetIO</Filter>
     </ClInclude>

@@ -6,6 +6,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
+    <ClInclude Include="ClientConfig.h" />
     <ClInclude Include="Session.h">
       <Filter>Session</Filter>
     </ClInclude>

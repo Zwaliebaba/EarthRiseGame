@@ -161,7 +161,7 @@
   (`IClientController.h` notes the same). M2 wired combat-adjacent VFX/SFX hooks; M6 fills the
   combat cues.
 - **Deployment is dev-only.** `Config/deploy/Dockerfile` (Windows Server Core ltsc2022, ODBC
-  Driver 18, UDP 7777, env `ER_DB_CONNSTR`/`ER_SERVER_PEPPER`/`ER_LISTEN_PORT`) +
+  Driver 18, UDP 7777, config mounted from `erserver.config.json`) +
   `docker-compose.dev.yml` exist. There are **no Kubernetes manifests, no UDP LoadBalancer, no
   Windows node-pool / Secret / affinity config** — net-new for area K.
 - **UWP package exists.** `EarthRise/Package.appxmanifest` (identity, self-signed `CN=Zwaliebaba`,
@@ -511,9 +511,10 @@
   - [ ] **UDP LoadBalancer:** a `Service type: LoadBalancer` with **`protocol: UDP`** (or
         NodePort / cloud UDP LB) exposing the reliable-UDP port; **client→pod session affinity** so
         a connection stays on its shard pod.
-  - [ ] **Config + secrets:** a **Secret** for the Azure SQL connection string (area J) +
-        `ER_SERVER_PEPPER`, a ConfigMap for non-secret tunables (`ER_LISTEN_PORT`, game-data
-        version) — the Dockerfile already reads these envs.
+  - [ ] **Config + secrets:** mount `erserver.config.json` as a **Secret** volume (it holds the
+        Azure SQL connection string (area J) + `auth.serverPepper`); non-secret tunables
+        (`server.listenPort`, game-data version) can live in a ConfigMap-mounted config or a second
+        merged file — the server reads the JSON config from its working dir (or `--config`).
   - [ ] **Rolling-restart on the cluster:** prove the §26 SLA on K8s — restart the pod
         (warm-restart, M5 F), clients reconnect with backoff/jitter (M5 G), economy zero-loss; a
         brief blip is acceptable. **One shard = one pod** (the matchmaking/directory service for
