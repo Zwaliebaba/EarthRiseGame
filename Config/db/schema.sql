@@ -35,6 +35,36 @@
 
 
 -- ============================================================
+-- CLEAN SLATE — drop everything before (re)creating the schema
+-- ------------------------------------------------------------
+-- Running this file is destructive: it wipes ALL user tables (and their data)
+-- in the current database so the CREATE TABLEs below start from an empty schema.
+-- Foreign keys are dropped first (FKs — including the circular Ships ↔
+-- InsuranceContracts reference — otherwise block DROP TABLE), then every base
+-- table. Dynamic SQL keeps this resilient to ordering and to objects added
+-- outside this file. Azure-SQL-compatible: no cross-DB queries, no SQL Agent.
+-- ============================================================
+DECLARE @sql NVARCHAR(MAX);
+
+-- 1) Drop all foreign-key constraints so tables can be dropped in any order.
+SET @sql = N'';
+SELECT @sql = @sql + N'ALTER TABLE ' + QUOTENAME(SCHEMA_NAME(t.schema_id))
+    + N'.' + QUOTENAME(t.name) + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';' + CHAR(10)
+FROM sys.foreign_keys AS fk
+JOIN sys.tables AS t ON t.object_id = fk.parent_object_id;
+EXEC sys.sp_executesql @sql;
+
+-- 2) Drop all base tables.
+SET @sql = N'';
+SELECT @sql = @sql + N'DROP TABLE ' + QUOTENAME(SCHEMA_NAME(t.schema_id))
+    + N'.' + QUOTENAME(t.name) + N';' + CHAR(10)
+FROM sys.tables AS t
+WHERE t.is_ms_shipped = 0;
+EXEC sys.sp_executesql @sql;
+GO
+
+
+-- ============================================================
 -- §14  Accounts & authentication
 -- ============================================================
 CREATE TABLE Accounts (
