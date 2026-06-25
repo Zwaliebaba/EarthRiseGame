@@ -41,7 +41,7 @@ namespace Neuron::Sim
     std::string_view cmoPath;
   };
 
-  inline constexpr ShapeDef kShapes[] = {
+  inline constexpr ShapeDef SHAPES[] = {
     { 0, ShapeCategory::Asteroid, "Asteroid01Rock", "Assets\\Shapes\\Asteroids\\Asteroid01Rock.cmo" },
     { 1, ShapeCategory::Asteroid, "Asteroid02Rock", "Assets\\Shapes\\Asteroids\\Asteroid02Rock.cmo" },
     { 2, ShapeCategory::Asteroid, "Asteroid03Rock", "Assets\\Shapes\\Asteroids\\Asteroid03Rock.cmo" },
@@ -114,10 +114,10 @@ namespace Neuron::Sim
     { 69, ShapeCategory::Station, "Science01", "Assets\\Shapes\\Stations\\Science01.cmo" },
   };
 
-  inline constexpr uint16_t kShapeCount = 70;
-  static_assert(sizeof(kShapes) / sizeof(kShapes[0]) == kShapeCount, "shape count mismatch");
+  inline constexpr uint16_t SHAPE_COUNT = 70;
+  static_assert(sizeof(SHAPES) / sizeof(SHAPES[0]) == SHAPE_COUNT, "shape count mismatch");
 
-  inline constexpr uint16_t kInvalidShapeId = 0xFFFF;
+  inline constexpr uint16_t INVALID_SHAPE_ID = 0xFFFF;
 
   // Default entity kind for a category (the client uses it for colour/scale
   // fallback; the server stamps it into the snapshot when no explicit kind set).
@@ -140,22 +140,22 @@ namespace Neuron::Sim
   // Look up a shape by id; returns nullptr if out of range.
   inline constexpr const ShapeDef* ShapeById(uint16_t id) noexcept
   {
-    return (id < kShapeCount) ? &kShapes[id] : nullptr;
+    return (id < SHAPE_COUNT) ? &SHAPES[id] : nullptr;
   }
 
-  // Find a shape id by (case-sensitive) name; returns kInvalidShapeId if absent.
+  // Find a shape id by (case-sensitive) name; returns INVALID_SHAPE_ID if absent.
   inline constexpr uint16_t ShapeIdByName(std::string_view name) noexcept
   {
-    for (const auto& s : kShapes)
+    for (const auto& s : SHAPES)
       if (s.name == name) return s.id;
-    return kInvalidShapeId;
+    return INVALID_SHAPE_ID;
   }
 
-  // First shape id in a category (kInvalidShapeId if the category is empty).
+  // First shape id in a category (INVALID_SHAPE_ID if the category is empty).
   inline constexpr uint16_t FirstShapeOfCategory(ShapeCategory c) noexcept
   {
-    for (const auto& s : kShapes)
+    for (const auto& s : SHAPES)
       if (s.category == c) return s.id;
-    return kInvalidShapeId;
+    return INVALID_SHAPE_ID;
   }
 } // namespace Neuron::Sim

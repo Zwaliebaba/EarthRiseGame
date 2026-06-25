@@ -117,13 +117,13 @@ public:
     void RandomBytes(std::span<uint8_t> out) override;
 
     // Tag/nonce layout constants (documented; used by the connection layer too).
-    static constexpr size_t kNonceBytes = 12; // GCM standard nonce
-    static constexpr size_t kTagBytes   = 16; // GCM tag appended to ciphertext
+    static constexpr size_t NONCE_BYTES = 12; // GCM standard nonce
+    static constexpr size_t TAG_BYTES   = 16; // GCM tag appended to ciphertext
 
 private:
     // Build the 12-byte GCM nonce: [dir:1][packetNumber BE:8][zero:3].
     static void BuildNonce(Direction dir, uint64_t packetNumber,
-                           uint8_t (&nonce)[kNonceBytes]);
+                           uint8_t (&nonce)[NONCE_BYTES]);
 
     // CNG algorithm-provider handles, stored opaquely (BCRYPT_ALG_HANDLE).
     void* m_ecdhAlg{ nullptr };   // BCRYPT_ECDH_P256_ALGORITHM

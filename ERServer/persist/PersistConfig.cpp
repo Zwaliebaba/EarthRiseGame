@@ -40,20 +40,20 @@ PersistConfig PersistConfig::FromJson(const Neuron::Json::Value& root)
 
     const Neuron::Json::Value& auth = root["auth"];
     c.pepper           = auth.getString("serverPepper");
-    c.pbkdf2Iterations = auth.getUint32("pbkdf2Iterations", kDefaultPbkdf2Iterations);
-    if (c.pbkdf2Iterations < kMinPbkdf2Iterations)
-        c.pbkdf2Iterations = kMinPbkdf2Iterations; // never silently weaken the KDF
-    c.maxLoginFailures  = auth.getUint32("maxLoginFailures", kDefaultMaxLoginFailures);
-    c.lockoutSeconds    = auth.getUint64("lockoutSeconds", kDefaultLockoutSeconds);
-    c.sessionTtlSeconds = auth.getUint64("sessionTtlSeconds", kDefaultSessionTtlSeconds);
+    c.pbkdf2Iterations = auth.getUint32("pbkdf2Iterations", DEFAULT_PBKDF2_ITERATIONS);
+    if (c.pbkdf2Iterations < MIN_PBKDF2_ITERATIONS)
+        c.pbkdf2Iterations = MIN_PBKDF2_ITERATIONS; // never silently weaken the KDF
+    c.maxLoginFailures  = auth.getUint32("maxLoginFailures", DEFAULT_MAX_LOGIN_FAILURES);
+    c.lockoutSeconds    = auth.getUint64("lockoutSeconds", DEFAULT_LOCKOUT_SECONDS);
+    c.sessionTtlSeconds = auth.getUint64("sessionTtlSeconds", DEFAULT_SESSION_TTL_SECONDS);
 
     const Neuron::Json::Value& dur = root["durability"];
-    c.writeBehindRpoMs = dur.getUint64("writeBehindRpoMs", kDefaultWriteBehindRpoMs);
-    c.snapshotMs       = dur.getUint64("snapshotMs", kDefaultSnapshotMs);
+    c.writeBehindRpoMs = dur.getUint64("writeBehindRpoMs", DEFAULT_WRITE_BEHIND_RPO_MS);
+    c.snapshotMs       = dur.getUint64("snapshotMs", DEFAULT_SNAPSHOT_MS);
 
     const Neuron::Json::Value& pool = root["pool"];
-    c.poolMin = pool.getInt("min", kDefaultPoolMin);
-    c.poolMax = pool.getInt("max", kDefaultPoolMax);
+    c.poolMin = pool.getInt("min", DEFAULT_POOL_MIN);
+    c.poolMax = pool.getInt("max", DEFAULT_POOL_MAX);
     if (c.poolMax < c.poolMin)
         c.poolMax = c.poolMin;
 

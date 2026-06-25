@@ -22,7 +22,7 @@ namespace
 ServerStatus SampleStatus()
 {
     ServerStatus s;
-    s.protocolVersion    = Neuron::Net::kStatusProtocolVersion;
+    s.protocolVersion    = Neuron::Net::STATUS_PROTOCOL_VERSION;
     s.uptimeSeconds       = 12345;
     s.simTick             = 67890;
     s.connectionsPending  = 7;
@@ -48,7 +48,7 @@ ER_TEST(ServerStatus, EncodeParseRoundTrip)
 {
     const ServerStatus in = SampleStatus();
     const std::string json = Neuron::Net::EncodeStatusJson(in);
-    ER_CHECK(json.size() < Neuron::Net::kStatusMaxDatagramBytes);
+    ER_CHECK(json.size() < Neuron::Net::STATUS_MAX_DATAGRAM_BYTES);
 
     ServerStatus out;
     ER_CHECK(Neuron::Net::ParseStatusJson(json, out));
@@ -91,16 +91,16 @@ ER_TEST(ServerStatus, QueryTokenValidation)
 {
     // The exact token is accepted.
     ER_CHECK(Neuron::Net::IsStatusQuery(std::span<const uint8_t>(
-        reinterpret_cast<const uint8_t*>(Neuron::Net::kStatusQueryToken),
-        Neuron::Net::kStatusQueryTokenSize)));
+        reinterpret_cast<const uint8_t*>(Neuron::Net::STATUS_QUERY_TOKEN),
+        Neuron::Net::STATUS_QUERY_TOKEN_SIZE)));
 
     // Wrong length is rejected.
     const uint8_t shortBuf[3] = { 'E', 'R', 'S' };
     ER_CHECK(!Neuron::Net::IsStatusQuery(std::span<const uint8_t>(shortBuf, sizeof(shortBuf))));
 
     // Right length, one wrong byte is rejected (e.g. a version mismatch).
-    uint8_t bad[Neuron::Net::kStatusQueryTokenSize];
-    for (size_t i = 0; i < sizeof(bad); ++i) bad[i] = static_cast<uint8_t>(Neuron::Net::kStatusQueryToken[i]);
+    uint8_t bad[Neuron::Net::STATUS_QUERY_TOKEN_SIZE];
+    for (size_t i = 0; i < sizeof(bad); ++i) bad[i] = static_cast<uint8_t>(Neuron::Net::STATUS_QUERY_TOKEN[i]);
     bad[sizeof(bad) - 1] ^= 0xFF;
     ER_CHECK(!Neuron::Net::IsStatusQuery(std::span<const uint8_t>(bad, sizeof(bad))));
 }
@@ -125,13 +125,13 @@ ER_TEST(ServerStatus, ClientPollOverLoopback)
 {
     Neuron::Net::LoopbackNetwork net;
 
-    constexpr uint16_t kStatusPort = 7778;
+    constexpr uint16_t STATUS_PORT = 7778;
     Neuron::Net::LoopbackSocket serverSock(&net);
     Neuron::Net::LoopbackSocket clientSock(&net);
-    ER_CHECK(serverSock.Open(kStatusPort));
+    ER_CHECK(serverSock.Open(STATUS_PORT));
     ER_CHECK(clientSock.Open(0)); // ephemeral
 
-    Neuron::Client::ServerStatusClient client(&clientSock, "127.0.0.1", kStatusPort);
+    Neuron::Client::ServerStatusClient client(&clientSock, "127.0.0.1", STATUS_PORT);
     ER_CHECK(client.Enabled());
     ER_CHECK(!client.Valid()); // nothing received yet
 
@@ -140,7 +140,7 @@ ER_TEST(ServerStatus, ClientPollOverLoopback)
 
     // 2) The "server" socket receives it, validates, and replies with the status JSON.
     {
-        std::array<uint8_t, Neuron::Net::kStatusMaxDatagramBytes> buf{};
+        std::array<uint8_t, Neuron::Net::STATUS_MAX_DATAGRAM_BYTES> buf{};
         Neuron::Net::Endpoint from;
         const int n = serverSock.RecvFrom(from, std::span<uint8_t>(buf.data(), buf.size()));
         ER_CHECK(n > 0);

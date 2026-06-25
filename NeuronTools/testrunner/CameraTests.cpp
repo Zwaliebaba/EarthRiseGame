@@ -41,18 +41,18 @@ ER_TEST(Camera, ZoomClampsToRange)
 {
     RtsCamera cam;
     cam.Zoom(0.0001f); // hard zoom in
-    ER_CHECK(std::fabs(cam.Distance() - RtsCamera::kMinDistance) < 0.01f);
+    ER_CHECK(std::fabs(cam.Distance() - RtsCamera::MIN_DISTANCE) < 0.01f);
     cam.Zoom(100000.0f); // hard zoom out
-    ER_CHECK(std::fabs(cam.Distance() - RtsCamera::kMaxDistance) < 0.01f);
+    ER_CHECK(std::fabs(cam.Distance() - RtsCamera::MAX_DISTANCE) < 0.01f);
 }
 
 ER_TEST(Camera, PitchClampsOffThePoles)
 {
     RtsCamera cam;
     cam.Rotate(0.0f, +10.0f);
-    ER_CHECK(std::fabs(cam.Pitch() - RtsCamera::kMaxPitch) < 0.001f);
+    ER_CHECK(std::fabs(cam.Pitch() - RtsCamera::MAX_PITCH) < 0.001f);
     cam.Rotate(0.0f, -10.0f);
-    ER_CHECK(std::fabs(cam.Pitch() - RtsCamera::kMinPitch) < 0.001f);
+    ER_CHECK(std::fabs(cam.Pitch() - RtsCamera::MIN_PITCH) < 0.001f);
 }
 
 ER_TEST(Camera, PanMovesFocusAndDisablesFollow)

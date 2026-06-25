@@ -47,8 +47,8 @@ public:
         if (!Enabled()) return;
         m_socket->SendTo(m_server,
             std::span<const uint8_t>(
-                reinterpret_cast<const uint8_t*>(Neuron::Net::kStatusQueryToken),
-                Neuron::Net::kStatusQueryTokenSize));
+                reinterpret_cast<const uint8_t*>(Neuron::Net::STATUS_QUERY_TOKEN),
+                Neuron::Net::STATUS_QUERY_TOKEN_SIZE));
     }
 
     // Drain any pending reply datagrams; on a valid status reply, refresh Last() /
@@ -57,7 +57,7 @@ public:
     {
         if (!m_socket) return false;
         bool updated = false;
-        std::array<uint8_t, Neuron::Net::kStatusMaxDatagramBytes> buf{};
+        std::array<uint8_t, Neuron::Net::STATUS_MAX_DATAGRAM_BYTES> buf{};
         for (;;)
         {
             Neuron::Net::Endpoint from;

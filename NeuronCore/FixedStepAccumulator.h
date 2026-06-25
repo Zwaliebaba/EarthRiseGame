@@ -4,8 +4,8 @@
 // The authoritative 30 Hz simulation uses a real time accumulator:
 //   1. Measure wall-clock elapsed time each frame.
 //   2. Add it to the accumulator.
-//   3. Consume whole fixed steps (each kSimDeltaSeconds long).
-//   4. Clamp catch-up to kMaxCatchUpTicksPerFrame to prevent spiral-of-death.
+//   3. Consume whole fixed steps (each SIM_DELTA_SECONDS long).
+//   4. Clamp catch-up to MAX_CATCH_UP_TICKS_PER_FRAME to prevent spiral-of-death.
 //   5. Carry the remainder as alpha ∈ [0, 1) for rendering interpolation.
 //
 // WinRT-free: uses only Win32 QueryPerformanceCounter.
@@ -24,9 +24,9 @@ namespace Neuron::Sim
 {
 
 // Constants — match §7.2 / TimerCore.h
-static constexpr int    kSimTicksPerSecond      = 30;
-static constexpr double kSimDeltaSeconds        = 1.0 / kSimTicksPerSecond;
-static constexpr int    kMaxCatchUpTicksPerFrame = 5;
+static constexpr int    SIM_TICKS_PER_SECOND      = 30;
+static constexpr double SIM_DELTA_SECONDS        = 1.0 / SIM_TICKS_PER_SECOND;
+static constexpr int    MAX_CATCH_UP_TICKS_PER_FRAME = 5;
 
 // ---------------------------------------------------------------------------
 // FixedStepAccumulator
@@ -65,8 +65,8 @@ public:
         double elapsed = static_cast<double>(now.QuadPart - m_last.QuadPart)
                        / static_cast<double>(m_freq.QuadPart);
 
-        // Hard clamp: never add more than kMaxCatchUpTicksPerFrame steps-worth.
-        const double maxElapsed = kSimDeltaSeconds * kMaxCatchUpTicksPerFrame;
+        // Hard clamp: never add more than MAX_CATCH_UP_TICKS_PER_FRAME steps-worth.
+        const double maxElapsed = SIM_DELTA_SECONDS * MAX_CATCH_UP_TICKS_PER_FRAME;
         if (elapsed > maxElapsed) elapsed = maxElapsed;
 
         // Time dilation (M4 area H, §7.2): when the sim is overrunning its budget,
@@ -84,7 +84,7 @@ public:
     // Returns the current dilation factor (∈ [floor, 1]) for the §8.5 clock echo.
     double ReportTickCost(double measuredSeconds) noexcept
     {
-        return m_dilation.Update(measuredSeconds, kSimDeltaSeconds, m_dilationCfg);
+        return m_dilation.Update(measuredSeconds, SIM_DELTA_SECONDS, m_dilationCfg);
     }
 
     // Current dilation factor — published in the clock-sync echo (§8.5) so clients
@@ -94,13 +94,13 @@ public:
     [[nodiscard]] DilationConfig& DilationCfg() noexcept { return m_dilationCfg; }
 
     // Returns true and deducts one step's worth of time if a full step is ready
-    // AND we have not yet consumed kMaxCatchUpTicksPerFrame steps this frame.
+    // AND we have not yet consumed MAX_CATCH_UP_TICKS_PER_FRAME steps this frame.
     [[nodiscard]] bool ConsumeStep() noexcept
     {
-        if (m_stepsThisFrame >= kMaxCatchUpTicksPerFrame) return false;
-        if (m_accumulator < kSimDeltaSeconds)             return false;
+        if (m_stepsThisFrame >= MAX_CATCH_UP_TICKS_PER_FRAME) return false;
+        if (m_accumulator < SIM_DELTA_SECONDS)             return false;
 
-        m_accumulator   -= kSimDeltaSeconds;
+        m_accumulator   -= SIM_DELTA_SECONDS;
         ++m_simTickCount;
         ++m_stepsThisFrame;
         return true;
@@ -109,7 +109,7 @@ public:
     // Interpolation fraction ∈ [0, 1) for rendering between the last two sim states.
     [[nodiscard]] float GetAlpha() const noexcept
     {
-        return static_cast<float>(m_accumulator / kSimDeltaSeconds);
+        return static_cast<float>(m_accumulator / SIM_DELTA_SECONDS);
     }
 
     // Total simulation ticks consumed since Start().

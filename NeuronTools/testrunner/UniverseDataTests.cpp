@@ -16,7 +16,7 @@ namespace
 {
     // A minimal, fully valid dataset: 2 regions (high/low), a connected public
     // beacon pair + a claimable null... no — keep it self-contained & legal.
-    const char* kGood =
+    const char* GOOD =
         "region HOME { security = high  bounds = -16 16 -16 16 -4 4  yield_mult = 0.6 }\n"
         "region EDGE { security = low   bounds = 17 64 -16 16 -4 4   yield_mult = 1.0 }\n"
         "beacon A { region = HOME  pos = 0 0 0        links = B          kind = public }\n"
@@ -37,7 +37,7 @@ namespace
 
 ER_TEST(UniverseData, ParsesCountsAndFields)
 {
-    UniverseDataset ds = ParseOk(kGood);
+    UniverseDataset ds = ParseOk(GOOD);
     ER_CHECK_EQ(ds.regions.size(), size_t(2));
     ER_CHECK_EQ(ds.beacons.size(), size_t(3));
     ER_CHECK_EQ(ds.fields.size(), size_t(1));
@@ -58,7 +58,7 @@ ER_TEST(UniverseData, ParsesCountsAndFields)
 
 ER_TEST(UniverseData, ValidGraphPasses)
 {
-    UniverseDataset ds = ParseOk(kGood);
+    UniverseDataset ds = ParseOk(GOOD);
     std::vector<std::string> errs;
     ER_CHECK(ValidateUniverseDataset(ds, errs));
     ER_CHECK(errs.empty());
@@ -66,7 +66,7 @@ ER_TEST(UniverseData, ValidGraphPasses)
 
 ER_TEST(UniverseData, BinaryRoundTrip)
 {
-    UniverseDataset ds = ParseOk(kGood);
+    UniverseDataset ds = ParseOk(GOOD);
     const auto bytes = EncodeUniverseDataset(ds);
     auto rt = DecodeUniverseDataset(bytes);
     ER_CHECK(rt.has_value());

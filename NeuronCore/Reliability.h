@@ -87,10 +87,10 @@ public:
     [[nodiscard]] double CurrentRto() const noexcept
     {
         // RFC 6298-style: RTO = SRTT + 4*RTTVAR, clamped.
-        if (m_srtt <= 0.0) return kInitialRto;
+        if (m_srtt <= 0.0) return INITIAL_RTO;
         double rto = m_srtt + 4.0 * m_rttvar;
-        if (rto < kMinRto) rto = kMinRto;
-        if (rto > kMaxRto) rto = kMaxRto;
+        if (rto < MIN_RTO) rto = MIN_RTO;
+        if (rto > MAX_RTO) rto = MAX_RTO;
         return rto;
     }
 
@@ -120,9 +120,9 @@ private:
         }
     }
 
-    static constexpr double kInitialRto = 0.2;  // 200 ms
-    static constexpr double kMinRto     = 0.05; // 50 ms
-    static constexpr double kMaxRto     = 2.0;  // 2 s
+    static constexpr double INITIAL_RTO = 0.2;  // 200 ms
+    static constexpr double MIN_RTO     = 0.05; // 50 ms
+    static constexpr double MAX_RTO     = 2.0;  // 2 s
 
     uint16_t m_nextSequence{ 0 };
     std::unordered_map<uint16_t, InFlight> m_inFlight;

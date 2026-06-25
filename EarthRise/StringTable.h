@@ -16,7 +16,7 @@ namespace er::ui
     const char*      text; // null-terminated (usable directly with DrawText)
   };
 
-  inline constexpr StringEntry kStrings[] = {
+  inline constexpr StringEntry STRINGS[] = {
     { "app.title",          "EarthRise" },
     { "ui.mainmenu.title",  "MAIN MENU" },
     { "ui.options.title",   "OPTIONS" },
@@ -35,7 +35,7 @@ namespace er::ui
   // Look up display text by id; missing ids return a visible sentinel.
   inline constexpr const char* str(std::string_view id) noexcept
   {
-    for (const auto& e : kStrings)
+    for (const auto& e : STRINGS)
       if (e.id == id) return e.text;
     return "!?!";
   }

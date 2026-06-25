@@ -52,7 +52,7 @@ inline void CollectNeighbourhood(const SectorId& center, int radiusCells,
 {
     if (metres <= 0.0f) return 0;
     const double cells = static_cast<double>(metres) /
-                         static_cast<double>(Neuron::Universe::kSectorSize);
+                         static_cast<double>(Neuron::Universe::SECTOR_SIZE);
     return static_cast<int>(std::ceil(cells));
 }
 
@@ -123,7 +123,7 @@ public:
     [[nodiscard]] const std::vector<uint32_t>& Residents(const SectorId& s) const
     {
         auto it = m_cells.find(s);
-        return it == m_cells.end() ? kEmpty32 : it->second.residents;
+        return it == m_cells.end() ? EMPTY32 : it->second.residents;
     }
 
     // --- subscriptions (players) ---------------------------------------------
@@ -154,7 +154,7 @@ public:
     [[nodiscard]] const std::vector<uint32_t>& Subscribers(const SectorId& s) const
     {
         auto it = m_cells.find(s);
-        return it == m_cells.end() ? kEmpty32 : it->second.subscribers;
+        return it == m_cells.end() ? EMPTY32 : it->second.subscribers;
     }
 
     // Warp/jump prefetch (R21): pin the destination neighbourhood so it survives
@@ -193,7 +193,7 @@ public:
     Subscriptions(uint32_t player) const
     {
         auto it = m_playerSubs.find(player);
-        return it == m_playerSubs.end() ? kEmptySectors : it->second;
+        return it == m_playerSubs.end() ? EMPTY_SECTORS : it->second;
     }
 
     // Drop a player entirely (disconnect): clears its subscriptions + any pins.
@@ -295,12 +295,12 @@ private:
     std::unordered_map<uint32_t, std::unordered_set<SectorId, SectorHash>> m_playerSubs;
     std::unordered_map<uint32_t, std::unordered_set<SectorId, SectorHash>> m_playerPin;
 
-    static const std::vector<uint32_t>                          kEmpty32;
-    static const std::unordered_set<SectorId, SectorHash>       kEmptySectors;
+    static const std::vector<uint32_t>                          EMPTY32;
+    static const std::unordered_set<SectorId, SectorHash>       EMPTY_SECTORS;
 };
 
-inline const std::vector<uint32_t>                    InterestGrid::kEmpty32{};
-inline const std::unordered_set<SectorId, SectorHash> InterestGrid::kEmptySectors{};
+inline const std::vector<uint32_t>                    InterestGrid::EMPTY32{};
+inline const std::unordered_set<SectorId, SectorHash> InterestGrid::EMPTY_SECTORS{};
 
 // ---------------------------------------------------------------------------
 // Per-entity replication version + per-client baseline (M4 area B, §8.4)
@@ -384,14 +384,14 @@ public:
     }
 
     // Record what a snapshot for 'tick' carried, so an ack of that tick can advance
-    // the baseline. Bounded: only the most recent kMaxPending unacked ticks are
+    // the baseline. Bounded: only the most recent MAX_PENDING unacked ticks are
     // kept (older lost snapshots re-delta from 'acked' anyway, so dropping their
     // record is safe).
     void RecordSent(uint32_t tick, const SentList& sent)
     {
         if (sent.empty()) return;
         m_pending[tick] = sent;
-        while (m_pending.size() > kMaxPending) m_pending.erase(m_pending.begin());
+        while (m_pending.size() > MAX_PENDING) m_pending.erase(m_pending.begin());
     }
 
     // Advance the acked baseline to 'tick': fold every pending snapshot with key
@@ -410,7 +410,7 @@ public:
         // D): every snapshot re-emits the pending set, so any ack ≥ the earliest
         // carrying tick proves a leave record was delivered (§8.4 self-healing).
         for (auto it = m_tombstones.begin(); it != m_tombstones.end();) {
-            if (it->second != kUnsent && it->second <= tick) it = m_tombstones.erase(it);
+            if (it->second != UNSENT && it->second <= tick) it = m_tombstones.erase(it);
             else ++it;
         }
     }
@@ -442,7 +442,7 @@ public:
     void Tombstone(uint32_t netId)
     {
         m_acked.erase(netId);
-        m_tombstones.try_emplace(netId, kUnsent); // not yet emitted
+        m_tombstones.try_emplace(netId, UNSENT); // not yet emitted
     }
 
     // The entity re-entered interest before its removal was acked: cancel the
@@ -465,7 +465,7 @@ public:
     {
         for (uint32_t n : netIds) {
             auto it = m_tombstones.find(n);
-            if (it != m_tombstones.end() && it->second == kUnsent) it->second = tick;
+            if (it != m_tombstones.end() && it->second == UNSENT) it->second = tick;
         }
     }
 
@@ -484,8 +484,8 @@ public:
     }
 
 private:
-    static constexpr size_t   kMaxPending = 64;          // bounded unacked-snapshot history
-    static constexpr uint32_t kUnsent     = 0xFFFFFFFFu; // tombstone queued, not yet emitted
+    static constexpr size_t   MAX_PENDING = 64;          // bounded unacked-snapshot history
+    static constexpr uint32_t UNSENT     = 0xFFFFFFFFu; // tombstone queued, not yet emitted
     std::unordered_map<uint32_t, uint32_t>      m_acked;   // netId → acked version
     std::map<uint32_t, SentList>                m_pending; // tick → sent (netId,version)
     std::map<uint32_t, uint32_t>                m_tombstones; // netId → earliest carrying tick

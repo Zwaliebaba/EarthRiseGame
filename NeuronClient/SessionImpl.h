@@ -49,7 +49,7 @@ public:
         m_useRealAuth = true;
     }
 
-    // Last auth verdict (Neuron::Net::kAuthResult* wire codes; 0xFF until the server
+    // Last auth verdict (Neuron::Net::AUTH_RESULT* wire codes; 0xFF until the server
     // answers) — a login screen reads this to show "wrong password / locked / ...".
     [[nodiscard]] uint8_t LastAuthResult() const noexcept
         { return m_conn ? m_conn->LastAuthResult() : 0xFF; }
@@ -131,9 +131,9 @@ public:
                     m_socket->SendTo(m_serverEp, *dg);
                 m_lastKeepalive = now;
             }
-            // Liveness timeout: no traffic for kConnLostMs (server warm-restart / network
+            // Liveness timeout: no traffic for CONN_LOST_MS (server warm-restart / network
             // drop) → tear down and reconnect with backoff (§26, R22).
-            if (nowMs - m_lastRecvMs > kConnLostMs)
+            if (nowMs - m_lastRecvMs > CONN_LOST_MS)
                 BeginReconnect(nowMs);
         } else if (m_state != SessionState::Disconnected) {
             // Still handshaking/authenticating. A *permanent* auth rejection (wrong
@@ -147,7 +147,7 @@ public:
             // A stalled handshake against a still-down server (the warm-restart window):
             // after a live session, give each attempt a bounded budget then back off so we
             // don't sit forever resending into the void (R22).
-            if (m_everConnected && nowMs - m_attemptStartMs > kHandshakeTimeoutMs) {
+            if (m_everConnected && nowMs - m_attemptStartMs > HANDSHAKE_TIMEOUT_MS) {
                 BeginReconnect(nowMs);
                 return;
             }
@@ -241,10 +241,10 @@ private:
         return h;
     }
 
-    // Liveness/backoff tuning. kConnLostMs matches the server's idle-reap window so a
-    // warm-restart is noticed promptly; kHandshakeTimeoutMs bounds a stalled retry.
-    static constexpr uint64_t kConnLostMs         = 8000;
-    static constexpr uint64_t kHandshakeTimeoutMs = 5000;
+    // Liveness/backoff tuning. CONN_LOST_MS matches the server's idle-reap window so a
+    // warm-restart is noticed promptly; HANDSHAKE_TIMEOUT_MS bounds a stalled retry.
+    static constexpr uint64_t CONN_LOST_MS         = 8000;
+    static constexpr uint64_t HANDSHAKE_TIMEOUT_MS = 5000;
 
     Neuron::Net::ICrypto*                          m_crypto;
     Neuron::Net::EcPubKey                          m_pinnedPub;

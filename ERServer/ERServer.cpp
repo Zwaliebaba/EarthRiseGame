@@ -125,11 +125,11 @@ namespace
   // pinned key survives restarts (M1a generated an ephemeral one each boot). Stored as
   // the exportable BCRYPT_ECCPRIVATE_BLOB in a local file beside the daemon; a secret
   // store / DB column is the production upgrade (out of the persist headers' surface).
-  constexpr const char* kStaticKeyFile = "er_server_key.bin";
+  constexpr const char* STATIC_KEY_FILE = "er_server_key.bin";
 
   std::vector<uint8_t> ReadStaticKeyBlob()
   {
-    std::ifstream f(kStaticKeyFile, std::ios::binary);
+    std::ifstream f(STATIC_KEY_FILE, std::ios::binary);
     if (!f) return {};
     return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)),
                                 std::istreambuf_iterator<char>());
@@ -137,7 +137,7 @@ namespace
 
   void WriteStaticKeyBlob(const std::vector<uint8_t>& blob)
   {
-    std::ofstream f(kStaticKeyFile, std::ios::binary | std::ios::trunc);
+    std::ofstream f(STATIC_KEY_FILE, std::ios::binary | std::ios::trunc);
     if (f) f.write(reinterpret_cast<const char*>(blob.data()),
                    static_cast<std::streamsize>(blob.size()));
   }
@@ -297,12 +297,12 @@ int main(int argc, char* argv[])
   {
     WriteStaticKeyBlob(crypto.GetStaticPrivateBlob());
     ConsoleLog("[INFO] Generated + persisted a new static server key to {} ({} bytes).\n",
-               kStaticKeyFile, crypto.GetStaticPrivateBlob().size());
+               STATIC_KEY_FILE, crypto.GetStaticPrivateBlob().size());
   }
   else
   {
     ConsoleLog("[INFO] Loaded persisted static server key from {} ({} bytes).\n",
-               kStaticKeyFile, existingKey.size());
+               STATIC_KEY_FILE, existingKey.size());
   }
 
   // Publish the pinned static public key so dev clients / ERHeadless bots can pin it
@@ -486,7 +486,7 @@ int main(int argc, char* argv[])
 
   // Reap peers silent for longer than this (clients send a keepalive every 1 s;
   // a graceful Disconnect frees the slot immediately).
-  constexpr uint64_t kIdleTimeoutMs = 8000;
+  constexpr uint64_t IDLE_TIMEOUT_MS = 8000;
 
   std::vector<InboundDatagram> drained; // reused per loop (drains 'inbound' under lock)
 
@@ -523,7 +523,7 @@ int main(int argc, char* argv[])
     while (acc.ConsumeStep())
     {
       const auto t0 = std::chrono::steady_clock::now();
-      universe.Step(static_cast<float>(Neuron::Sim::kSimDeltaSeconds));
+      universe.Step(static_cast<float>(Neuron::Sim::SIM_DELTA_SECONDS));
       const double costSec =
           std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       acc.ReportTickCost(costSec);
@@ -633,7 +633,7 @@ int main(int argc, char* argv[])
     }
 
     // 4b) Reap gone clients (graceful Disconnect or idle timeout); despawn bases.
-    for (const auto& c : host.PruneStale(kIdleTimeoutMs))
+    for (const auto& c : host.PruneStale(IDLE_TIMEOUT_MS))
       ConsoleLog("[INFO] Connection closed: {} (netId {}) - {}.\n", c.endpoint, c.netId,
                  c.timedOut ? "idle timeout" : "graceful disconnect");
 

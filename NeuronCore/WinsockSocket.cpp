@@ -129,7 +129,7 @@ WinsockSocket::~WinsockSocket()
 WinsockSocket::WinsockSocket(WinsockSocket&& other) noexcept
     : sock_(other.sock_), localPort_(other.localPort_), isV6_(other.isV6_)
 {
-    other.sock_      = kInvalidSocket;
+    other.sock_      = INVALID_SOCKET_SENTINEL;
     other.localPort_ = 0;
     other.isV6_      = false;
 }
@@ -141,7 +141,7 @@ WinsockSocket& WinsockSocket::operator=(WinsockSocket&& other) noexcept
         sock_      = other.sock_;
         localPort_ = other.localPort_;
         isV6_      = other.isV6_;
-        other.sock_      = kInvalidSocket;
+        other.sock_      = INVALID_SOCKET_SENTINEL;
         other.localPort_ = 0;
         other.isV6_      = false;
     }
@@ -219,9 +219,9 @@ bool WinsockSocket::Open(uint16_t localPort)
 
 void WinsockSocket::Close()
 {
-    if (sock_ != kInvalidSocket) {
+    if (sock_ != INVALID_SOCKET_SENTINEL) {
         ::closesocket(ToSocket(sock_));
-        sock_ = kInvalidSocket;
+        sock_ = INVALID_SOCKET_SENTINEL;
     }
     localPort_ = 0;
     isV6_      = false;
@@ -229,7 +229,7 @@ void WinsockSocket::Close()
 
 int WinsockSocket::SendTo(const Endpoint& to, std::span<const uint8_t> data)
 {
-    if (sock_ == kInvalidSocket)
+    if (sock_ == INVALID_SOCKET_SENTINEL)
         return -1;
 
     sockaddr_storage dst{};
@@ -256,7 +256,7 @@ int WinsockSocket::SendTo(const Endpoint& to, std::span<const uint8_t> data)
 
 int WinsockSocket::RecvFrom(Endpoint& from, std::span<uint8_t> buffer)
 {
-    if (sock_ == kInvalidSocket)
+    if (sock_ == INVALID_SOCKET_SENTINEL)
         return -1;
 
     sockaddr_storage src{};

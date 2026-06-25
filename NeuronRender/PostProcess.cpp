@@ -16,11 +16,11 @@ namespace Neuron::Render
   namespace
   {
     // Bloom + tone-map tunables.
-    constexpr float kThreshold = 0.60f; // luminance above which bloom is extracted
-    constexpr float kIntensity = 1.10f; // bloom add strength in the composite
-    constexpr float kExposure  = 1.30f; // scene exposure before the ACES tone-map
-    constexpr float kVignette  = 0.32f; // corner darkening (Darwinia framing)
-    constexpr float kScanline  = 0.05f; // faint CRT scanlines (0 = off)
+    constexpr float THRESHOLD = 0.60f; // luminance above which bloom is extracted
+    constexpr float INTENSITY = 1.10f; // bloom add strength in the composite
+    constexpr float EXPOSURE  = 1.30f; // scene exposure before the ACES tone-map
+    constexpr float VIGNETTE  = 0.32f; // corner darkening (Darwinia framing)
+    constexpr float SCANLINE  = 0.05f; // faint CRT scanlines (0 = off)
   } // namespace
 
   bool PostProcess::Initialize(DeviceResources* dr)
@@ -95,9 +95,9 @@ namespace Neuron::Render
       return SUCCEEDED(m_device->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(out.put())));
     };
 
-    if (!makePso(g_pBrightPassPS, sizeof(g_pBrightPassPS), kHdrFormat, DXGI_FORMAT_UNKNOWN, m_psoBright))
+    if (!makePso(g_pBrightPassPS, sizeof(g_pBrightPassPS), HDR_FORMAT, DXGI_FORMAT_UNKNOWN, m_psoBright))
       return false;
-    if (!makePso(g_pBlurPS, sizeof(g_pBlurPS), kHdrFormat, DXGI_FORMAT_UNKNOWN, m_psoBlur))
+    if (!makePso(g_pBlurPS, sizeof(g_pBlurPS), HDR_FORMAT, DXGI_FORMAT_UNKNOWN, m_psoBlur))
       return false;
     // Composite targets the LDR swap-chain buffer and runs with the shared depth
     // bound (test disabled), matching the HUD pass that draws over it.
@@ -166,12 +166,12 @@ namespace Neuron::Render
       rd.Height = h;
       rd.DepthOrArraySize = 1;
       rd.MipLevels = 1;
-      rd.Format = kHdrFormat;
+      rd.Format = HDR_FORMAT;
       rd.SampleDesc.Count = 1;
       rd.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
       D3D12_CLEAR_VALUE cv{};
-      cv.Format = kHdrFormat;
+      cv.Format = HDR_FORMAT;
       cv.Color[0] = 0.018f;
       cv.Color[1] = 0.014f;
       cv.Color[2] = 0.013f;
@@ -186,7 +186,7 @@ namespace Neuron::Render
       m_device->CreateRenderTargetView(t.res.get(), nullptr, t.rtv);
 
       D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-      srv.Format = kHdrFormat;
+      srv.Format = HDR_FORMAT;
       srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
       srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
       srv.Texture2D.MipLevels = 1;
@@ -246,8 +246,8 @@ namespace Neuron::Render
     const D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_dr->DsvHandle();
     cl->OMSetRenderTargets(1, &m_hdr.rtv, FALSE, &dsv);
 
-    constexpr float kSky[] = {0.018f, 0.014f, 0.013f, 1.0f}; // near-black warm void
-    cl->ClearRenderTargetView(m_hdr.rtv, kSky, 0, nullptr);
+    constexpr float SKY[] = {0.018f, 0.014f, 0.013f, 1.0f}; // near-black warm void
+    cl->ClearRenderTargetView(m_hdr.rtv, SKY, 0, nullptr);
     // Depth was already cleared by DeviceResources::BeginFrame; the scene draws
     // into the HDR target using the shared depth buffer.
 
@@ -291,7 +291,7 @@ namespace Neuron::Render
     Barrier(cl, m_hdr, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
     // Bright-pass + downsample: HDR (t0) -> bloomA (half-res).
-    const float pBright[4] = {kThreshold, 0.f, 0.f, 0.f};
+    const float pBright[4] = {THRESHOLD, 0.f, 0.f, 0.f};
     DrawFullscreen(cl, m_psoBright.get(), m_bloomA, m_hdr.srvIndex, m_hdr.srvIndex, pBright, m_halfW, m_halfH);
 
     // Separable Gaussian: horizontal bloomA -> bloomB, then vertical bloomB -> bloomA.
@@ -315,9 +315,9 @@ namespace Neuron::Render
     cl->RSSetViewports(1, &vp);
     cl->RSSetScissorRects(1, &sr);
 
-    const float pComp[4] = {kExposure, m_bloomIntensity,
-                            m_pixelEffect ? kVignette : 0.f,
-                            m_pixelEffect ? kScanline : 0.f};
+    const float pComp[4] = {EXPOSURE, m_bloomIntensity,
+                            m_pixelEffect ? VIGNETTE : 0.f,
+                            m_pixelEffect ? SCANLINE : 0.f};
     cl->SetPipelineState(m_psoComposite.get());
     cl->SetGraphicsRoot32BitConstants(0, 4, pComp, 0);
     cl->SetGraphicsRootDescriptorTable(1, SrvGpu(m_hdr.srvIndex));

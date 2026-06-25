@@ -17,10 +17,10 @@ using Neuron::Universe::UniversePos;
 
 namespace
 {
-    constexpr int kOre = static_cast<int>(ResourceType::Ore);
+    constexpr int ORE = static_cast<int>(ResourceType::Ore);
 
     // Fast economy: small cargo, instant travel, cheap ore-only ship, quick build.
-    const char* kEcon =
+    const char* ECON =
         "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
         "economy { fleet_cap = 8  cargo_capacity = 200  storage_capacity = 10000  harvest_rate = 1000\n"
         "          build_ore = 300  build_ice = 0  build_seconds = 0.1  build_ship_type = 1\n"
@@ -39,7 +39,7 @@ namespace
 ER_TEST(Harvest, FullLoopNodeToCargoToStorageToShip)
 {
     ServerUniverse su(false);
-    Load(su, kEcon);
+    Load(su, ECON);
 
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     const uint32_t harv = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 500, 0, 0 });
@@ -50,10 +50,10 @@ ER_TEST(Harvest, FullLoopNodeToCargoToStorageToShip)
     ER_CHECK(su.OrderHarvest(harv, node));
 
     // Run the loop: the harvester shuttles node↔base, ore flows node → cargo → storage.
-    for (int i = 0; i < 80 && su.StorageOf(base)->amount[kOre] < 400.0f; ++i)
+    for (int i = 0; i < 80 && su.StorageOf(base)->amount[ORE] < 400.0f; ++i)
         su.Step(0.1f);
 
-    ER_CHECK(su.StorageOf(base)->amount[kOre] >= 400.0f); // returned + deposited
+    ER_CHECK(su.StorageOf(base)->amount[ORE] >= 400.0f); // returned + deposited
     ER_CHECK(su.ResourceNodeOf(node)->remaining < 2000.0f); // node depleted
 
     // Enqueue a build off the deposited ore → a ship is born.
@@ -68,7 +68,7 @@ ER_TEST(Harvest, FullLoopNodeToCargoToStorageToShip)
 ER_TEST(Harvest, HarvesterDepositsThenIdlesWhenNodeEmpty)
 {
     ServerUniverse su(false);
-    Load(su, kEcon);
+    Load(su, ECON);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     const uint32_t harv = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 100, 0, 0 });
     const uint32_t node = su.SpawnResourceNode(ResourceType::Ore, 150.0f, { 2000, 0, 0 }); // less than one cargo
@@ -79,14 +79,14 @@ ER_TEST(Harvest, HarvesterDepositsThenIdlesWhenNodeEmpty)
 
     ER_CHECK(su.HarvestOrderOf(harv)->phase == HarvestPhase::Idle); // finished (node drained)
     ER_CHECK(su.ResourceNodeOf(node)->remaining == 0.0f);
-    ER_CHECK(su.StorageOf(base)->amount[kOre] == 150.0f);          // all of it banked
-    ER_CHECK(su.CargoOf(harv)->amount[kOre] == 0.0f);              // cargo emptied on deposit
+    ER_CHECK(su.StorageOf(base)->amount[ORE] == 150.0f);          // all of it banked
+    ER_CHECK(su.CargoOf(harv)->amount[ORE] == 0.0f);              // cargo emptied on deposit
 }
 
 ER_TEST(Harvest, OrderHarvestValidates)
 {
     ServerUniverse su(false);
-    Load(su, kEcon);
+    Load(su, ECON);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     const uint32_t harv = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
     const uint32_t node = su.SpawnResourceNode(ResourceType::Ore, 100.0f, { 1000, 0, 0 });

@@ -22,14 +22,14 @@ struct EntityHandle
 {
     uint32_t value{ 0 };
 
-    static constexpr uint32_t kIndexBits = 20;
-    static constexpr uint32_t kGenBits   = 12;
-    static constexpr uint32_t kIndexMask = (1u << kIndexBits) - 1u;
-    static constexpr uint32_t kMaxIndex  = kIndexMask;
-    static constexpr uint32_t kMaxGen    = (1u << kGenBits) - 1u;
+    static constexpr uint32_t INDEX_BITS = 20;
+    static constexpr uint32_t GEN_BITS   = 12;
+    static constexpr uint32_t INDEX_MASK = (1u << INDEX_BITS) - 1u;
+    static constexpr uint32_t MAX_INDEX  = INDEX_MASK;
+    static constexpr uint32_t MAX_GEN    = (1u << GEN_BITS) - 1u;
 
-    [[nodiscard]] uint32_t Index()      const noexcept { return value & kIndexMask; }
-    [[nodiscard]] uint32_t Generation() const noexcept { return value >> kIndexBits; }
+    [[nodiscard]] uint32_t Index()      const noexcept { return value & INDEX_MASK; }
+    [[nodiscard]] uint32_t Generation() const noexcept { return value >> INDEX_BITS; }
     [[nodiscard]] bool     IsNull()     const noexcept { return value == 0; }
 
     bool operator==(const EntityHandle&) const = default;
@@ -37,8 +37,8 @@ struct EntityHandle
 
     static EntityHandle Make(uint32_t idx, uint32_t gen) noexcept
     {
-        assert(idx <= kMaxIndex && gen <= kMaxGen);
-        return { (gen << kIndexBits) | idx };
+        assert(idx <= MAX_INDEX && gen <= MAX_GEN);
+        return { (gen << INDEX_BITS) | idx };
     }
     static EntityHandle Null() noexcept { return { 0 }; }
 };
@@ -47,7 +47,7 @@ struct EntityHandle
 // Component type ID
 // ---------------------------------------------------------------------------
 using ComponentTypeId = uint8_t;
-static constexpr ComponentTypeId kMaxComponentTypes = 64;
+static constexpr ComponentTypeId MAX_COMPONENT_TYPES = 64;
 
 // Declare once per component type in a header; define (set value) once per TU
 // via NEURON_DEFINE_COMPONENT(Type, N).
@@ -173,7 +173,7 @@ public:
     void RegisterComponent()
     {
         const ComponentTypeId id = ComponentId<T>::value;
-        assert(id < kMaxComponentTypes);
+        assert(id < MAX_COMPONENT_TYPES);
         assert(m_storages[id] == nullptr && "already registered");
         m_storages[id] = new ComponentStorage<T>();
     }
@@ -189,7 +189,7 @@ public:
             // generation already incremented on destroy
         } else {
             idx = static_cast<uint32_t>(m_records.size());
-            assert(idx <= EntityHandle::kMaxIndex);
+            assert(idx <= EntityHandle::MAX_INDEX);
             m_records.push_back({});
         }
         auto& rec    = m_records[idx];
@@ -203,7 +203,7 @@ public:
         if (!IsAlive(e)) return;
         auto& rec = m_records[e.Index()];
         // Remove all components
-        for (ComponentTypeId cid = 0; cid < kMaxComponentTypes; ++cid) {
+        for (ComponentTypeId cid = 0; cid < MAX_COMPONENT_TYPES; ++cid) {
             if ((rec.componentMask >> cid) & 1u) {
                 if (m_storages[cid])
                     m_storages[cid]->Remove(e.Index());
@@ -211,7 +211,7 @@ public:
         }
         rec.componentMask = 0;
         rec.alive         = false;
-        rec.generation    = (rec.generation + 1) & EntityHandle::kMaxGen;
+        rec.generation    = (rec.generation + 1) & EntityHandle::MAX_GEN;
         m_freeList.push_back(e.Index());
     }
 
@@ -309,7 +309,7 @@ public:
 private:
     std::vector<EntityRecord>                        m_records;
     std::vector<uint32_t>                            m_freeList;
-    std::array<IComponentStorage*, kMaxComponentTypes> m_storages{};
+    std::array<IComponentStorage*, MAX_COMPONENT_TYPES> m_storages{};
 };
 
 } // namespace Neuron::ECS

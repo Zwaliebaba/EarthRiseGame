@@ -16,14 +16,14 @@ namespace
 
 // §14 input bounds (Accounts.Username NVARCHAR(64)). Keep passwords reasonable to
 // bound the PBKDF2 input; the hash itself is fixed-size regardless.
-constexpr size_t kMaxUsernameChars = 64;
-constexpr size_t kMinUsernameChars = 3;
-constexpr size_t kMinPasswordChars = 8;
-constexpr size_t kMaxPasswordChars = 256;
+constexpr size_t MAX_USERNAME_CHARS = 64;
+constexpr size_t MIN_USERNAME_CHARS = 3;
+constexpr size_t MIN_PASSWORD_CHARS = 8;
+constexpr size_t MAX_PASSWORD_CHARS = 256;
 
 bool ValidUsername(std::string_view u)
 {
-    if (u.size() < kMinUsernameChars || u.size() > kMaxUsernameChars)
+    if (u.size() < MIN_USERNAME_CHARS || u.size() > MAX_USERNAME_CHARS)
         return false;
     // Conservative charset to avoid homoglyph/whitespace abuse; the column is NVARCHAR
     // but launch usernames stay ASCII-ish (display names are a separate feature).
@@ -38,12 +38,12 @@ bool ValidUsername(std::string_view u)
 
 bool ValidPassword(std::string_view p)
 {
-    return p.size() >= kMinPasswordChars && p.size() <= kMaxPasswordChars;
+    return p.size() >= MIN_PASSWORD_CHARS && p.size() <= MAX_PASSWORD_CHARS;
 }
 
 } // namespace
 
-std::array<uint8_t, kPwHashBytes>
+std::array<uint8_t, PW_HASH_BYTES>
 AccountStore::HashPassword(std::string_view password, std::span<const uint8_t> salt,
                            uint32_t iterations) const
 {
@@ -57,11 +57,11 @@ AccountStore::HashPassword(std::string_view password, std::span<const uint8_t> s
     pw.insert(pw.end(), password.begin(), password.end());
     pw.insert(pw.end(), m_cfg.pepper.begin(), m_cfg.pepper.end());
 
-    std::array<uint8_t, kPwHashBytes> out{};
+    std::array<uint8_t, PW_HASH_BYTES> out{};
     const std::vector<uint8_t> dk =
-        m_crypto->Pbkdf2HmacSha512(pw, salt, iterations, kPwHashBytes);
-    if (dk.size() == kPwHashBytes)
-        std::memcpy(out.data(), dk.data(), kPwHashBytes);
+        m_crypto->Pbkdf2HmacSha512(pw, salt, iterations, PW_HASH_BYTES);
+    if (dk.size() == PW_HASH_BYTES)
+        std::memcpy(out.data(), dk.data(), PW_HASH_BYTES);
     return out;
 }
 
@@ -82,12 +82,12 @@ bool AccountStore::CheckIpRateLimit(std::string_view ip, int64_t nowUnix)
     // primary control. Keyed by the opaque ip string the caller passes.
     std::lock_guard lock(m_mutex);
     IpWindow& w = m_ipWindows[std::string(ip)];
-    if (nowUnix - w.windowStartUnix >= kIpWindowSeconds) {
+    if (nowUnix - w.windowStartUnix >= IP_WINDOW_SECONDS) {
         w.windowStartUnix = nowUnix;
         w.count = 0;
     }
     ++w.count;
-    return w.count <= kIpWindowMaxAttempts;
+    return w.count <= IP_WINDOW_MAX_ATTEMPTS;
 }
 
 AccountStore::AuthCounters AccountStore::Counters() const
@@ -112,7 +112,7 @@ AuthResult AccountStore::Register(std::string_view username, std::string_view pa
         return AuthResult::DbUnavailable;
 
     // Per-user random salt (§14). CngCrypto::RandomBytes is the system-preferred RNG.
-    std::array<uint8_t, kPwSaltBytes> salt{};
+    std::array<uint8_t, PW_SALT_BYTES> salt{};
     m_crypto->RandomBytes(salt);
     const auto hash = HashPassword(password, salt, m_cfg.pbkdf2Iterations);
 
@@ -246,7 +246,7 @@ AuthResult AccountStore::Login(std::string_view username, std::string_view passw
     const auto candidate = HashPassword(
         password, storedSalt,
         storedIters > 0 ? static_cast<uint32_t>(storedIters) : m_cfg.pbkdf2Iterations);
-    const bool match = (storedHash.size() == kPwHashBytes) &&
+    const bool match = (storedHash.size() == PW_HASH_BYTES) &&
                        ConstTimeEqual(std::span<const uint8_t>(candidate.data(), candidate.size()),
                                       storedHash);
 

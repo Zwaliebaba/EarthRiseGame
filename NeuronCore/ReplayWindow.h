@@ -8,7 +8,7 @@
 //
 // Algorithm (mirrors IPsec / DTLS anti-replay):
 //   - Track the highest packet number seen (m_highest).
-//   - A bitmask covers the kWindowBits numbers ending at m_highest.
+//   - A bitmask covers the WINDOW_BITS numbers ending at m_highest.
 //   - A number > m_highest slides the window forward.
 //   - A number within the window is accepted iff its bit is unset (then set).
 //   - A number older than the window's tail is rejected outright.
@@ -21,8 +21,8 @@ namespace Neuron::Net
 class ReplayWindow
 {
 public:
-    static constexpr int kWindowBits = 1024;
-    static constexpr int kWords      = kWindowBits / 64;
+    static constexpr int WINDOW_BITS = 1024;
+    static constexpr int WORDS      = WINDOW_BITS / 64;
 
     // Check-and-update. Returns true if the packet number is fresh (accept),
     // false if it is a replay or too old (reject).
@@ -46,7 +46,7 @@ public:
 
         // packetNumber <= m_highest: offset back from the head.
         const uint64_t offset = m_highest - packetNumber;
-        if (offset >= static_cast<uint64_t>(kWindowBits))
+        if (offset >= static_cast<uint64_t>(WINDOW_BITS))
             return false; // older than the window — reject
 
         if (TestBit(offset))
@@ -78,10 +78,10 @@ private:
     }
 
     // Shift the whole bitmask "down" (toward older offsets) by 'shift' bits,
-    // because m_highest is advancing. Bits that fall past kWindowBits are lost.
+    // because m_highest is advancing. Bits that fall past WINDOW_BITS are lost.
     void SlideForward(uint64_t shift) noexcept
     {
-        if (shift >= static_cast<uint64_t>(kWindowBits)) {
+        if (shift >= static_cast<uint64_t>(WINDOW_BITS)) {
             for (auto& w : m_bits) w = 0;
             return;
         }
@@ -89,10 +89,10 @@ private:
         const int bitShift  = static_cast<int>(shift % 64);
 
         if (bitShift == 0) {
-            for (int i = kWords - 1; i >= 0; --i)
+            for (int i = WORDS - 1; i >= 0; --i)
                 m_bits[i] = (i - wordShift >= 0) ? m_bits[i - wordShift] : 0;
         } else {
-            for (int i = kWords - 1; i >= 0; --i) {
+            for (int i = WORDS - 1; i >= 0; --i) {
                 uint64_t v = 0;
                 const int lo = i - wordShift;
                 const int hi = i - wordShift - 1;
@@ -103,7 +103,7 @@ private:
         }
     }
 
-    uint64_t m_bits[kWords]{};
+    uint64_t m_bits[WORDS]{};
     uint64_t m_highest{ 0 };
     bool     m_seenAny{ false };
 };

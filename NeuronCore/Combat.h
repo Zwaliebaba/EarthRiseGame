@@ -41,14 +41,14 @@ enum class DamageOutcome : uint8_t { Absorbed = 0, ShieldDown = 1, ArmorDown = 2
 // Tracking factor (combat-balance.md §2.3): a big slow gun struggles to hit a small
 // fast target. Rises with weapon 'tracking' and target 'signature', falls with target
 // 'speed'. A stationary or huge target → ~1.0 (always tracked). Clamped to [0,1]. The
-// kTrackingSpeedScale below is a model SHAPE constant (a unit bridge between m/s and
+// TRACKING_SPEED_SCALE below is a model SHAPE constant (a unit bridge between m/s and
 // signature), NOT a balance number — every per-entity input (tracking/sig/speed) is
 // game data, so the size rock-paper-scissors is tuned in the catalog (area A/M).
-inline constexpr float kTrackingSpeedScale = 0.02f;
+inline constexpr float TRACKING_SPEED_SCALE = 0.02f;
 [[nodiscard]] inline float TrackingFactor(float tracking, float targetSignature, float targetSpeed) noexcept
 {
     const float track = tracking * targetSignature;
-    const float denom = track + targetSpeed * kTrackingSpeedScale;
+    const float denom = track + targetSpeed * TRACKING_SPEED_SCALE;
     if (denom <= 0.0f) return 1.0f;
     const float f = track / denom;
     return f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f);
@@ -65,14 +65,14 @@ inline constexpr float kTrackingSpeedScale = 0.02f;
     if (raw <= 0.0f) return DamageOutcome::Absorbed;
 
     struct Lref { LayerHp& l; DefenseLayer which; DamageOutcome broke; };
-    Lref layers[kDefenseLayerCount] = {
+    Lref layers[DEFENSE_LAYER_COUNT] = {
         { d.shield, DefenseLayer::Shield, DamageOutcome::ShieldDown },
         { d.armor,  DefenseLayer::Armor,  DamageOutcome::ArmorDown },
         { d.hull,   DefenseLayer::Hull,   DamageOutcome::Killed },
     };
 
     DamageOutcome outcome = DamageOutcome::Absorbed;
-    for (int i = 0; i < kDefenseLayerCount && raw > 0.0f; ++i) {
+    for (int i = 0; i < DEFENSE_LAYER_COUNT && raw > 0.0f; ++i) {
         LayerHp& layer = layers[i].l;
         if (layer.cur <= 0) continue;
         const float mult = 1.0f - resist.At(layers[i].which, type); // applied per raw point

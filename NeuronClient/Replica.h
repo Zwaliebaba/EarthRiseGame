@@ -13,7 +13,7 @@ struct ReplicaEntity
     uint32_t networkId{ 0 }; // server-assigned entity ID
     float    x{ 0 }, y{ 0 }, z{ 0 }; // sector-local position from last snapshot
     uint8_t  entityType{ 0 };
-    uint16_t shapeId{ 0xFFFF }; // ShapeCatalog index (selects the mesh); kInvalidShapeId
+    uint16_t shapeId{ 0xFFFF }; // ShapeCatalog index (selects the mesh); INVALID_SHAPE_ID
     int32_t  hp{ 0 };            // last-snapshot health (selected/target panel, §22.2)
     uint32_t ownerPlayer{ 0 };   // owning player net id (0 = NPC/unowned); drives IFF
     bool     valid{ false };
@@ -23,8 +23,8 @@ struct ReplicaEntity
 // In M1a+ this is populated by snapshot decoding and used by the interpolator.
 struct ReplicaSet
 {
-    static constexpr uint32_t kMaxEntities = 512;
-    ReplicaEntity entities[kMaxEntities]{};
+    static constexpr uint32_t MAX_ENTITIES = 512;
+    ReplicaEntity entities[MAX_ENTITIES]{};
     uint32_t      count{ 0 };
 
     void Clear() { count = 0; }

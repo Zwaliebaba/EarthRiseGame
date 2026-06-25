@@ -193,9 +193,9 @@ int main(int argc, char* argv[])
     }
 
     std::array<uint8_t, 2048> buf{};
-    constexpr int kMaxIterations = 20000; // safety bound for the dev run
+    constexpr int MAX_ITERATIONS = 20000; // safety bound for the dev run
 
-    for (int iter = 0; iter < kMaxIterations; ++iter) {
+    for (int iter = 0; iter < MAX_ITERATIONS; ++iter) {
         for (auto& b : bots) {
             const uint32_t self = b.conn->PlayerNetId();
             Neuron::Sim::Snapshot latest;

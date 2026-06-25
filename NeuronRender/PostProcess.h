@@ -33,7 +33,7 @@ namespace Neuron::Render
   {
   public:
     // HDR format the scene must render into (pass to SceneRenderer::Initialize).
-    static constexpr DXGI_FORMAT kHdrFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    static constexpr DXGI_FORMAT HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
     // Creates size-dependent targets for the current back-buffer size. Returns
     // false on failure (caller renders without post-processing).

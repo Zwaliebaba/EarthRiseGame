@@ -48,12 +48,12 @@ struct FleetCommand
     std::string                   beacon;           // jump destination beacon name
 };
 
-inline constexpr uint8_t kFleetCommandVersion = 1;
+inline constexpr uint8_t FLEET_COMMAND_VERSION = 1;
 
 inline std::vector<uint8_t> EncodeFleetCommand(const FleetCommand& c)
 {
     Neuron::Serde::WriteBuffer wb(64 + c.units.size() * 4 + c.beacon.size());
-    wb.WriteUint8(kFleetCommandVersion);
+    wb.WriteUint8(FLEET_COMMAND_VERSION);
     wb.WriteUint32(c.clientTick);
     wb.WriteUint8(static_cast<uint8_t>(c.intent));
     wb.WriteUint8(c.queue ? 1u : 0u);
@@ -75,7 +75,7 @@ inline std::vector<uint8_t> EncodeFleetCommand(const FleetCommand& c)
 {
     Neuron::Serde::ReadBuffer rb(body);
     if (!rb.IsGood()) return false;
-    if (rb.ReadUint8() != kFleetCommandVersion) return false; // protocol-version gate (§8.5)
+    if (rb.ReadUint8() != FLEET_COMMAND_VERSION) return false; // protocol-version gate (§8.5)
     out.clientTick = rb.ReadUint32();
     out.intent     = static_cast<IntentType>(rb.ReadUint8());
     out.queue      = rb.ReadUint8() != 0;

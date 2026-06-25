@@ -10,7 +10,7 @@
 //   * Worker threads loop on GetQueuedCompletionStatus. On each completion they
 //     decode the source address, invoke the callback with the received bytes,
 //     then re-issue WSARecvFrom on the same RecvOp to keep the pool saturated.
-//   * Stop() posts a sentinel completion (key = kStopKey) per worker so each
+//   * Stop() posts a sentinel completion (key = STOP_KEY) per worker so each
 //     thread wakes and exits, then closes the socket and IOCP.
 //
 // The OVERLAPPED* returned by GetQueuedCompletionStatus is the first member of
@@ -40,7 +40,7 @@
 #include <vector>
 
 #include "ConnectionTable.h" // Neuron::Net::PeekConnectionToken (token-peek router)
-#include "Protocol.h"        // kMaxDatagramBytes
+#include "Protocol.h"        // MAX_DATAGRAM_BYTES
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -49,12 +49,12 @@ namespace
 
 using Neuron::Net::Endpoint;
 
-constexpr ULONG_PTR kRecvKey = 1; // completion key for socket I/O
-constexpr ULONG_PTR kStopKey = 0; // sentinel to wake/exit a worker
+constexpr ULONG_PTR RECV_KEY = 1; // completion key for socket I/O
+constexpr ULONG_PTR STOP_KEY = 0; // sentinel to wake/exit a worker
 
 // How many overlapped receives we keep posted at once. Higher = more in-flight
 // receive capacity under burst load at the cost of memory.
-constexpr int kRecvPoolSize = 64;
+constexpr int RECV_POOL_SIZE = 64;
 
 // One outstanding overlapped receive. OVERLAPPED MUST be the first member so the
 // completion-port OVERLAPPED* maps back to this struct.
@@ -65,7 +65,7 @@ struct RecvOp
     sockaddr_storage from;
     INT              fromLen;
     DWORD            flags;
-    uint8_t          buffer[Neuron::Net::kMaxDatagramBytes];
+    uint8_t          buffer[Neuron::Net::MAX_DATAGRAM_BYTES];
 };
 
 bool SockaddrToEndpoint(const sockaddr* sa, Endpoint& out)
@@ -233,7 +233,7 @@ struct IocpUdpListenerImpl
             const BOOL ok = ::GetQueuedCompletionStatus(
                 iocp, &bytes, &key, &ov, INFINITE);
 
-            if (key == kStopKey)
+            if (key == STOP_KEY)
                 break; // shutdown sentinel
 
             if (ov == nullptr)
@@ -326,7 +326,7 @@ bool IocpUdpListener::Start(uint16_t port, unsigned numThreads)
         return false;
     }
     if (::CreateIoCompletionPort(reinterpret_cast<HANDLE>(impl_->sock),
-                                 impl_->iocp, kRecvKey, 0) == nullptr) {
+                                 impl_->iocp, RECV_KEY, 0) == nullptr) {
         ::CloseHandle(impl_->iocp); impl_->iocp = nullptr;
         ::closesocket(impl_->sock); impl_->sock = INVALID_SOCKET;
         ::WSACleanup();
@@ -350,8 +350,8 @@ bool IocpUdpListener::Start(uint16_t port, unsigned numThreads)
     impl_->laneCount = resolvedLaneCount;
 
     // Pre-post the receive pool.
-    impl_->recvOps.reserve(kRecvPoolSize);
-    for (int i = 0; i < kRecvPoolSize; ++i) {
+    impl_->recvOps.reserve(RECV_POOL_SIZE);
+    for (int i = 0; i < RECV_POOL_SIZE; ++i) {
         auto* op = new RecvOp{};
         impl_->recvOps.push_back(op);
         if (!impl_->PostRecv(op)) {
@@ -387,7 +387,7 @@ void IocpUdpListener::Stop()
 
     if (impl_->iocp) {
         for (size_t i = 0; i < impl_->workers.size(); ++i)
-            ::PostQueuedCompletionStatus(impl_->iocp, 0, kStopKey, nullptr);
+            ::PostQueuedCompletionStatus(impl_->iocp, 0, STOP_KEY, nullptr);
     }
 
     for (auto& t : impl_->workers)

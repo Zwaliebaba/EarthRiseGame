@@ -24,7 +24,7 @@ namespace Neuron::Net
 // server can apply the version gate before allocating any state. ---
 struct ClientHelloBody
 {
-    uint32_t protocolId{ kProtocolId };
+    uint32_t protocolId{ PROTOCOL_ID };
 
     void Encode(std::vector<uint8_t>& out) const { PutU32(out, protocolId); }
     [[nodiscard]] static bool Decode(std::span<const uint8_t> in, ClientHelloBody& b)
@@ -41,8 +41,8 @@ struct CookieBody
     void Encode(std::vector<uint8_t>& out) const { out.insert(out.end(), cookie.begin(), cookie.end()); }
     [[nodiscard]] static bool Decode(std::span<const uint8_t> in, CookieBody& b)
     {
-        if (in.size() < kCookieBytes) return false;
-        std::copy_n(in.begin(), kCookieBytes, b.cookie.begin());
+        if (in.size() < COOKIE_BYTES) return false;
+        std::copy_n(in.begin(), COOKIE_BYTES, b.cookie.begin());
         return true;
     }
 };
@@ -61,9 +61,9 @@ struct CookieResponseBody
     }
     [[nodiscard]] static bool Decode(std::span<const uint8_t> in, CookieResponseBody& b)
     {
-        if (in.size() < kCookieBytes + kEcPubKeyBytes) return false;
-        std::copy_n(in.begin(), kCookieBytes, b.cookie.begin());
-        std::copy_n(in.begin() + kCookieBytes, kEcPubKeyBytes, b.clientEphemeralPub.begin());
+        if (in.size() < COOKIE_BYTES + EC_PUB_KEY_BYTES) return false;
+        std::copy_n(in.begin(), COOKIE_BYTES, b.cookie.begin());
+        std::copy_n(in.begin() + COOKIE_BYTES, EC_PUB_KEY_BYTES, b.clientEphemeralPub.begin());
         return true;
     }
 };
@@ -87,10 +87,10 @@ struct HandshakeResponseBody
     }
     [[nodiscard]] static bool Decode(std::span<const uint8_t> in, HandshakeResponseBody& b)
     {
-        if (in.size() < kEcPubKeyBytes + kEcSigBytes + 8 + 4) return false;
+        if (in.size() < EC_PUB_KEY_BYTES + EC_SIG_BYTES + 8 + 4) return false;
         size_t off = 0;
-        std::copy_n(in.begin() + off, kEcPubKeyBytes, b.serverEphemeralPub.begin()); off += kEcPubKeyBytes;
-        std::copy_n(in.begin() + off, kEcSigBytes, b.signature.begin());             off += kEcSigBytes;
+        std::copy_n(in.begin() + off, EC_PUB_KEY_BYTES, b.serverEphemeralPub.begin()); off += EC_PUB_KEY_BYTES;
+        std::copy_n(in.begin() + off, EC_SIG_BYTES, b.signature.begin());             off += EC_SIG_BYTES;
         b.connectionToken = GetU64(in, off);
         b.epoch           = GetU32(in, off);
         return true;
@@ -104,7 +104,7 @@ struct HandshakeResponseBody
 // client must track that or it over-extrapolates. Sent as fixed-point parts-per-
 // million (factor ∈ [floor, 1] → [100000, 1000000]) to stay integer on the wire.
 // Backward-aware: an old 16-byte body (no field) decodes as factor 1.0 (full speed).
-inline constexpr uint32_t kDilationFixedOne = 1'000'000; // 1.0 in ppm fixed-point
+inline constexpr uint32_t DILATION_FIXED_ONE = 1'000'000; // 1.0 in ppm fixed-point
 
 struct ClockSyncBody
 {
@@ -118,7 +118,7 @@ struct ClockSyncBody
         PutU64(out, serverTimeMicros);
         // Clamp to [floor=0, 1]·1e6 and round to ppm; the controller never exceeds 1.
         double f = dilationFactor < 0.0 ? 0.0 : (dilationFactor > 1.0 ? 1.0 : dilationFactor);
-        PutU32(out, static_cast<uint32_t>(f * static_cast<double>(kDilationFixedOne) + 0.5));
+        PutU32(out, static_cast<uint32_t>(f * static_cast<double>(DILATION_FIXED_ONE) + 0.5));
     }
     [[nodiscard]] static bool Decode(std::span<const uint8_t> in, ClockSyncBody& b)
     {
@@ -129,7 +129,7 @@ struct ClockSyncBody
         // Versioned/forward-compatible: the dilation field is optional. A peer that
         // predates it (16-byte body) is treated as full speed.
         b.dilationFactor = (in.size() >= off + 4)
-            ? static_cast<double>(GetU32(in, off)) / static_cast<double>(kDilationFixedOne)
+            ? static_cast<double>(GetU32(in, off)) / static_cast<double>(DILATION_FIXED_ONE)
             : 1.0;
         return true;
     }

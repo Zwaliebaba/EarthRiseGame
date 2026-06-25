@@ -101,7 +101,7 @@ ER_TEST(ConnectionTable, PeekConnectionTokenReadsTheHeaderToken)
     // Build a datagram exactly as ServerConnection/SecureChannel would: kind byte,
     // then the clear PacketHeader (protocolId u32 · token u64 · packetNumber u64).
     std::vector<uint8_t> dg;
-    dg.push_back(kDatagramKindEncrypted);
+    dg.push_back(DATAGRAM_KIND_ENCRYPTED);
     PacketHeader hdr; hdr.connectionToken = token; hdr.packetNumber = 42;
     WritePacketHeader(dg, hdr);
     dg.insert(dg.end(), { 0x11, 0x22, 0x33 }); // (stands in for AEAD ciphertext+tag)
@@ -127,7 +127,7 @@ ER_TEST(ConnectionTable, PeekConnectionTokenRejectsClearAndRunt)
     const std::vector<uint8_t> clear{ 0x00 /*ClearHandshake*/, 0x01, 0xAA, 0xBB };
     ER_CHECK(!PeekConnectionToken(clear).has_value());
 
-    const std::vector<uint8_t> runt{ kDatagramKindEncrypted, 0x01, 0x02, 0x03 }; // < header
+    const std::vector<uint8_t> runt{ DATAGRAM_KIND_ENCRYPTED, 0x01, 0x02, 0x03 }; // < header
     ER_CHECK(!PeekConnectionToken(runt).has_value());
 
     const std::vector<uint8_t> empty;

@@ -18,7 +18,7 @@
 namespace Neuron::Sim
 {
 
-// Stable component IDs (≤ 64; see ECS kMaxComponentTypes).
+// Stable component IDs (≤ 64; see ECS MAX_COMPONENT_TYPES).
 enum ComponentSlot : uint8_t
 {
     Slot_Transform = 0,
@@ -76,7 +76,7 @@ enum class EntityKind : uint8_t
 // --- Components ---
 
 // Absolute universe position (int64 metres) + sector-local float offset for
-// smooth sub-metre motion (§6.1). The offset is kept in [0, kSectorSize) and
+// smooth sub-metre motion (§6.1). The offset is kept in [0, SECTOR_SIZE) and
 // rebased into 'pos' by the movement system when it leaves the sector.
 struct Transform
 {
@@ -97,7 +97,7 @@ struct ShipTag { uint8_t shipType{ 0 }; };
 // carries (colour/scale class on the client). Both are replicated.
 struct ShapeId
 {
-    uint16_t   value{ 0xFFFF };            // kInvalidShapeId
+    uint16_t   value{ 0xFFFF };            // INVALID_SHAPE_ID
     EntityKind kind{ EntityKind::Unknown };
 };
 
@@ -143,10 +143,10 @@ struct OwnerId { uint32_t player{ 0 }; };
 struct ResourceNodeTag { uint8_t type{ 0 }; float remaining{ 0.0f }; };
 
 // Itemised cargo / storage (§13.4). Index = ResourceType value (Ore=0/Ice=1/Gas=2);
-// kResourceSlots must match UniverseData::kResourceTypeCount (asserted in Economy.h).
-inline constexpr int kResourceSlots = 3;
-struct Cargo   { float amount[kResourceSlots]{}; float capacity{ 0.0f }; };
-struct Storage { float amount[kResourceSlots]{}; float capacity{ 0.0f }; };
+// RESOURCE_SLOTS must match UniverseData::RESOURCE_TYPE_COUNT (asserted in Economy.h).
+inline constexpr int RESOURCE_SLOTS = 3;
+struct Cargo   { float amount[RESOURCE_SLOTS]{}; float capacity{ 0.0f }; };
+struct Storage { float amount[RESOURCE_SLOTS]{}; float capacity{ 0.0f }; };
 
 // Per-base build queue (§13.4 economy chain). M3: one slot building one recipe —
 // consumes Storage, advances over time, spawns a ship at the base on completion.
@@ -272,7 +272,7 @@ struct Fitting
     std::vector<ModuleInstance> modules;
     float   pgUsed{ 0.0f }, pgMax{ 0.0f };
     float   cpuUsed{ 0.0f }, cpuMax{ 0.0f };
-    uint8_t slots[kSlotTypeCount]{}; // High/Mid/Low capacities
+    uint8_t slots[SLOT_TYPE_COUNT]{}; // High/Mid/Low capacities
 };
 
 // Active EWAR debuffs on a unit (§13.2). Each is a countdown; the EWAR system sets
@@ -312,7 +312,7 @@ struct Projectile
 // recovery transfers them to the looter's cargo (area G). expiresAt despawns it.
 struct LootContainer
 {
-    float items[kResourceSlots]{};
+    float items[RESOURCE_SLOTS]{};
     float expiresAt{ 0.0f }; // sim-seconds after which it despawns
 };
 

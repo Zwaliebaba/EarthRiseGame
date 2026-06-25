@@ -298,13 +298,13 @@ private:
     // determinism / collision resistance at test scale; NOT a real hash.
     static void Hash32(std::span<const uint8_t> data, uint8_t out[32])
     {
-        static constexpr uint64_t kBases[4] = {
+        static constexpr uint64_t BASES[4] = {
             1469598103934665603ull, 1099511628211ull,
             0xCBF29CE484222325ull,  0x100000001B3ull
         };
         uint64_t lanes[4];
         for (int l = 0; l < 4; ++l) {
-            uint64_t h = kBases[l] ^ (static_cast<uint64_t>(l) << 32);
+            uint64_t h = BASES[l] ^ (static_cast<uint64_t>(l) << 32);
             for (uint8_t byte : data) {
                 h ^= byte;
                 h *= 1099511628211ull;

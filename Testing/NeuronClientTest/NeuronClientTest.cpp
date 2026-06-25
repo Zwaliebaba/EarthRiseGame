@@ -169,13 +169,13 @@ namespace NeuronClientTest
     {
       RtsCamera cam;
       cam.Zoom(0.0001f);
-      Assert::IsTrue(std::fabs(cam.Distance() - RtsCamera::kMinDistance) < 0.01f);
+      Assert::IsTrue(std::fabs(cam.Distance() - RtsCamera::MIN_DISTANCE) < 0.01f);
       cam.Zoom(100000.0f);
-      Assert::IsTrue(std::fabs(cam.Distance() - RtsCamera::kMaxDistance) < 0.01f);
+      Assert::IsTrue(std::fabs(cam.Distance() - RtsCamera::MAX_DISTANCE) < 0.01f);
       cam.Rotate(0.0f, +10.0f);
-      Assert::IsTrue(std::fabs(cam.Pitch() - RtsCamera::kMaxPitch) < 0.001f);
+      Assert::IsTrue(std::fabs(cam.Pitch() - RtsCamera::MAX_PITCH) < 0.001f);
       cam.Rotate(0.0f, -10.0f);
-      Assert::IsTrue(std::fabs(cam.Pitch() - RtsCamera::kMinPitch) < 0.001f);
+      Assert::IsTrue(std::fabs(cam.Pitch() - RtsCamera::MIN_PITCH) < 0.001f);
     }
 
     TEST_METHOD(PanMovesFocusAndDisablesFollow)
@@ -314,19 +314,19 @@ namespace NeuronClientTest
     TEST_METHOD(PollOverLoopback)
     {
       Neuron::Net::LoopbackNetwork net;
-      constexpr uint16_t kStatusPort = 7778;
+      constexpr uint16_t STATUS_PORT = 7778;
       Neuron::Net::LoopbackSocket serverSock(&net);
       Neuron::Net::LoopbackSocket clientSock(&net);
-      Assert::IsTrue(serverSock.Open(kStatusPort));
+      Assert::IsTrue(serverSock.Open(STATUS_PORT));
       Assert::IsTrue(clientSock.Open(0));
 
-      ServerStatusClient client(&clientSock, "127.0.0.1", kStatusPort);
+      ServerStatusClient client(&clientSock, "127.0.0.1", STATUS_PORT);
       Assert::IsTrue(client.Enabled());
       Assert::IsFalse(client.Valid());
 
       client.RequestStatus();
 
-      uint8_t buf[Neuron::Net::kStatusMaxDatagramBytes]{};
+      uint8_t buf[Neuron::Net::STATUS_MAX_DATAGRAM_BYTES]{};
       Neuron::Net::Endpoint from;
       const int n = serverSock.RecvFrom(from, std::span<uint8_t>(buf, sizeof(buf)));
       Assert::IsTrue(n > 0);
