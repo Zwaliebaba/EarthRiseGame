@@ -23,7 +23,7 @@ SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParse
         LoadHarnessTests.cpp CameraTests.cpp OnboardingTests.cpp PickingTests.cpp \
         HudOverlayTests.cpp ReconnectTests.cpp OutboxTests.cpp WarmRestartTests.cpp \
         WarmRestartCaptureTests.cpp Pbkdf2Tests.cpp PersistTelemetryTests.cpp \
-        JsonParseTests.cpp ClientConfigTests.cpp
+        JsonParseTests.cpp ClientConfigTests.cpp ServerStatusTests.cpp
 BIN := testrunner
 
 .PHONY: all build run clean

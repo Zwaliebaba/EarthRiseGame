@@ -14,6 +14,7 @@
 #include "Interest.h"
 #include "Navigation.h"
 #include "ServerUniverse.h"
+#include "ServerStatus.h"
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
 #include "SnapshotJobs.h"
@@ -1678,6 +1679,90 @@ namespace NeuronCoreTest
     TEST_METHOD(DivergentLogChangesSimHash)
     {
       Assert::IsTrue(RunScript(kDetSrc, 120, true) != RunScript(kDetSrc, 120, false));
+    }
+  };
+
+  // --- Out-of-band server status (§21) ----------------------------------------
+  // Mirrors NeuronTools/testrunner/ServerStatusTests.cpp: the diagnostic-port wire
+  // format (EncodeStatusJson/ParseStatusJson) and the fixed query-token validation.
+  TEST_CLASS(ServerStatusTests)
+  {
+    static Neuron::Net::ServerStatus Sample()
+    {
+      Neuron::Net::ServerStatus s;
+      s.uptimeSeconds      = 12345;
+      s.simTick            = 67890;
+      s.connectionsPending = 7;
+      s.connectionsActive  = 4;
+      s.objectsSpawned     = 1024;
+      s.projectiles        = 33;
+      s.simP99Ms           = 1.25;  // %.4g-safe
+      s.encodeP99Ms        = 0.5;
+      s.dilation           = 0.75;
+      s.downstreamBytes    = 500000;
+      s.upstreamBytes      = 250000;
+      s.datagramsIn        = 900;
+      s.datagramsOut       = 1100;
+      s.baselineBytes      = 4096;
+      s.listenPort         = 7777;
+      s.devAuthStub        = true;
+      s.persistenceEnabled = true;
+      return s;
+    }
+
+  public:
+    TEST_METHOD(EncodeParseRoundTrip)
+    {
+      const Neuron::Net::ServerStatus in = Sample();
+      const std::string json = Neuron::Net::EncodeStatusJson(in);
+      Assert::IsTrue(json.size() < Neuron::Net::kStatusMaxDatagramBytes);
+
+      Neuron::Net::ServerStatus out;
+      Assert::IsTrue(Neuron::Net::ParseStatusJson(json, out));
+      Assert::AreEqual(in.uptimeSeconds, out.uptimeSeconds);
+      Assert::AreEqual(in.simTick, out.simTick);
+      Assert::AreEqual(in.connectionsPending, out.connectionsPending);
+      Assert::AreEqual(in.connectionsActive, out.connectionsActive);
+      Assert::AreEqual(in.objectsSpawned, out.objectsSpawned);
+      Assert::AreEqual(in.projectiles, out.projectiles);
+      Assert::AreEqual(in.simP99Ms, out.simP99Ms);
+      Assert::AreEqual(in.encodeP99Ms, out.encodeP99Ms);
+      Assert::AreEqual(in.dilation, out.dilation);
+      Assert::AreEqual(in.downstreamBytes, out.downstreamBytes);
+      Assert::AreEqual(in.upstreamBytes, out.upstreamBytes);
+      Assert::AreEqual(in.baselineBytes, out.baselineBytes);
+      Assert::AreEqual(uint32_t{ in.listenPort }, uint32_t{ out.listenPort });
+      Assert::AreEqual(in.devAuthStub, out.devAuthStub);
+      Assert::AreEqual(in.persistenceEnabled, out.persistenceEnabled);
+    }
+
+    TEST_METHOD(ParseRejectsGarbageAndDefaultsMissing)
+    {
+      Neuron::Net::ServerStatus out;
+      Assert::IsFalse(Neuron::Net::ParseStatusJson("not json", out));
+      Assert::IsFalse(Neuron::Net::ParseStatusJson("[1,2,3]", out));
+
+      Neuron::Net::ServerStatus partial;
+      Assert::IsTrue(Neuron::Net::ParseStatusJson("{\"connectionsActive\":3}", partial));
+      Assert::AreEqual(uint32_t{ 3 }, partial.connectionsActive);
+      Assert::AreEqual(uint64_t{ 0 }, partial.objectsSpawned);
+      Assert::AreEqual(1.0, partial.dilation); // default
+    }
+
+    TEST_METHOD(QueryTokenValidation)
+    {
+      Assert::IsTrue(Neuron::Net::IsStatusQuery(std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(Neuron::Net::kStatusQueryToken),
+          Neuron::Net::kStatusQueryTokenSize)));
+
+      const uint8_t shortBuf[3] = { 'E', 'R', 'S' };
+      Assert::IsFalse(Neuron::Net::IsStatusQuery(std::span<const uint8_t>(shortBuf, sizeof(shortBuf))));
+
+      uint8_t bad[Neuron::Net::kStatusQueryTokenSize];
+      for (size_t i = 0; i < sizeof(bad); ++i)
+        bad[i] = static_cast<uint8_t>(Neuron::Net::kStatusQueryToken[i]);
+      bad[sizeof(bad) - 1] ^= 0xFF;
+      Assert::IsFalse(Neuron::Net::IsStatusQuery(std::span<const uint8_t>(bad, sizeof(bad))));
     }
   };
 } // namespace NeuronCoreTest

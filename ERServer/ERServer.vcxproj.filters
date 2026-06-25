@@ -37,6 +37,9 @@
     <ClInclude Include="IocpUdpListener.h">
       <Filter>NetIO</Filter>
     </ClInclude>
+    <ClInclude Include="StatusEndpoint.h">
+      <Filter>NetIO</Filter>
+    </ClInclude>
     <ClInclude Include="persist\PersistConfig.h">
       <Filter>Persist</Filter>
     </ClInclude>

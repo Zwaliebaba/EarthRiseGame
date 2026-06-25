@@ -63,12 +63,24 @@
 #include "Protocol.h"
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
+#ifdef _DEBUG
+#include "ServerStatusClient.h" // F3 server-status overlay (debug builds only, §21)
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 static constexpr uint16_t kServerPort = 7777;
 static constexpr float kInterpAlpha = 0.0f; // M1b: snap-on-ack (alpha unused)
+
+#ifdef _DEBUG
+// The server's SEPARATE diagnostic status port (must match server.statusPort in the
+// ERServer config). Debug-only; the F3 overlay polls this UDP port for the read-only
+// server status. 0 in the server config disables it (then the overlay stays empty).
+static constexpr uint16_t kStatusPort = 7778;
+// How many frames between status queries (~0.5 s at 60 Hz) — the port is low-traffic.
+static constexpr int kStatusQueryIntervalFrames = 30;
+#endif
 
 // M5 real-auth credentials (§14). The server (server.devAuthStub = false) only spawns
 // and replicates a player's world after a successful account login, so the client must
@@ -167,6 +179,16 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   Neuron::Net::CngCrypto m_crypto;
   std::unique_ptr<Neuron::Net::DatagramSocketAdapter> m_socket; // WinRT DatagramSocket (§8.1)
   Neuron::Net::EcPubKey m_pinnedPub{}; // zeroed = dev/test
+
+#ifdef _DEBUG
+  // Server-status overlay (F3, debug builds only, §21): a SEPARATE socket polls the
+  // server's out-of-band diagnostic port and ServerStatusClient parses the reply into
+  // the lines drawn by DrawServerStatusOverlay. Compiled out of retail entirely.
+  std::unique_ptr<Neuron::Net::DatagramSocketAdapter>  m_statusSocket;
+  std::unique_ptr<Neuron::Client::ServerStatusClient>  m_statusClient;
+  bool m_showServerStatus{ false };
+  int  m_statusReqCountdown{ 0 };
+#endif
   std::unique_ptr<Neuron::Client::SessionImpl> m_session;
   Neuron::Client::ReplicaManager m_replica;
   Neuron::Client::InterpBuffer m_interp;
@@ -248,6 +270,17 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // world. Requires the server to run real auth (server.devAuthStub = false); for a
     // dev-stub server, drop this line and pass a name to the ctor instead.
     m_session->SetCredentials(kDevAuthUser, kDevAuthPassword);
+
+#ifdef _DEBUG
+    // Server-status overlay (F3): its own ephemeral socket so status traffic never
+    // interleaves with the game session's reliable-UDP. Points at the server's
+    // separate diagnostic port (kStatusPort); if the server has statusPort 0 the
+    // queries simply go unanswered and the overlay shows "no data".
+    m_statusSocket = std::make_unique<Neuron::Net::DatagramSocketAdapter>();
+    if (m_statusSocket->Open(0))
+      m_statusClient = std::make_unique<Neuron::Client::ServerStatusClient>(
+          m_statusSocket.get(), "127.0.0.1", kStatusPort);
+#endif
   }
 
   void SetWindow(const Windows::UI::Core::CoreWindow& window)
@@ -446,6 +479,10 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_session->Disconnect(); // best-effort graceful notice while the socket is alive
     m_session.reset();
     m_socket.reset();
+#ifdef _DEBUG
+    m_statusClient.reset();
+    m_statusSocket.reset();
+#endif
   }
 
   // Bring up XAudio2, load the PCM-16 clips, and start the looping ambient bed.
@@ -1402,6 +1439,20 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // 1. Network I/O.
     m_session->Tick();
 
+#ifdef _DEBUG
+    // 1b. Server-status overlay (F3): poll replies every frame, and re-query the
+    //     diagnostic port on a slow cadence while the overlay is visible.
+    if (m_statusClient)
+    {
+      m_statusClient->Poll();
+      if (m_showServerStatus && --m_statusReqCountdown <= 0)
+      {
+        m_statusClient->RequestStatus();
+        m_statusReqCountdown = kStatusQueryIntervalFrames;
+      }
+    }
+#endif
+
     // One-shot: how long from Connect() to fully connected (handshake cost).
     if (!m_connectedLogged && m_session->GetState() == Neuron::Client::SessionState::Connected)
     {
@@ -1673,10 +1724,60 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // Darwinia windowed UI (Main Menu / Options / settings panels + dropdowns).
     DrawUi(w, h);
 
+#ifdef _DEBUG
+    // Server-status overlay (F3, debug builds only) — on top of everything else.
+    DrawServerStatusOverlay(w, h);
+#endif
+
     m_canvas.Render(cl, w, h);
 
     m_dr.EndFrame();
   }
+
+#ifdef _DEBUG
+  // Server-status overlay (F3, debug builds only, §21): a translucent panel pinned
+  // top-right listing the live server status polled from the diagnostic port. The
+  // ServerStatusClient parses the JSON reply into the display lines drawn here.
+  void DrawServerStatusOverlay(UINT screenW, UINT screenH)
+  {
+    if (!m_showServerStatus) return;
+    const float s     = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
+    const float ts    = s * 0.85f;
+    const float lineH = m_canvas.TextHeight(ts) + 4.f * s;
+    const float pad   = 10.f * s;
+
+    // Parsed status lines, or a single hint line if no reply has arrived yet.
+    static const std::vector<std::string> kWaiting{
+        "SERVER STATUS", "(no data - is server.statusPort set?)" };
+    const std::vector<std::string>& lines =
+        (m_statusClient && m_statusClient->Valid()) ? m_statusClient->Lines() : kWaiting;
+
+    // Size the panel from the widest line.
+    float maxW = 0.f;
+    for (const auto& ln : lines)
+      maxW = std::max(maxW, m_canvas.TextWidth(ln.c_str(), ts));
+    const float panelW = maxW + 2.f * pad;
+    const float panelH = lineH * static_cast<float>(lines.size()) + 2.f * pad;
+    const float x = static_cast<float>(screenW) - panelW - 12.f * s;
+    const float y = 12.f * s;
+
+    m_canvas.DrawRect(x, y, panelW, panelH, 0.04f, 0.06f, 0.09f, 0.86f);
+    const float bw = std::max(1.f, 1.f * s);
+    m_canvas.DrawRect(x, y, panelW, bw, 0.35f, 0.85f, 1.0f, 0.9f);              // top accent
+    m_canvas.DrawRect(x, y + panelH - bw, panelW, bw, 0.35f, 0.85f, 1.0f, 0.9f); // bottom accent
+
+    float ly = y + pad;
+    bool  first = true;
+    for (const auto& ln : lines)
+    {
+      // Title row in cyan; value rows in pale text.
+      if (first) m_canvas.DrawText(x + pad, ly, ln.c_str(), 0.35f, 0.85f, 1.0f, ts);
+      else       m_canvas.DrawText(x + pad, ly, ln.c_str(), 0.85f, 0.90f, 0.92f, ts);
+      first = false;
+      ly += lineH;
+    }
+  }
+#endif
 
   // ── Input handlers ───────────────────────────────────────────────────────
   void OnKeyDown(const Windows::UI::Core::CoreWindow& win, const Windows::UI::Core::KeyEventArgs& args)
@@ -1686,6 +1787,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     // Esc closes the active (frontmost) window; the previous one becomes active.
     if (key == VK::Escape) { CloseTopWindow(); return; }
+
+#ifdef _DEBUG
+    // F3 toggles the server-status overlay (debug builds only, §21).
+    if (key == VK::F3) { m_showServerStatus = !m_showServerStatus; return; }
+#endif
 
     // --- fleet command hotkeys (§23.2 desktop affordances; M3 area G) ---
     const bool ctrl =

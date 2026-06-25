@@ -8,7 +8,7 @@
 // Layout of the document (see Config/erserver.config.example.json):
 //
 //   {
-//     "server":     { "listenPort": 7777, "devAuthStub": false },
+//     "server":     { "listenPort": 7777, "devAuthStub": false, "statusPort": 0 },
 //     "database":   { "connectionString": "...", "user": "...", "password": "...", "authMode": "sql" },
 //     "auth":       { "serverPepper": "...", "pbkdf2Iterations": 210000, ... },
 //     "durability": { "writeBehindRpoMs": 2000, "snapshotMs": 60000 },
@@ -45,6 +45,15 @@ struct ServerConfig
     // OFF = real account auth (former ER_DEV_AUTH_STUB). server.devAuthStub
     bool devAuthStub{ false };
 
+    // Optional SEPARATE out-of-band diagnostic status port (§21). 0 = disabled
+    // (the default). A debug client polls this UDP port for the read-only server
+    // status overlay (connections, spawned objects, sim/encode percentiles, …).
+    // The endpoint that serves it is compiled only into _DEBUG builds (see
+    // ERServer/StatusEndpoint.h); the field is always parsed (it is just a number,
+    // ignored by a retail build) so the config schema is identical across builds.
+    // server.statusPort
+    uint16_t statusPort{ 0 };
+
     // -- persistence / auth / durability / pool ---------------------------------
     Neuron::Persist::PersistConfig persist;
 
@@ -64,6 +73,7 @@ struct ServerConfig
         out.listenPort = static_cast<uint16_t>(
             server.getUint32("listenPort", DEFAULT_LISTEN_PORT));
         out.devAuthStub = server.getBool("devAuthStub", false);
+        out.statusPort = static_cast<uint16_t>(server.getUint32("statusPort", 0));
 
         out.persist = Neuron::Persist::PersistConfig::FromJson(root);
         return true;
