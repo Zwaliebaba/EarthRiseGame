@@ -97,6 +97,43 @@ The generator must be **seed-reproducible and deterministic** (it rides the exis
 deterministic-ECS guarantee, §7.2), so the same seed always rebuilds the same baseline — that
 is what lets the DB store only the *seed* + *divergences* instead of every node.
 
+### Epoch policy (resolves worldgen §5 open question)
+
+> **The master seed is permanent for the shard's lifetime. "Epoch" is a localized,
+> monotonic respawn counter — never a global reset.**
+
+A persistent single-shard sandbox (the EVE half of the fantasy) must never wipe: territory,
+the economy and player landmarks accrue value, so a global epoch bump (= regenerating the
+whole baseline) is off the table in production. Concretely:
+
+- **`masterSeed` is chosen once** at shard creation, written to the `Shard` row, and **never
+  changes.** Bumping it would be a map wipe.
+- **Static layout is epoch-0, fixed forever.** Regions, the beacon-graph *topology*, and
+  station/landmark placement derive from `hash(masterSeed ⊕ regionId)` only — stable for the
+  shard's life so player mental maps and the coordinates of claimed structures never shift.
+- **Epoch is scoped to the resource field** (the smallest naturally-cycling unit) and is a
+  **respawn cursor**: when a field mines out and its respawn timer elapses, increment *that
+  field's* epoch and regenerate its nodes from `hash(masterSeed ⊕ fieldId ⊕ epoch)`. This is
+  the *same* mechanism as "node respawn" — they are one feature.
+- **Persistence stays tiny:** per field, store `{epoch, perNodeRemaining, respawnTimer}` — a
+  counter plus depletion, never node positions (those are always reproducible). This is exactly
+  the "majority procedural, only state in DB" split.
+- **Never epoch-scope player-owned content.** Claimed beacons, built structures, territory are
+  pure DB divergence, regenerated *never*. Epoch only touches unowned, naturally-cycling content
+  (resource fields now; M7 anomalies/invasions later, where the epoch is **time-driven** off the
+  Universe Clock §26 — same `hash(seed ⊕ id ⊕ epoch)` pattern, different trigger).
+- **Live-ops knob, not a wipe switch:** a controlled single-region refresh (a season, a
+  rebalance of a mined-flat region) is a surgical bump of *that region's* epoch — auditable,
+  not a server restart.
+
+**Decision — public seed at launch (with a private-salt escape hatch).** Use a public seed
+everywhere for launch: clients can reconstruct the baseline (incl. respawns) with zero wire
+cost, which is the §8.4 cold-start story, and predictable belts are a sandbox feature. If
+mining-bot prediction later becomes a real problem, fold a **server-private salt into the
+resource-field hash only** (`hash(masterSeed ⊕ privateSalt ⊕ fieldId ⊕ epoch)`) — never into
+static layout, which must stay client-reproducible. The cost of a private salt is that those
+nodes can no longer be pre-generated client-side and must come over the wire as divergence.
+
 ---
 
 ## Feature areas
@@ -166,16 +203,25 @@ is what lets the DB store only the *seed* + *divergences* instead of every node.
   nodes; a `ResourceNodes` table already exists in `schema.sql` but is unused by capture. No
   `Shard`/seed row exists.
 - **Work:**
-  - [ ] Add a `Shard` (or `Universe`) row: `masterSeed`, `epoch`, `createdAt` — written once on
-        fresh seed, read on boot to pick restore-vs-generate (area A's decision tree).
-  - [ ] Add `PersistResourceNode { netId, x,y,z, type, remaining }` to `PersistState`; capture
-        it in `CaptureState`, restore in `RestoreState`, include it in `StateHash`. (Generated
-        placements need not be stored if reproducible from seed; the **simplest correct first
-        pass** is to persist node *divergence* — `remaining` — keyed by the generated netId.)
+  - [ ] Add a `Shard` (or `Universe`) row: `masterSeed`, `createdAt` — written **once** on fresh
+        seed, read on boot to pick restore-vs-generate (area A's decision tree). `masterSeed`
+        never changes (epoch policy).
+  - [ ] Persist **per-field state**, not node positions: `{ fieldId, epoch, respawnTimer }` plus
+        per-node `remaining` (depletion divergence keyed by the generated netId). Node placements
+        are reproduced from `hash(masterSeed ⊕ fieldId ⊕ epoch)`, so the DB stores only the
+        counter + depletion — the "majority procedural" split. Add to `PersistState`; capture in
+        `CaptureState`, restore in `RestoreState`, include in `StateHash`.
+  - [ ] **Respawn system** (NeuronCore rule + `ServerUniverse` system): when a field is depleted,
+        run `respawnTimer`; on elapse, `++epoch` and regenerate that field's nodes (area B
+        generator). Deterministic, so client and server agree without shipping placements.
   - [ ] Forward-only migration under `Config/db/migrations/` (project rule: ordered, additive).
 - **Tests (`WarmRestartCaptureTests`/`WarmRestartTests`, testrunner):**
-  - [ ] Capture→encode→decode→restore round-trips resource nodes; `StateHash` stable.
+  - [ ] Capture→encode→decode→restore round-trips per-field `{epoch, respawnTimer, remaining}`;
+        `StateHash` stable.
   - [ ] Depleted node stays depleted across a capture/restore cycle.
+  - [ ] Respawn: a depleted field at epoch N, after its timer, regenerates at epoch N+1 to the
+        same placements on a re-run (seed-reproducible); a different epoch → different placements.
+  - [ ] `masterSeed` is read once and never rewritten on a warm restart (no re-seed).
 - **Depends on:** A, B. **Blocks:** zero-loss restart for the economy.
 
 ### D. Close the loot-claim loop
@@ -225,8 +271,10 @@ is what lets the DB store only the *seed* + *divergences* instead of every node.
 - [ ] A fresh `ERServer` boot seeds a mineable, jumpable, fightable universe (resource nodes +
       beacons + NPC site present), logged at boot.
 - [ ] The `.universe` file holds **parameters**; the baseline is **procedurally generated** from
-      a master seed; the **seed + divergences are persisted in the DB** and a restart reproduces
-      the universe (node depletion preserved).
+      a permanent master seed; the **seed + divergences are persisted in the DB** and a restart
+      reproduces the universe (per-field epoch + depletion preserved).
+- [ ] Mined-out fields **respawn** via a per-field epoch bump (deterministic, no node positions
+      stored or shipped); player-owned content is never epoch-regenerated.
 - [ ] Loot dropped on a kill can be claimed end-to-end via a validated intent.
 - [ ] All matching `<project>Test` suites green on the Linux `testrunner` (§16.1).
 - [ ] (Out-of-env, tracked) Windows `ERServer`+`ERHeadless`+`EarthRise` smoke confirms the path.
