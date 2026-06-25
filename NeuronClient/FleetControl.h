@@ -23,7 +23,7 @@ namespace Neuron::Client
 
 // IFF / target classification for the smart action (§23.4). Derived from a
 // contact's EntityKind + ownership relative to the local player.
-enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Beacon };
+enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Beacon, Loot };
 
 // Classify a replicated contact for the smart action. NPCs (owner 0) and other
 // players' combat units read as Enemy; your own units read as Ally.
@@ -32,8 +32,9 @@ enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Be
 {
     using K = Neuron::Sim::EntityKind;
     switch (kind) {
-    case K::ResourceNode: return SmartTarget::ResourceNode;
-    case K::Structure:    return SmartTarget::Beacon;          // jump beacon / gate
+    case K::ResourceNode:  return SmartTarget::ResourceNode;
+    case K::LootContainer: return SmartTarget::Loot;           // recoverable kill loot
+    case K::Structure:     return SmartTarget::Beacon;         // jump beacon / gate
     case K::Base:
     case K::Ship:         return (ownerPlayer == selfPlayer && selfPlayer != 0)
                                  ? SmartTarget::Ally : SmartTarget::Enemy;
@@ -43,7 +44,7 @@ enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Be
 }
 
 // The smart single action (§23.1): empty space = move, enemy = attack, node =
-// harvest, beacon = warp/jump, ally = guard/assist.
+// harvest, beacon = warp/jump, ally = guard/assist, loot = claim.
 [[nodiscard]] inline Neuron::Sim::IntentType ResolveSmartAction(SmartTarget t) noexcept
 {
     using I = Neuron::Sim::IntentType;
@@ -52,6 +53,7 @@ enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Be
     case SmartTarget::ResourceNode: return I::Harvest;
     case SmartTarget::Beacon:       return I::Jump;
     case SmartTarget::Ally:         return I::Guard;
+    case SmartTarget::Loot:         return I::ClaimLoot;
     case SmartTarget::EmptySpace:   return I::Move;
     }
     return I::Move;

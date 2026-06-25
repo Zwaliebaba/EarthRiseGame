@@ -29,6 +29,7 @@ ER_TEST(ClientFleet, SmartActionResolvesByTargetType)
     ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::NpcUnit, 0, 100))      == IntentType::Attack);
     ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::Ship, 999, 100))       == IntentType::Attack); // enemy ship
     ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::Ship, 100, 100))       == IntentType::Guard);  // own ship
+    ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::LootContainer, 0, 100)) == IntentType::ClaimLoot); // kill loot
     ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::Decoration, 0, 100))   == IntentType::Move);   // empty/scenery
 }
 
@@ -44,6 +45,11 @@ ER_TEST(ClientFleet, MakeSmartCommandFillsTargetByType)
     ER_CHECK(mv.intent == IntentType::Move);
     ER_CHECK(mv.targetNetId == 0);
     ER_CHECK(mv.targetPoint == Neuron::Universe::UniversePos({ 10, 20, 30 }));
+
+    // Loot is an entity target → fills targetNetId (the container), like Attack.
+    auto loot = MakeSmartCommand(SmartTarget::Loot, sel, 77, { 0, 0, 0 });
+    ER_CHECK(loot.intent == IntentType::ClaimLoot);
+    ER_CHECK(loot.targetNetId == 77);
 }
 
 // --- control groups ---------------------------------------------------------

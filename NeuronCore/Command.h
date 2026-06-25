@@ -55,12 +55,12 @@ inline std::vector<uint8_t> EncodeMoveCommand(const MoveCommand& c)
 // --- fleet command — the full RTS intent set (§23.4) ------------------------
 
 // The intent verbs. Stop/Move/Attack/Guard/Orbit/KeepRange/Retreat map 1:1 onto
-// OrderType (one machine drives both player + NPC units); Harvest/Warp/Jump are
-// one-shot intents routed to their own systems. Stable wire values.
+// OrderType (one machine drives both player + NPC units); Harvest/Warp/Jump/Build/
+// ClaimLoot are one-shot intents routed to their own systems. Stable wire values.
 enum class IntentType : uint8_t
 {
     Stop = 0, Move = 1, Attack = 2, Guard = 3, Orbit = 4, KeepRange = 5,
-    Harvest = 6, Warp = 7, Jump = 8, Retreat = 9, Build = 10
+    Harvest = 6, Warp = 7, Jump = 8, Retreat = 9, Build = 10, ClaimLoot = 11
 };
 
 // One client → server fleet order. 'units' lists the owned entity net ids to

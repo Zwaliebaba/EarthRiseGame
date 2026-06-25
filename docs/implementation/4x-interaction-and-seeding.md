@@ -271,24 +271,31 @@ requirement (and bind any future topology generator).
   - [ ] `masterSeed` is read once and never rewritten on a warm restart (no re-seed).
 - **Depends on:** A, B. **Blocks:** zero-loss restart for the economy.
 
-### D. Close the loot-claim loop
+### D. Close the loot-claim loop ✅ done
 
 - **Goal:** players can recover loot dropped on kills, end-to-end.
 - **Refs:** §13.2 (loot-on-kill). **Touch:** `Command.h`, `ServerUniverse.h`
-  (`ApplyIntentToUnit`), `ServerHost.h` (route), `NeuronClient/FleetControl.h` (smart-action).
-- **Current state:** `ClaimLoot()` exists + tested; no `IntentType`, no route, no client verb.
+  (`ApplyIntentToUnit`), `NeuronClient/FleetControl.h` (smart-action).
+- **Current state:** ✅ done — `ClaimLoot` is now a routed intent with a client smart-action;
+  289 testrunner cases green.
 - **Work:**
-  - [ ] Add `IntentType::ClaimLoot` (next stable wire value) to `Command.h`; route it in
-        `ApplyIntentToUnit` → `ClaimLoot(unit, cmd.targetNetId)` with the same ownership check.
-  - [ ] `FleetControl.h` `ClassifyTarget` → loot container ⇒ smart-action "claim"
-        (`MakeSmartCommand` fills the target).
-  - [ ] No `ServerHost` change beyond the existing `FleetCommand` decode (it already routes all
-        intents through `ApplyFleetCommand`).
-- **Tests (`Fleet*`/`ClientFleet*`, testrunner):**
-  - [ ] `ClaimLoot` intent round-trips and transfers items to the claimer's cargo; rejected for
-        an unowned claimer / dead container.
-  - [ ] Smart-action over a loot container resolves to the claim intent.
-- **Depends on:** nothing (sim method exists). **Blocks:** the kill→loot→cargo loop being whole.
+  - [x] Added `IntentType::ClaimLoot` (= 11, stable wire value) to `Command.h`; routed in
+        `ApplyIntentToUnit` → `ClaimLoot(unit, cmd.targetNetId)`. Ownership is enforced for free
+        by `ApplyFleetCommand`'s per-unit owner check (the claimer ship is the commanded unit).
+  - [x] `FleetControl.h`: new `SmartTarget::Loot`; `ClassifyTarget` maps `EntityKind::LootContainer`
+        → `Loot`; `ResolveSmartAction` → `ClaimLoot`; `MakeSmartCommand` fills `targetNetId` (the
+        container) via the entity-target branch.
+  - [x] No `ServerHost` change (it already routes every `FleetCommand` through `ApplyFleetCommand`);
+        no `App.cpp` change (the radar handler calls `MakeSmartCommand` generically — a loot click
+        issues `ClaimLoot` on the selection). Loot containers already replicate with
+        `EntityKind::LootContainer`, so the client can see/click them.
+- **Tests (testrunner):**
+  - [x] `CombatScenario.ClaimLootIntentRecoversContainerAndChecksOwnership`: a `ClaimLoot`
+        `FleetCommand` recovers the container + transfers cargo; an unowned claimer is rejected
+        (affected count 0, container untouched).
+  - [x] `ClientFleet.SmartActionResolvesByTargetType` / `MakeSmartCommandFillsTargetByType`:
+        loot container → `ClaimLoot`, `targetNetId` filled.
+- **Depends on:** nothing (sim method existed). **Blocks:** the kill→loot→cargo loop being whole.
 
 ### E. Windows integration verification (out-of-environment, tracked)
 
