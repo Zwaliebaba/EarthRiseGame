@@ -12,6 +12,9 @@
 #include "Picking.h"      // NeuronClient — selection hit-testing (playable slice)
 #include "RtsCamera.h"    // NeuronClient — RTS camera (playable slice)
 #include "Starmap.h"      // NeuronClient — beacon route solver
+#include "ServerStatusClient.h" // NeuronClient — debug server-status poller (§21)
+#include "LoopbackNetwork.h"    // NeuronCore — in-memory ISocket for the poll test
+#include "ServerStatus.h"       // NeuronCore — status wire format
 #include "UniverseData.h" // NeuronCore — UniverseDataset / BeaconDef
 
 using namespace Microsoft::VisualStudio::CppUnitTestFramework;
@@ -277,6 +280,66 @@ namespace NeuronClientTest
       Assert::IsTrue(std::fabs(HealthFraction(EntityKind::Ship, 900) - 1.0f) < 1e-4f);
       Assert::IsTrue(std::fabs(HealthFraction(EntityKind::Ship, -50) - 0.0f) < 1e-4f);
       Assert::IsTrue(HealthFraction(EntityKind::Asteroid, 100) < 0.0f);
+    }
+  };
+
+  // --- Debug server-status poller (§21) ---------------------------------------
+  // Mirrors NeuronTools/testrunner/ServerStatusTests.cpp: the overlay line
+  // formatter and the full client poll path over an in-memory LoopbackSocket.
+  TEST_CLASS(ServerStatusClientTests)
+  {
+    static Neuron::Net::ServerStatus Sample()
+    {
+      Neuron::Net::ServerStatus s;
+      s.connectionsActive = 4;
+      s.connectionsPending = 7;
+      s.objectsSpawned = 1024;
+      s.projectiles = 33;
+      return s;
+    }
+
+  public:
+    TEST_METHOD(FormatStatusLines)
+    {
+      const auto lines = ServerStatusClient::FormatStatusLines(Sample());
+      Assert::AreEqual(size_t{ 12 }, lines.size()); // title + 11 value rows
+      Assert::IsTrue(lines[0].find("SERVER STATUS") != std::string::npos);
+
+      bool foundConns = false;
+      for (const auto& ln : lines)
+        if (ln.find("4 active / 7 total") != std::string::npos) foundConns = true;
+      Assert::IsTrue(foundConns);
+    }
+
+    TEST_METHOD(PollOverLoopback)
+    {
+      Neuron::Net::LoopbackNetwork net;
+      constexpr uint16_t kStatusPort = 7778;
+      Neuron::Net::LoopbackSocket serverSock(&net);
+      Neuron::Net::LoopbackSocket clientSock(&net);
+      Assert::IsTrue(serverSock.Open(kStatusPort));
+      Assert::IsTrue(clientSock.Open(0));
+
+      ServerStatusClient client(&clientSock, "127.0.0.1", kStatusPort);
+      Assert::IsTrue(client.Enabled());
+      Assert::IsFalse(client.Valid());
+
+      client.RequestStatus();
+
+      uint8_t buf[Neuron::Net::kStatusMaxDatagramBytes]{};
+      Neuron::Net::Endpoint from;
+      const int n = serverSock.RecvFrom(from, std::span<uint8_t>(buf, sizeof(buf)));
+      Assert::IsTrue(n > 0);
+      Assert::IsTrue(Neuron::Net::IsStatusQuery(
+          std::span<const uint8_t>(buf, static_cast<size_t>(n))));
+      const std::string json = Neuron::Net::EncodeStatusJson(Sample());
+      serverSock.SendTo(from, std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(json.data()), json.size()));
+
+      Assert::IsTrue(client.Poll());
+      Assert::IsTrue(client.Valid());
+      Assert::AreEqual(uint64_t{ 1024 }, client.Last().objectsSpawned);
+      Assert::AreEqual(uint32_t{ 4 }, client.Last().connectionsActive);
     }
   };
 }
