@@ -73,5 +73,7 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)Pbkdf2.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)PersistTelemetry.h" />
     <ClInclude Include="$(MSBuildThisFileDirectory)Reconnect.h" />
+    <!-- M6 combat economy → M5 outbox bridge (area G) -->
+    <ClInclude Include="$(MSBuildThisFileDirectory)EconomyOutbox.h" />
   </ItemGroup>
 </Project>

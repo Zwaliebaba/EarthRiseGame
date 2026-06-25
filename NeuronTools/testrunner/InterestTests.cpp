@@ -190,7 +190,12 @@ ER_TEST(Replication, VersionBumpsOnlyWhenAReplicatedFieldChanges)
     su.Step(0.1f);
     ER_CHECK_EQ(su.ReplVersion(base), v1); // version held across idle ticks
 
-    su.SetBaseVelocity(base, { 50, 0, 0 }); // now it moves
+    // The base relocates by a Move order now (the legacy SetBaseVelocity path is retired).
+    Neuron::Sim::FleetCommand mv;
+    mv.intent      = Neuron::Sim::IntentType::Move;
+    mv.units       = { base };
+    mv.targetPoint = { 1'000'000, 0, 0 }; // far point → the base keeps steering toward it
+    su.ApplyFleetCommand(base, mv);       // player ≈ base net id, so it owns itself
     su.Step(0.1f);
     ER_CHECK(su.ReplVersion(base) > v1); // position changed → version advanced
 }

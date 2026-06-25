@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <winrt/Windows.ApplicationModel.h> // Package (install location)
@@ -27,6 +28,7 @@
 #include <winrt/Windows.Storage.h>          // StorageFolder::Path
 #include <winrt/Windows.UI.Core.h>          // CoreWindow, PointerEventArgs
 #include <winrt/Windows.UI.Input.h>         // PointerPoint / button state
+#include <winrt/Windows.UI.Popups.h>        // MessageDialog (server-unreachable notice)
 #include <winrt/Windows.Foundation.Collections.h> // LocalSettings IPropertySet
 
 // NeuronRender
@@ -44,6 +46,9 @@
 #include "StringTable.h"
 #include "CmoLoader.h"
 #include "DdsLoader.h"
+#include "TacticalHud.h"      // in-space radar / overlays / overview / connection banner
+#include "MenuUi.h"           // Darwinia windowed menus + options/settings
+#include "FleetCommandController.h" // selection / control groups / smart commands
 
 // NeuronClient
 #include "SessionImpl.h"
@@ -72,6 +77,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 static constexpr uint16_t kServerPort = 7777;
 static constexpr float kInterpAlpha = 0.0f; // M1b: snap-on-ack (alpha unused)
+
+// How long to wait for the very first connection before telling the player the server
+// can't be reached (§8.5 handshake is sub-second on a live server; this is the "server
+// is down / wrong address / loopback not exempt" budget). After this the client keeps
+// retrying in the background — the notice is informational, not a hard stop.
+static constexpr long long kConnectTimeoutMs = 8000;
 
 #ifdef _DEBUG
 // The server's SEPARATE diagnostic status port (must match server.statusPort in the
@@ -129,11 +140,12 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   Neuron::Render::ParticleRenderer m_particles;
   bool m_bloom{false}; // true once PostProcess initialized (HDR path active)
   std::chrono::steady_clock::time_point m_lastFrame{}; // for particle dt
-
-  // UI chrome textures (Darwinia menu skins, docs/design/darwinia-menu-ui.md).
-  Neuron::Render::TextureGpu m_uiGrey; // InterfaceGrey — title bars, highlight beam
-  Neuron::Render::TextureGpu m_uiRed;  // InterfaceRed  — buttons, window body
-  bool m_uiReady{false};
+  // In-space HUD overlays (radar / brackets / overview / connection banner). Holds a
+  // reference to m_canvas (declared above), so it must be initialized after it.
+  er::TacticalHud m_hud{ m_canvas };
+  // Darwinia windowed menus + options/settings (owns its own window/selection state +
+  // chrome textures). Also references m_canvas, so likewise initialized after it.
+  er::MenuUi m_menu{ m_canvas };
 
   // ---- audio (NeuronAudio) ----
   Neuron::Audio::AudioEngine m_audio;
@@ -149,31 +161,13 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   bool  m_rmbDown{false};
   float m_prevPtrX{0.f}, m_prevPtrY{0.f};
   int   m_wheelAccum{0};
-  // Left-drag selection state (playable slice).
-  bool  m_selDragging{false};
-  float m_selX0{0.f}, m_selY0{0.f};
   static constexpr float kCamYawPerPx   = 0.005f;
   static constexpr float kCamPitchPerPx = 0.005f;
   static constexpr float kCamPanFrac    = 0.02f; // pan step as a fraction of zoom distance
 
-  // ---- windowed UI (docs/design/darwinia-menu-ui.md) ----
-  enum Win { Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other, Win_Count };
-  bool  m_winOpen[Win_Count]{ false, false, false, false, false };
-  float m_winX[Win_Count]{}, m_winY[Win_Count]{};
-  bool  m_uiPlaced{false};
-  int   m_dragWin{-1};
-  float m_dragDX{0.f}, m_dragDY{0.f};
-  int   m_hoverWin{-1}, m_hoverItem{-1}; // item = button index or panel row
-  int   m_pressWin{-1}, m_pressItem{-1};
-  int   m_ddWin{-1}, m_ddRow{-1};        // open dropdown (window, row); -1 none
-  int   m_ddHover{-1};                    // hovered popup row
-  int   m_sel[Win_Count][16]{};           // dropdown selection per panel row
-  int   m_zorder[Win_Count]{ Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other }; // back→front
-  UINT  m_lastW{0}, m_lastH{0}; // last screen size (for window cascade clamping)
+  // ---- HUD / settings-applied state ----
   float m_fps{0.f};
-  // Live-applied settings state (area G).
-  float m_particleDensity{1.0f}; // scales emitter rate + ambient field
-  float m_uiScaleMul{1.0f};      // "Large Menus" HUD scale multiplier
+  float m_particleDensity{1.0f}; // scales the particle emitter rate (from MenuUi each frame)
 
   // ---- network ----
   Neuron::Net::CngCrypto m_crypto;
@@ -194,9 +188,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   Neuron::Client::InterpBuffer m_interp;
 
   // ---- fleet command (§23.4; M3 area G) ----
-  Neuron::Client::ControlGroups m_controlGroups;
-  std::vector<uint32_t> m_selection;     // locally-selected owned net ids
-  uint32_t m_targetNetId{0};             // last picked target (overview/radar)
+  er::FleetCommandController m_fleet;    // selection / control groups / smart commands
   float m_focus[3]{0.f, 0.f, 0.f};       // render-space camera focus (own base)
   Neuron::Client::RtsCamera m_camera;    // free orbit/zoom/pan camera (playable slice)
   Neuron::Client::Onboarding m_onboarding; // objective/hint chain (playable slice)
@@ -211,6 +203,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   float m_dpiScale{1.0f};
   std::chrono::steady_clock::time_point m_connectStart{};
   bool m_connectedLogged{false};
+  // Server-unreachable notice (graceful MessageDialog instead of a silent hang/crash
+  // when ERServer is down or the address is wrong). Latched so it shows once per
+  // attempt; m_dialogOpen guards against stacking dialogs while one is on screen.
+  bool m_serverUnreachableNotified{false};
+  bool m_dialogOpen{false};
   // Per-shape bounding radius (indexed by ShapeCatalog id; 0 = not loaded / cube
   // fallback) used to normalize each mesh to a per-kind on-screen size.
   std::array<float, Neuron::Sim::kShapeCount> m_shapeRadius{};
@@ -317,8 +314,12 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     check_bool(m_canvas.Initialize(&m_dr));
     LoadUiAssets(); // bitmap font + menu chrome (fail-safe: HUD falls back to blocks)
     LoadAudio();    // XAudio2 engine + clips + ambient bed (fail-safe: silent)
-    InitSettings(); // default selections, then restore any persisted ones
-    LoadSettings();
+    // Route menu click/select feedback to the loaded UI clips (no audio dep in MenuUi).
+    m_menu.SetSoundCallback([this](er::MenuSound s) {
+      PlayUi(s == er::MenuSound::Click ? m_clipClick : m_clipSelect);
+    });
+    m_menu.InitSettings(); // default selections, then restore any persisted ones
+    m_menu.LoadSettings();
     {
       const long long initMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                    std::chrono::steady_clock::now() - initStart)
@@ -534,6 +535,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   // Load the UI font atlas + menu chrome textures (uncompressed BGRA DDS). The
   // font drives real DrawText; the grey/red gradient strips skin the windows.
   // Fail-safe: if anything is missing the HUD just won't render the menu.
+  // Load the shared bitmap font into the Canvas, then hand the Darwinia chrome skins to
+  // MenuUi (which owns them). The font drives all 2D text; the chrome is menu-only.
   void LoadUiAssets()
   {
     if (auto dds = LoadPackagedAsset(L"Assets\\Fonts\\EditorFont-ENG.dds"); !dds.empty())
@@ -542,847 +545,40 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       if (font.valid())
         m_canvas.SetFont(std::move(font), er::format::FontAtlasConfig{}); // 256x224, 16x16, cp32
     }
+    Neuron::Render::TextureGpu grey, red;
     if (auto dds = LoadPackagedAsset(L"Assets\\Textures\\InterfaceGrey.dds"); !dds.empty())
-      m_uiGrey = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
+      grey = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
     if (auto dds = LoadPackagedAsset(L"Assets\\Textures\\InterfaceRed.dds"); !dds.empty())
-      m_uiRed = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
+      red = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
 
-    m_uiReady = m_canvas.hasFont() && m_uiGrey.valid() && m_uiRed.valid();
     char buf[96];
     std::snprintf(buf, sizeof(buf), "[EarthRise] UI assets: font=%d grey=%d red=%d\n",
-                  static_cast<int>(m_canvas.hasFont()), static_cast<int>(m_uiGrey.valid()),
-                  static_cast<int>(m_uiRed.valid()));
+                  static_cast<int>(m_canvas.hasFont()), static_cast<int>(grey.valid()),
+                  static_cast<int>(red.valid()));
     OutputDebugStringA(buf);
+    m_menu.SetChrome(std::move(grey), std::move(red));
   }
 
-  using Rect = Neuron::Render::Ui::Rect;
-  struct UiRow { const char* label; const char* const* opts; int optCount; };
-
+  // HUD/menu scale: physical-height ratio × the "Large Menus" multiplier (owned by
+  // MenuUi). Used by the HUD (TacticalHud frame) and the fleet-command hit-tests.
   float MenuScale(UINT screenH) const noexcept
   {
-    return (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f * m_uiScaleMul;
+    return (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f * m_menu.UiScaleMul();
   }
 
-  // ── Settings (area G) ─────────────────────────────────────────────────────
-  // Sensible default selections so the wired knobs start in a good state.
-  void InitSettings()
-  {
-    // Graphics: FOV 75, Bloom High, Particles Medium, RenderScale 100%,
-    //           Shadow High, Entity High, Pixel Effect On.
-    const int g[] = { 1, 3, 2, 2, 2, 2, 1 };
-    for (int i = 0; i < 7; ++i) m_sel[Win_Graphics][i] = g[i];
-    // Screen: 1920x1080, Borderless, VSync On, Limit Off, Aniso 8x, FXAA On, Tex High, Brightness Normal.
-    const int sc[] = { 1, 1, 1, 0, 3, 1, 2, 1 };
-    for (int i = 0; i < 8; ++i) m_sel[Win_Screen][i] = sc[i];
-    // Other: Help On, Controller Off, Intro On, English, Normal, Large Off, Auto Camera On.
-    const int ot[] = { 1, 0, 1, 0, 1, 0, 1 };
-    for (int i = 0; i < 7; ++i) m_sel[Win_Other][i] = ot[i];
-  }
-
-  static int Clamp(int v, int n) { return v < 0 ? 0 : (v >= n ? n - 1 : v); }
-  float SettingFovRadians() const
-  {
-    static const float deg[4] = { 60.f, 75.f, 90.f, 110.f };
-    return deg[Clamp(m_sel[Win_Graphics][0], 4)] * 0.01745329f;
-  }
-
-  // Push the current selections to the live engine knobs (called each frame).
+  // Push the current menu selections to the live engine knobs (called each frame). The
+  // selection→value mapping lives in MenuUi; App just applies the derived values.
   void ApplySettings()
   {
-    m_dr.SetVSync(m_sel[Win_Screen][2] != 0);
-
-    static const float bloom[4] = { 0.f, 0.6f, 1.1f, 1.7f };
-    m_post.SetBloomIntensity(bloom[Clamp(m_sel[Win_Graphics][1], 4)]);
-    m_post.SetPixelEffect(m_sel[Win_Graphics][6] != 0);
-
-    static const float dens[4] = { 0.f, 0.33f, 0.66f, 1.0f };
-    m_particleDensity = dens[Clamp(m_sel[Win_Graphics][2], 4)];
+    m_dr.SetVSync(m_menu.VSyncOn());
+    m_post.SetBloomIntensity(m_menu.BloomIntensity());
+    m_post.SetPixelEffect(m_menu.PixelEffect());
+    m_particleDensity = m_menu.ParticleDensity();
     m_particles.SetDensity(m_particleDensity);
-
-    m_uiScaleMul = (m_sel[Win_Other][5] != 0) ? 1.3f : 1.0f; // Large Menus
   }
 
-  // Persist / restore selections in UWP local settings (best-effort).
-  void SaveSettings()
-  {
-    try
-    {
-      auto vals = Windows::Storage::ApplicationData::Current().LocalSettings().Values();
-      for (int win = Win_Screen; win <= Win_Other; ++win)
-        for (int row = 0; row < 16; ++row)
-        {
-          const winrt::hstring key{ L"set." + std::to_wstring(win) + L"." + std::to_wstring(row) };
-          vals.Insert(key, winrt::box_value(m_sel[win][row]));
-        }
-    }
-    catch (...) {}
-  }
-  void LoadSettings()
-  {
-    try
-    {
-      auto vals = Windows::Storage::ApplicationData::Current().LocalSettings().Values();
-      for (int win = Win_Screen; win <= Win_Other; ++win)
-        for (int row = 0; row < 16; ++row)
-        {
-          const winrt::hstring key{ L"set." + std::to_wstring(win) + L"." + std::to_wstring(row) };
-          if (vals.HasKey(key)) m_sel[win][row] = winrt::unbox_value<int>(vals.Lookup(key));
-        }
-    }
-    catch (...) {}
-  }
-  static bool WinIsPanel(int win) { return win == Win_Screen || win == Win_Graphics || win == Win_Other; }
-  static float PanelWidth(float s) { return 460.f * s; }
 
-  static const char* WinTitle(int win)
-  {
-    switch (win)
-    {
-      case Win_MainMenu: return er::ui::str("ui.mainmenu.title");
-      case Win_Options:  return er::ui::str("ui.options.title");
-      case Win_Screen:   return er::ui::str("ui.screen.title");
-      case Win_Graphics: return er::ui::str("ui.graphics.title");
-      case Win_Other:    return er::ui::str("ui.other.title");
-    }
-    return "";
-  }
 
-  // Move a window to the front of the draw/pick order.
-  void RaiseWindow(int win)
-  {
-    int idx = -1;
-    for (int i = 0; i < Win_Count; ++i)
-      if (m_zorder[i] == win) { idx = i; break; }
-    if (idx < 0) return;
-    for (int i = idx; i < Win_Count - 1; ++i) m_zorder[i] = m_zorder[i + 1];
-    m_zorder[Win_Count - 1] = win;
-  }
-
-  // Button-list windows (Main Menu, Options). 'Close' is appended by the layout.
-  static int WinButtons(int win, const char* const*& out)
-  {
-    static const char* mm[] = { "Profile", "Mods", "Options", "Visit Website",
-                                "Play Tutorial", "Quit EarthRise" };
-    static const char* op[] = { "Screen Options", "Graphics Options", "Sound Options",
-                                "Control Options", "Other Options" };
-    if (win == Win_Options) { out = op; return 5; }
-    out = mm; return 6;
-  }
-  // Caption for button index i (i == listCount → the trailing Close).
-  static const char* WinButtonCaption(int win, int i)
-  {
-    const char* const* items; const int n = WinButtons(win, items);
-    return (i >= 0 && i < n) ? items[i] : "Close";
-  }
-
-  // Panel dropdown rows. Returns the dropdown-row count (excludes the label row).
-  static int WinRows(int win, const UiRow*& out)
-  {
-    static const char* onoff[]   = { "Off", "On" };
-    static const char* q3[]      = { "Low", "Medium", "High" };
-    static const char* q4[]      = { "Off", "Low", "Medium", "High" };
-    static const char* res[]     = { "1280x720", "1920x1080", "2560x1440", "3840x2160" };
-    static const char* wmode[]   = { "Windowed", "Borderless", "Fullscreen" };
-    static const char* fpscap[]  = { "Off", "30", "60", "120", "144" };
-    static const char* aniso[]   = { "Off", "2x", "4x", "8x", "16x" };
-    static const char* fov[]     = { "60", "75", "90", "110" };
-    static const char* scale[]   = { "50%", "75%", "100%", "125%" };
-    static const char* lang[]    = { "English", "Francais", "Italiano", "Russian" };
-    static const char* diff[]    = { "Easy", "Normal", "Hard" };
-
-    static const UiRow screen[] = {
-      { "Resolution", res, 4 }, { "Window Mode", wmode, 3 }, { "VSync", onoff, 2 },
-      { "Limit FPS", fpscap, 5 }, { "Anisotropy", aniso, 5 }, { "FXAA", onoff, 2 },
-      { "Texture Detail", q3, 3 }, { "Brightness", q3, 3 },
-    };
-    static const UiRow graphics[] = {
-      { "Field of View", fov, 4 }, { "Bloom", q4, 4 }, { "Particles", q4, 4 },
-      { "Render Scale", scale, 4 }, { "Shadow Detail", q3, 3 }, { "Entity Detail", q3, 3 },
-      { "Pixel Effect", onoff, 2 },
-    };
-    static const UiRow other[] = {
-      { "Help System", onoff, 2 }, { "Controller Help", onoff, 2 }, { "Intro Movies", onoff, 2 },
-      { "Language", lang, 4 }, { "Difficulty", diff, 3 }, { "Large Menus", onoff, 2 },
-      { "Automatic Camera", onoff, 2 },
-    };
-    switch (win)
-    {
-      case Win_Screen:   out = screen;   return 8;
-      case Win_Graphics: out = graphics; return 7;
-      case Win_Other:    out = other;    return 7;
-    }
-    out = nullptr; return 0;
-  }
-  // Trailing read-only label for a panel (FPS / build version), or nullptr.
-  static const char* WinLabel(int win)
-  {
-    if (win == Win_Graphics) return "FPS";
-    if (win == Win_Other)    return "Build";
-    return nullptr;
-  }
-
-  void PlaceWindows(UINT screenW, UINT screenH)
-  {
-    const float s = MenuScale(screenH);
-    float mmX = 0, mmY = 0;
-    Neuron::Render::Ui::CenterMainMenu(static_cast<float>(screenW), static_cast<float>(screenH), s, 6, mmX, mmY);
-    const float pw = PanelWidth(s);
-    auto clampX = [&](float x) { const float m = screenW - 320.f * s; return x < 10.f * s ? 10.f * s : (x > m ? m : x); };
-    m_winX[Win_MainMenu] = mmX;                       m_winY[Win_MainMenu] = mmY;
-    m_winX[Win_Options]  = clampX(mmX - 330.f * s);    m_winY[Win_Options]  = mmY;
-    m_winX[Win_Graphics] = clampX(mmX + 330.f * s);    m_winY[Win_Graphics] = 70.f * s;
-    m_winX[Win_Screen]   = m_winX[Win_Graphics];       m_winY[Win_Screen]   = 70.f * s;
-    m_winX[Win_Other]    = m_winX[Win_Options];        m_winY[Win_Other]    = 70.f * s;
-    (void)pw;
-  }
-
-  // Per-frame UI interaction. Run before DrawUi; consumes pointer edges.
-  void UpdateUi(UINT screenW, UINT screenH)
-  {
-    m_lastW = screenW; m_lastH = screenH;
-    if (!m_uiPlaced) { PlaceWindows(screenW, screenH); m_uiPlaced = true; }
-    if (!m_uiReady) { m_ptrPressed = m_ptrReleased = false; return; }
-    const float s = MenuScale(screenH);
-    m_hoverWin = m_hoverItem = -1; m_ddHover = -1;
-
-    // Drag continuation.
-    if (m_dragWin >= 0)
-    {
-      if (m_ptrDown)
-      {
-        m_winX[m_dragWin] = m_ptrX - m_dragDX;
-        m_winY[m_dragWin] = m_ptrY - m_dragDY;
-        if (m_winX[m_dragWin] < 0) m_winX[m_dragWin] = 0;
-        if (m_winY[m_dragWin] < 0) m_winY[m_dragWin] = 0;
-      }
-      else m_dragWin = -1;
-    }
-
-    // Open dropdown popup takes all input until closed.
-    if (m_ddWin >= 0)
-    {
-      const UiRow* rows; WinRows(m_ddWin, rows);
-      const auto L = Neuron::Render::Ui::BuildPanel(m_winX[m_ddWin], m_winY[m_ddWin], s, PanelWidth(s),
-                                                    WinRows(m_ddWin, rows) + (WinLabel(m_ddWin) ? 1 : 0), true);
-      const Rect vb = Neuron::Render::Ui::ValueBox(L.rows[m_ddRow]);
-      const int n = rows[m_ddRow].optCount;
-      for (int i = 0; i < n; ++i)
-        if (Neuron::Render::Ui::PopupRow(vb, i).Contains(m_ptrX, m_ptrY)) { m_ddHover = i; break; }
-      if (m_ptrPressed)
-      {
-        if (m_ddHover >= 0) { m_sel[m_ddWin][m_ddRow] = m_ddHover; PlayUi(m_clipSelect); }
-        m_ddWin = m_ddRow = -1; // any click closes the popup
-      }
-      m_ptrPressed = m_ptrReleased = false;
-      return;
-    }
-
-    // Topmost window under the pointer consumes the interaction (front = last in
-    // z-order, so iterate it backwards).
-    for (int oi = Win_Count - 1; oi >= 0; --oi)
-    {
-      const int win = m_zorder[oi];
-      if (!m_winOpen[win]) continue;
-
-      if (WinIsPanel(win))
-      {
-        const UiRow* rows; const int dd = WinRows(win, rows);
-        const bool hasLabel = WinLabel(win) != nullptr;
-        const auto L = Neuron::Render::Ui::BuildPanel(m_winX[win], m_winY[win], s, PanelWidth(s),
-                                                      dd + (hasLabel ? 1 : 0), true);
-        if (!L.window.Contains(m_ptrX, m_ptrY)) continue;
-        if (m_ptrPressed) RaiseWindow(win);
-        for (int i = 0; i < dd; ++i)
-          if (Neuron::Render::Ui::ValueBox(L.rows[i]).Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = i; break; }
-        if (m_hoverItem < 0)
-        {
-          if (L.footerClose.Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = -2; }
-          else if (L.footerApply.Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = -3; }
-        }
-        if (m_ptrPressed)
-        {
-          if (L.closeBox.Contains(m_ptrX, m_ptrY)) { m_winOpen[win] = false; PlayUi(m_clipClick); }
-          else if (L.footerClose.Contains(m_ptrX, m_ptrY)) { m_winOpen[win] = false; PlayUi(m_clipClick); }
-          else if (L.footerApply.Contains(m_ptrX, m_ptrY)) { SaveSettings(); PlayUi(m_clipClick); }
-          else if (m_hoverItem >= 0) { m_ddWin = win; m_ddRow = m_hoverItem; PlayUi(m_clipSelect); }
-          else if (L.titleBar.Contains(m_ptrX, m_ptrY)) { m_dragWin = win; m_dragDX = m_ptrX - m_winX[win]; m_dragDY = m_ptrY - m_winY[win]; }
-        }
-        break;
-      }
-      else
-      {
-        const char* const* items; const int n = WinButtons(win, items);
-        const auto L = Neuron::Render::Ui::BuildMainMenu(m_winX[win], m_winY[win], s, n);
-        if (!L.window.Contains(m_ptrX, m_ptrY)) continue;
-        if (m_ptrPressed) RaiseWindow(win);
-        for (int i = 0; i < L.count; ++i)
-          if (L.buttons[i].Contains(m_ptrX, m_ptrY)) { m_hoverWin = win; m_hoverItem = i; break; }
-        if (m_ptrPressed)
-        {
-          if (L.closeBox.Contains(m_ptrX, m_ptrY)) m_winOpen[win] = false;
-          else if (m_hoverItem >= 0) { m_pressWin = win; m_pressItem = m_hoverItem; }
-          else if (L.titleBar.Contains(m_ptrX, m_ptrY)) { m_dragWin = win; m_dragDX = m_ptrX - m_winX[win]; m_dragDY = m_ptrY - m_winY[win]; }
-        }
-        if (m_ptrReleased && m_pressWin == win && m_pressItem >= 0 && L.buttons[m_pressItem].Contains(m_ptrX, m_ptrY))
-          OnButtonAction(win, m_pressItem, L.count);
-        break;
-      }
-    }
-
-    if (m_ptrReleased) { m_pressWin = m_pressItem = -1; }
-    m_ptrPressed = m_ptrReleased = false;
-  }
-
-  void OnButtonAction(int win, int idx, int count)
-  {
-    PlayUi(m_clipClick);
-    if (idx == count - 1) { m_winOpen[win] = false; return; } // trailing Close
-    // Open a window; if it was closed, cascade it off the current front window
-    // so it never opens exactly on top of another (wraps near the screen edge).
-    auto open = [&](int w) {
-      if (!m_winOpen[w])
-      {
-        int front = -1;
-        for (int oi = Win_Count - 1; oi >= 0; --oi) { const int x = m_zorder[oi]; if (m_winOpen[x]) { front = x; break; } }
-        if (front >= 0)
-        {
-          float nx = m_winX[front] + 36.f, ny = m_winY[front] + 36.f;
-          if (m_lastW > 140u && nx > static_cast<float>(m_lastW) - 140.f) nx = 40.f;
-          if (m_lastH > 140u && ny > static_cast<float>(m_lastH) - 140.f) ny = 40.f;
-          m_winX[w] = nx; m_winY[w] = ny;
-        }
-      }
-      m_winOpen[w] = true;
-      RaiseWindow(w);
-    };
-    if (win == Win_MainMenu)
-    {
-      if (idx == 2) open(Win_Options);              // Options
-      else if (idx == 5) m_running = false;         // Quit EarthRise
-      else OutputDebugStringA("[EarthRise] menu item\n");
-    }
-    else if (win == Win_Options)
-    {
-      if (idx == 0) open(Win_Screen);
-      else if (idx == 1) open(Win_Graphics);
-      else if (idx == 4) open(Win_Other);
-      else OutputDebugStringA("[EarthRise] options item\n");
-    }
-  }
-
-  // ── Drawing ───────────────────────────────────────────────────────────────
-  void DrawChromeBody(const Rect& W, const Rect& titleBar)
-  {
-    m_canvas.DrawTexturedQuad(W.x, W.y, W.w, W.h, 0.f, 0.f, 1.f, 1.f, m_uiRed, 1.f, 1.f, 1.f, 0.96f);
-    m_canvas.DrawVGradient(titleBar.x, titleBar.y, titleBar.w, titleBar.h,
-                           0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
-  }
-  void DrawChromeFrame(const Rect& W, const Rect& titleBar, const Rect& closeBox, const char* title, float s)
-  {
-    const float bw = 2.f * s;
-    constexpr float lbR = 0.780f, lbG = 0.839f, lbB = 0.863f;
-    m_canvas.DrawRect(W.x, W.y, W.w, bw, lbR, lbG, lbB, 1.f);
-    m_canvas.DrawRect(W.x, W.y + W.h - bw, W.w, bw, lbR, lbG, lbB, 1.f);
-    m_canvas.DrawRect(W.x, W.y, bw, W.h, lbR, lbG, lbB, 1.f);
-    m_canvas.DrawRect(W.x + W.w - bw, W.y, bw, W.h, lbR, lbG, lbB, 1.f);
-    constexpr float dbR = 0.165f, dbG = 0.220f, dbB = 0.322f;
-    const float o = 2.f * s;
-    m_canvas.DrawRect(W.x - o, W.y - o, W.w + 2 * o, s, dbR, dbG, dbB, 1.f);
-    m_canvas.DrawRect(W.x - o, W.y + W.h + o - s, W.w + 2 * o, s, dbR, dbG, dbB, 1.f);
-    m_canvas.DrawRect(W.x - o, W.y - o, s, W.h + 2 * o, dbR, dbG, dbB, 1.f);
-    m_canvas.DrawRect(W.x + W.w + o - s, W.y - o, s, W.h + 2 * o, dbR, dbG, dbB, 1.f);
-
-    const float tts = s * 0.9f;
-    const float tx = titleBar.x + (titleBar.w - m_canvas.TextWidth(title, tts)) * 0.5f;
-    const float ty = titleBar.y + (titleBar.h - m_canvas.TextHeight(tts)) * 0.5f;
-    m_canvas.DrawText(tx + 1.5f * s, ty + 1.5f * s, title, 0.f, 0.f, 0.f, tts);
-    m_canvas.DrawText(tx, ty, title, 0.13f, 0.16f, 0.22f, tts);
-
-    const bool ch = closeBox.Contains(m_ptrX, m_ptrY);
-    m_canvas.DrawVGradient(closeBox.x, closeBox.y, closeBox.w, closeBox.h,
-                           ch ? 1.f : 0.780f, ch ? 1.f : 0.839f, ch ? 1.f : 0.863f, 1.f,
-                           0.439f, 0.553f, 0.659f, 1.f);
-  }
-
-  void DrawButton(const Rect& b, const char* caption, float s, bool highlighted, bool pressed)
-  {
-    const float ts = s * 1.0f;
-    const float tw = m_canvas.TextWidth(caption, ts);
-    const float th = m_canvas.TextHeight(ts);
-    const float cx = b.x + (b.w - tw) * 0.5f, cy = b.y + (b.h - th) * 0.5f;
-    if (highlighted)
-    {
-      if (pressed)
-        m_canvas.DrawVGradient(b.x, b.y, b.w, b.h, 1.f, 1.f, 1.f, 1.f, 0.635f, 0.749f, 0.816f, 1.f);
-      else
-        m_canvas.DrawVGradient(b.x, b.y, b.w, b.h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
-      m_canvas.DrawText(cx + 1.f * s, cy + 1.f * s, caption, 0.f, 0.f, 0.f, ts);
-      m_canvas.DrawText(cx, cy, caption, 0.12f, 0.14f, 0.18f, ts);
-      return;
-    }
-    m_canvas.DrawRect(b.x, b.y, b.w, b.h, 0.420f, 0.145f, 0.153f, 0.25f);
-    const float px = (s > 1.f ? s : 1.f);
-    m_canvas.DrawRect(b.x, b.y, b.w, px, 0.392f, 0.133f, 0.133f, 0.78f);
-    m_canvas.DrawRect(b.x, b.y, px, b.h, 0.392f, 0.133f, 0.133f, 0.78f);
-    m_canvas.DrawRect(b.x + b.w - px, b.y, px, b.h, 0.10f, 0.f, 0.f, 1.f);
-    m_canvas.DrawRect(b.x, b.y + b.h - px, b.w, px, 0.10f, 0.f, 0.f, 1.f);
-    m_canvas.DrawText(cx, cy, caption, 1.f, 1.f, 1.f, ts);
-  }
-
-  // Dropdown row: label (left) + recessed value box (right) showing the current
-  // option + a down-arrow. Hovered value boxes brighten.
-  void DrawDropDown(const Rect& row, const UiRow& r, int sel, bool hover, float s)
-  {
-    const float ts = s * 0.9f;
-    const float th = m_canvas.TextHeight(ts);
-    m_canvas.DrawText(row.x, row.y + (row.h - th) * 0.5f, r.label, 0.92f, 0.88f, 0.80f, ts);
-
-    const Rect vb = Neuron::Render::Ui::ValueBox(row);
-    const float a = hover ? 0.5f : 0.32f; // recessed dark-red, brighter on hover
-    m_canvas.DrawRect(vb.x, vb.y, vb.w, vb.h, 0.42f, 0.16f, 0.16f, a);
-    const float px = (s > 1.f ? s : 1.f);
-    m_canvas.DrawRect(vb.x, vb.y, vb.w, px, 0.10f, 0.f, 0.f, 1.f);            // top (recessed)
-    m_canvas.DrawRect(vb.x, vb.y, px, vb.h, 0.10f, 0.f, 0.f, 1.f);            // left
-    m_canvas.DrawRect(vb.x + vb.w - px, vb.y, px, vb.h, 0.55f, 0.28f, 0.28f, 1.f);
-    m_canvas.DrawRect(vb.x, vb.y + vb.h - px, vb.w, px, 0.55f, 0.28f, 0.28f, 1.f);
-
-    const char* val = (sel >= 0 && sel < r.optCount) ? r.opts[sel] : "";
-    m_canvas.DrawText(vb.x + 6.f * s, vb.y + (vb.h - th) * 0.5f, val, 1.f, 1.f, 1.f, ts);
-
-    const Rect ar = Neuron::Render::Ui::ArrowBox(vb);
-    m_canvas.DrawTriangle(ar.x + ar.w * 0.30f, ar.y + ar.h * 0.40f,
-                          ar.x + ar.w * 0.70f, ar.y + ar.h * 0.40f,
-                          ar.x + ar.w * 0.50f, ar.y + ar.h * 0.64f,
-                          0.92f, 0.88f, 0.80f, 1.f);
-  }
-
-  void DrawPanelWindow(int win, float s)
-  {
-    const UiRow* rows; const int dd = WinRows(win, rows);
-    const char* label = WinLabel(win);
-    const int total = dd + (label ? 1 : 0);
-    const auto L = Neuron::Render::Ui::BuildPanel(m_winX[win], m_winY[win], s, PanelWidth(s), total, true);
-
-    DrawChromeBody(L.window, L.titleBar);
-    for (int i = 0; i < dd; ++i)
-      DrawDropDown(L.rows[i], rows[i], m_sel[win][i], (m_hoverWin == win && m_hoverItem == i), s);
-    if (label)
-    {
-      const Rect& lr = L.rows[dd];
-      const float ts = s * 0.9f;
-      char buf[64];
-      if (win == Win_Graphics) std::snprintf(buf, sizeof(buf), "%s   %d", label, static_cast<int>(m_fps + 0.5f));
-      else                     std::snprintf(buf, sizeof(buf), "%s   v0.17-dev", label);
-      m_canvas.DrawText(lr.x, lr.y + (lr.h - m_canvas.TextHeight(ts)) * 0.5f, buf, 0.85f, 0.85f, 0.55f, ts);
-    }
-    DrawButton(L.footerClose, er::ui::str("ui.close"), s, m_hoverWin == win && m_hoverItem == -2, false);
-    DrawButton(L.footerApply, er::ui::str("ui.apply"), s, m_hoverWin == win && m_hoverItem == -3, false);
-    DrawChromeFrame(L.window, L.titleBar, L.closeBox, WinTitle(win), s);
-  }
-
-  void DrawButtonListWindow(int win, float s)
-  {
-    const char* const* items; const int n = WinButtons(win, items);
-    const auto L = Neuron::Render::Ui::BuildMainMenu(m_winX[win], m_winY[win], s, n);
-    DrawChromeBody(L.window, L.titleBar);
-    for (int i = 0; i < L.count; ++i)
-    {
-      const bool hover = (m_hoverWin == win && m_hoverItem == i);
-      const bool pressed = hover && (m_pressWin == win && m_pressItem == i) && m_ptrDown;
-      DrawButton(L.buttons[i], WinButtonCaption(win, i), s, hover, pressed);
-    }
-    DrawChromeFrame(L.window, L.titleBar, L.closeBox, WinTitle(win), s);
-  }
-
-  void DrawDropdownPopup(float s)
-  {
-    if (m_ddWin < 0) return;
-    const UiRow* rows; const int dd = WinRows(m_ddWin, rows);
-    const auto L = Neuron::Render::Ui::BuildPanel(m_winX[m_ddWin], m_winY[m_ddWin], s, PanelWidth(s),
-                                                  dd + (WinLabel(m_ddWin) ? 1 : 0), true);
-    const Rect vb = Neuron::Render::Ui::ValueBox(L.rows[m_ddRow]);
-    const UiRow& r = rows[m_ddRow];
-    const Rect panel = Neuron::Render::Ui::PopupPanel(vb, r.optCount);
-    m_canvas.DrawRect(panel.x - s, panel.y, panel.w + 2 * s, panel.h + s, 0.06f, 0.02f, 0.03f, 0.97f);
-    const float ts = s * 0.9f, th = m_canvas.TextHeight(ts);
-    for (int i = 0; i < r.optCount; ++i)
-    {
-      const Rect pr = Neuron::Render::Ui::PopupRow(vb, i);
-      if (i == m_ddHover)
-        m_canvas.DrawVGradient(pr.x, pr.y, pr.w, pr.h, 0.780f, 0.839f, 0.863f, 1.f, 0.439f, 0.553f, 0.659f, 1.f);
-      const bool dark = (i == m_ddHover);
-      m_canvas.DrawText(pr.x + 6.f * s, pr.y + (pr.h - th) * 0.5f, r.opts[i],
-                        dark ? 0.10f : 1.f, dark ? 0.12f : 1.f, dark ? 0.16f : 1.f, ts);
-    }
-  }
-
-  // Radar IFF colour per entity kind.
-  static void RadarColor(uint8_t kind, float& r, float& g, float& b) noexcept
-  {
-    using K = Neuron::Sim::EntityKind;
-    switch (static_cast<K>(kind))
-    {
-      case K::Base:      r = 0.35f; g = 0.65f; b = 1.00f; break; // blue (self/allied)
-      case K::Ship:      r = 1.00f; g = 0.55f; b = 0.15f; break; // orange
-      case K::Station:   r = 0.40f; g = 0.85f; b = 0.90f; break; // cyan
-      case K::Structure: r = 0.65f; g = 0.45f; b = 1.00f; break; // violet
-      case K::Asteroid:  r = 0.55f; g = 0.50f; b = 0.42f; break; // rock
-      default:           r = 0.70f; g = 0.70f; b = 0.70f; break; // grey
-    }
-  }
-
-  void DrawDisc(float cx, float cy, float rad, int seg, float r, float g, float b, float a)
-  {
-    float px = cx + rad, py = cy;
-    for (int i = 1; i <= seg; ++i)
-    {
-      const float ang = 6.2831853f * static_cast<float>(i) / static_cast<float>(seg);
-      const float x = cx + rad * std::cos(ang), y = cy + rad * std::sin(ang);
-      m_canvas.DrawTriangle(cx, cy, px, py, x, y, r, g, b, a);
-      px = x; py = y;
-    }
-  }
-  void DrawRing(float cx, float cy, float rad, int seg, float width, float r, float g, float b, float a)
-  {
-    float px = cx + rad, py = cy;
-    for (int i = 1; i <= seg; ++i)
-    {
-      const float ang = 6.2831853f * static_cast<float>(i) / static_cast<float>(seg);
-      const float x = cx + rad * std::cos(ang), y = cy + rad * std::sin(ang);
-      m_canvas.DrawLine(px, py, x, y, width, r, g, b, a);
-      px = x; py = y;
-    }
-  }
-
-  // 2D radar disc (bottom-left): top-down blips of nearby entities relative to
-  // the camera focus, with range rings (masterplan §22).
-  void DrawRadar(UINT screenW, UINT screenH, const Neuron::Render::SceneEntity* ents, UINT count,
-                 float fx, float fy, float fz)
-  {
-    (void)screenW; (void)fy;
-    if (!m_uiReady) return;
-    const float s = MenuScale(screenH);
-    const float R = 95.f * s;
-    const float cxr = 20.f * s + R;
-    const float cyr = static_cast<float>(screenH) - 20.f * s - R;
-    constexpr float kRange = 1800.f; // world metres mapped to the disc edge
-
-    DrawDisc(cxr, cyr, R, 44, 0.30f, 0.11f, 0.12f, 0.85f);           // dark-red disc (menu body tone)
-    // Rings + cross-hairs in the window's light grey-blue border colour.
-    constexpr float lr = 0.780f, lg = 0.839f, lb = 0.863f;
-    DrawRing(cxr, cyr, R, 48, 2.0f * s, lr, lg, lb, 0.90f);           // outer frame (bright)
-    DrawRing(cxr, cyr, R * 0.66f, 44, 1.0f * s, lr, lg, lb, 0.40f);   // mid range ring
-    DrawRing(cxr, cyr, R * 0.33f, 40, 1.0f * s, lr, lg, lb, 0.32f);   // inner range ring
-    m_canvas.DrawLine(cxr - R, cyr, cxr + R, cyr, 1.f * s, lr, lg, lb, 0.30f);
-    m_canvas.DrawLine(cxr, cyr - R, cxr, cyr + R, 1.f * s, lr, lg, lb, 0.30f);
-
-    for (UINT i = 0; i < count; ++i)
-    {
-      const auto& e = ents[i];
-      const float dx = e.x - fx, dz = e.z - fz;
-      const float dist = std::sqrt(dx * dx + dz * dz);
-      if (dist > kRange) continue;
-      // World +X → radar right, world +Z → radar up.
-      const float bx = cxr + (dx / kRange) * R;
-      const float by = cyr - (dz / kRange) * R;
-      float r, g, b; RadarColor(e.kind, r, g, b);
-      const float bs = 3.0f * s;
-      m_canvas.DrawRect(bx - bs * 0.5f, by - bs * 0.5f, bs, bs, r, g, b, 1.f);
-    }
-
-    // Player marker (centre, pointing up).
-    const float m = 5.f * s;
-    m_canvas.DrawTriangle(cxr, cyr - m, cxr - m * 0.7f, cyr + m * 0.6f, cxr + m * 0.7f, cyr + m * 0.6f,
-                          0.9f, 0.95f, 1.f, 1.f);
-    const float ts = s * 0.8f;
-    const char* lbl = er::ui::str("ui.radar");
-    m_canvas.DrawText(cxr - m_canvas.TextWidth(lbl, ts) * 0.5f, cyr - R - 16.f * s, lbl, 0.780f, 0.839f, 0.863f, ts);
-  }
-
-  // --- fleet command interaction (§23.1/§23.4; M3 area G) --------------------
-
-  // Encode + send a validated FleetCommand to the server (the server re-checks
-  // ownership/target; this is purely the client request path, §8.4).
-  void SendFleet(const Neuron::Sim::FleetCommand& cmd)
-  {
-    if (!m_session || m_selection.empty()) return;
-    m_session->SendFleetCommand(Neuron::Sim::EncodeFleetCommand(cmd));
-  }
-
-  // Re-select all of the local player's own ships from the current replica (the
-  // overview "all ships" smart-select, §23.1). Bases are not commandable units.
-  void SelectAllOwnShips()
-  {
-    m_selection.clear();
-    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
-    const auto& rs = m_interp.curr;
-    for (uint32_t i = 0; i < rs.count; ++i) {
-      const auto& e = rs.entities[i];
-      if (e.valid && e.ownerPlayer == self &&
-          static_cast<Neuron::Sim::EntityKind>(e.entityType) == Neuron::Sim::EntityKind::Ship)
-        m_selection.push_back(e.networkId);
-    }
-  }
-
-  // True if the pointer is over any open windowed-UI panel (so a click there
-  // should not also reach the radar/HUD beneath it). Mirrors UpdateUi's hit-test.
-  bool PointerOverOpenWindow(float s) const
-  {
-    for (int win = 0; win < Win_Count; ++win) {
-      if (!m_winOpen[win]) continue;
-      if (WinIsPanel(win)) {
-        const UiRow* rows; const int dd = WinRows(win, rows);
-        const bool hasLabel = WinLabel(win) != nullptr;
-        const auto L = Neuron::Render::Ui::BuildPanel(m_winX[win], m_winY[win], s, PanelWidth(s),
-                                                      dd + (hasLabel ? 1 : 0), true);
-        if (L.window.Contains(m_ptrX, m_ptrY)) return true;
-      } else {
-        const char* const* items; const int n = WinButtons(win, items);
-        const auto L = Neuron::Render::Ui::BuildMainMenu(m_winX[win], m_winY[win], s, n);
-        if (L.window.Contains(m_ptrX, m_ptrY)) return true;
-      }
-    }
-    return false;
-  }
-
-  // Resolve a radar click into a smart action against the nearest contact (or
-  // empty space → move). Mirrors DrawRadar's projection so the pick lines up.
-  void HandleRadarCommand(UINT screenH, float fx, float fz)
-  {
-    if (!m_ptrPressed || m_selection.empty()) return;
-    if (PointerOverOpenWindow(MenuScale(screenH))) return; // UI window owns this click
-    const float s = MenuScale(screenH);
-    const float R = 95.f * s;
-    const float cxr = 20.f * s + R;
-    const float cyr = static_cast<float>(screenH) - 20.f * s - R;
-    constexpr float kRange = 1800.f;
-
-    const float ddx = m_ptrX - cxr, ddy = m_ptrY - cyr;
-    if (ddx * ddx + ddy * ddy > R * R) return; // click outside the radar disc
-
-    // World point under the click (radar +X right, +Z up).
-    const float wx = fx + (ddx / R) * kRange;
-    const float wz = fz - (ddy / R) * kRange;
-
-    // Nearest contact to the click (in render space) within a small pick radius.
-    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
-    const auto& rs = m_interp.curr;
-    uint32_t bestId = 0; float bestD2 = 0.f;
-    Neuron::Sim::EntityKind bestKind = Neuron::Sim::EntityKind::Unknown;
-    uint32_t bestOwner = 0;
-    for (uint32_t i = 0; i < rs.count; ++i) {
-      const auto& e = rs.entities[i];
-      if (!e.valid || e.networkId == self) continue;
-      const float dx = e.x - wx, dz = e.z - wz, d2 = dx * dx + dz * dz;
-      if (bestId == 0 || d2 < bestD2) {
-        bestId = e.networkId; bestD2 = d2;
-        bestKind = static_cast<Neuron::Sim::EntityKind>(e.entityType); bestOwner = e.ownerPlayer;
-      }
-    }
-
-    // Radar picks are entity-targeted: a click within ~120 m of a contact issues
-    // the smart action on it. An empty-space *move* needs an absolute UniversePos
-    // (the radar only has render-space, with no render→universe inverse here), so
-    // empty clicks are ignored — precise destinations come from the starmap /
-    // overview, which carry world coordinates (M3; a render→universe unproject is a
-    // small follow-up).
-    using namespace Neuron::Client;
-    if (bestId == 0 || bestD2 >= 120.f * 120.f) return;
-    const SmartTarget tt = ClassifyTarget(bestKind, bestOwner, self);
-    m_targetNetId = bestId;
-    // Beacon jumps need the beacon *name* (server keys jumps by name) — the radar
-    // doesn't carry it, so those go through the starmap UI. Skip beacon picks here.
-    if (tt == SmartTarget::Beacon) return;
-    SendFleet(MakeSmartCommand(tt, m_selection, bestId, {}, /*queue*/false));
-  }
-
-  // Left-click / drag-box selection in the 3D viewport (playable slice). Projects
-  // owned units to screen with the same view-proj the scene drew, then resolves a
-  // click (nearest unit) or a drag (box) via the platform-independent Picking helper.
-  // Runs after the radar handler and before UpdateUi consumes the pointer edge, and
-  // ignores clicks over the radar disc or an open UI window. NOTE: the CPU projection
-  // mirrors the renderer's column-major cbuffer convention (XMVector3Transform with
-  // the un-transposed view-proj) — verify the pick lines up on the Windows build.
-  void HandleViewportSelection(UINT screenW, UINT screenH, const DirectX::XMFLOAT4X4& vpf)
-  {
-    using namespace DirectX;
-    const float s = MenuScale(screenH);
-    const float R = 95.f * s, cxr = 20.f * s + R, cyr = static_cast<float>(screenH) - 20.f * s - R;
-    auto overRadar = [&](float x, float y) {
-      const float dx = x - cxr, dy = y - cyr; return dx * dx + dy * dy <= R * R;
-    };
-
-    if (m_ptrPressed && !PointerOverOpenWindow(s) && !overRadar(m_ptrX, m_ptrY))
-    {
-      m_selDragging = true; m_selX0 = m_ptrX; m_selY0 = m_ptrY;
-    }
-    if (!m_selDragging || !m_ptrReleased) return;
-    m_selDragging = false;
-
-    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
-    if (self == 0) return;
-
-    // Project owned ships + base to screen (same vpf the scene was rendered with).
-    const XMMATRIX vp = XMLoadFloat4x4(&vpf);
-    std::vector<Neuron::Client::ScreenPoint> pts;
-    const Neuron::Client::ReplicaSet& rs = m_interp.curr;
-    for (uint32_t i = 0; i < rs.count; ++i)
-    {
-      const auto& e = rs.entities[i];
-      if (!e.valid || e.ownerPlayer != self) continue;
-      const auto kind = static_cast<Neuron::Sim::EntityKind>(e.entityType);
-      if (kind != Neuron::Sim::EntityKind::Ship && kind != Neuron::Sim::EntityKind::Base) continue;
-      const XMVECTOR clip = XMVector3Transform(XMVectorSet(e.x, e.y, e.z, 1.f), vp);
-      const float wclip = XMVectorGetW(clip);
-      Neuron::Client::ScreenPoint sp; sp.id = e.networkId;
-      if (wclip > 1e-4f)
-      {
-        const float ndcx = XMVectorGetX(clip) / wclip, ndcy = XMVectorGetY(clip) / wclip;
-        sp.x = (ndcx * 0.5f + 0.5f) * static_cast<float>(screenW);
-        sp.y = (1.f - (ndcy * 0.5f + 0.5f)) * static_cast<float>(screenH);
-        sp.visible = ndcx >= -1.f && ndcx <= 1.f && ndcy >= -1.f && ndcy <= 1.f;
-      }
-      pts.push_back(sp);
-    }
-
-    if (Neuron::Client::IsDrag(m_selX0, m_selY0, m_ptrX, m_ptrY))
-    {
-      Neuron::Client::PickBox(pts, m_selX0, m_selY0, m_ptrX, m_ptrY, m_selection);
-    }
-    else
-    {
-      const uint32_t hit = Neuron::Client::PickNearest(pts, m_ptrX, m_ptrY, 28.f * s);
-      m_selection.clear();
-      if (hit) m_selection.push_back(hit); // empty click clears selection
-    }
-  }
-
-  // Project a render-space point to screen pixels via the cached view-proj. Returns
-  // false when behind the camera or off-screen. Mirrors the renderer's column-major
-  // cbuffer convention (un-transposed view-proj) — verify alignment on Windows.
-  bool ProjectToScreen(float x, float y, float z, UINT screenW, UINT screenH,
-                       float& sx, float& sy) const
-  {
-    using namespace DirectX;
-    const XMMATRIX vp = XMLoadFloat4x4(&m_viewProj);
-    const XMVECTOR clip = XMVector3Transform(XMVectorSet(x, y, z, 1.f), vp);
-    const float wc = XMVectorGetW(clip);
-    if (wc <= 1e-4f) return false;
-    const float ndcx = XMVectorGetX(clip) / wc, ndcy = XMVectorGetY(clip) / wc;
-    if (ndcx < -1.f || ndcx > 1.f || ndcy < -1.f || ndcy > 1.f) return false;
-    sx = (ndcx * 0.5f + 0.5f) * static_cast<float>(screenW);
-    sy = (1.f - (ndcy * 0.5f + 0.5f)) * static_cast<float>(screenH);
-    return true;
-  }
-
-  // In-world feedback (playable slice): a green bracket under each selected unit and
-  // a health bar over every combat unit (own = green, hostile = red). Drawn in the
-  // 2D HUD pass by projecting each replica to screen.
-  void DrawWorldOverlays(UINT screenW, UINT screenH)
-  {
-    if (!m_uiReady) return;
-    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
-    const float s = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
-    const Neuron::Client::ReplicaSet& rs = m_interp.curr;
-    for (uint32_t i = 0; i < rs.count; ++i)
-    {
-      const auto& e = rs.entities[i];
-      if (!e.valid) continue;
-      const auto kind = static_cast<Neuron::Sim::EntityKind>(e.entityType);
-      const bool isMine = (e.ownerPlayer == self && self != 0);
-      const bool isNpc = (kind == Neuron::Sim::EntityKind::NpcUnit);
-      const bool selected =
-          std::find(m_selection.begin(), m_selection.end(), e.networkId) != m_selection.end();
-      const bool bar = Neuron::Client::ShowsHealthBar(kind);
-      if (!selected && !bar) continue;
-
-      float sx = 0.f, sy = 0.f;
-      if (!ProjectToScreen(e.x, e.y, e.z, screenW, screenH, sx, sy)) continue;
-
-      if (selected) // green selection bracket
-      {
-        const float rr = 14.f * s, t = 2.f * s;
-        m_canvas.DrawRect(sx - rr, sy - rr, 2 * rr, t, 0.4f, 0.9f, 0.5f, 0.9f);
-        m_canvas.DrawRect(sx - rr, sy + rr - t, 2 * rr, t, 0.4f, 0.9f, 0.5f, 0.9f);
-        m_canvas.DrawRect(sx - rr, sy - rr, t, 2 * rr, 0.4f, 0.9f, 0.5f, 0.9f);
-        m_canvas.DrawRect(sx + rr - t, sy - rr, t, 2 * rr, 0.4f, 0.9f, 0.5f, 0.9f);
-      }
-      if (bar) // health bar, IFF-coloured
-      {
-        const float f = Neuron::Client::HealthFraction(kind, e.hp);
-        if (f >= 0.f)
-        {
-          const float bw = 24.f * s, bh = 3.f * s, bx = sx - bw * 0.5f, by = sy - 18.f * s;
-          m_canvas.DrawRect(bx, by, bw, bh, 0.f, 0.f, 0.f, 0.6f);
-          const float r = isMine ? 0.3f : (isNpc ? 0.95f : 0.9f);
-          const float g = isMine ? 0.85f : (isNpc ? 0.3f : 0.8f);
-          const float b = isMine ? 0.4f : 0.3f;
-          m_canvas.DrawRect(bx, by, bw * f, bh, r, g, b, 0.9f);
-        }
-      }
-    }
-  }
-
-  // Minimal command HUD (§22.2/§22.3; M3 area G): the overview contact list (fog-
-  // filtered, IFF-coloured, nearest-first) plus the current selection + target.
-  void DrawCommandHud(UINT screenW, UINT screenH)
-  {
-    if (!m_uiReady) return;
-    const float s = MenuScale(screenH);
-
-    // Objective banner (playable-slice onboarding) — amber, top-left.
-    if (const char* obj = m_onboarding.CurrentText(); obj && obj[0])
-      m_canvas.DrawText(40.f * s, 18.f * s, obj, 1.0f, 0.85f, 0.4f, s * 0.95f);
-
-    // Live drag-select rectangle (playable slice).
-    if (m_selDragging && m_ptrDown)
-    {
-      const float lx = m_selX0 < m_ptrX ? m_selX0 : m_ptrX;
-      const float ly = m_selY0 < m_ptrY ? m_selY0 : m_ptrY;
-      m_canvas.DrawRect(lx, ly, std::fabs(m_ptrX - m_selX0), std::fabs(m_ptrY - m_selY0),
-                        0.4f, 0.8f, 1.0f, 0.15f);
-    }
-    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
-    const auto overview = Neuron::Client::BuildOverview(m_interp.curr, self,
-                                                        m_focus[0], m_focus[1], m_focus[2]);
-    const float ts = s * 0.8f;
-    float y = 20.f * s;
-    const float x = static_cast<float>(screenW) - 230.f * s;
-    char line[96];
-    std::snprintf(line, sizeof(line), "OVERVIEW  sel:%u", static_cast<unsigned>(m_selection.size()));
-    m_canvas.DrawText(x, y, line, 0.78f, 0.84f, 0.86f, ts);
-    y += 14.f * s;
-    int shown = 0;
-    for (const auto& c : overview) {
-      if (shown++ >= 12) break; // cap the on-screen list
-      float r = 0.8f, g = 0.84f, b = 0.86f;
-      using ST = Neuron::Client::SmartTarget;
-      if (c.iff == ST::Enemy) { r = 0.95f; g = 0.4f; b = 0.35f; }
-      else if (c.iff == ST::Ally) { r = 0.45f; g = 0.85f; b = 0.5f; }
-      else if (c.iff == ST::ResourceNode) { r = 0.85f; g = 0.8f; b = 0.45f; }
-      std::snprintf(line, sizeof(line), "%c #%u  %.0fm  hp:%d",
-                    (c.netId == m_targetNetId) ? '>' : ' ',
-                    static_cast<unsigned>(c.netId), c.distance, c.hp);
-      m_canvas.DrawText(x, y, line, r, g, b, ts);
-      y += 12.f * s;
-    }
-  }
-
-  void DrawUi(UINT screenW, UINT screenH)
-  {
-    (void)screenW;
-    if (!m_uiReady) return;
-    const float s = MenuScale(screenH);
-    // Draw back-to-front in z-order (front = last); popup last.
-    for (int oi = 0; oi < Win_Count; ++oi)
-    {
-      const int win = m_zorder[oi];
-      if (!m_winOpen[win]) continue;
-      if (WinIsPanel(win)) DrawPanelWindow(win, s);
-      else                 DrawButtonListWindow(win, s);
-    }
-    DrawDropdownPopup(s);
-  }
 
   // Load every ShapeCatalog entry into the renderer: the CMO mesh plus its
   // derived diffuse (<stem>1.dds). Per-shape fail-safe — a missing/unparseable
@@ -1430,14 +626,75 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     OutputDebugStringA(buf);
   }
 
+  // Graceful "can't reach the server" notice. A CoreWindow (no-XAML) app uses
+  // Windows.UI.Popups.MessageDialog, not a XAML ContentDialog. ShowAsync must be awaited
+  // on the UI/ASTA thread — which is where Tick() (the caller) runs — so this is a
+  // fire_and_forget coroutine. Retry restarts the handshake; Exit closes the app.
+  winrt::fire_and_forget ShowServerUnreachable()
+  {
+    if (m_dialogOpen)
+      co_return;
+    m_dialogOpen = true;
+    auto lifetime = get_strong(); // keep this App alive across the co_await
+
+    Windows::UI::Popups::MessageDialog dlg{
+        L"EarthRise can't reach the game server.\n\n"
+        L"Make sure ERServer is running and reachable, then choose Retry. "
+        L"The client keeps trying to connect in the background.",
+        L"Server unavailable" };
+    dlg.Commands().Append(Windows::UI::Popups::UICommand{ L"Retry" });
+    dlg.Commands().Append(Windows::UI::Popups::UICommand{ L"Exit" });
+    dlg.DefaultCommandIndex(0); // Retry on Enter
+    dlg.CancelCommandIndex(1);  // Exit on Esc
+
+    Windows::UI::Popups::IUICommand chosen{ nullptr };
+    try
+    {
+      chosen = co_await dlg.ShowAsync();
+    }
+    catch (...)
+    {
+      // Couldn't show (e.g. a dialog is already up) — keep retrying silently.
+      m_dialogOpen = false;
+      co_return;
+    }
+    m_dialogOpen = false;
+
+    if (chosen && std::wstring_view{ chosen.Label() } == L"Exit")
+    {
+      m_running = false;
+      Windows::ApplicationModel::Core::CoreApplication::Exit();
+      co_return;
+    }
+
+    // Retry: re-arm the notice and restart the handshake — but only if we still aren't
+    // connected (the server may have come up while the dialog sat open, and the session
+    // reconnects on its own; don't tear down a live link).
+    m_serverUnreachableNotified = false;
+    if (m_session && m_session->GetState() != Neuron::Client::SessionState::Connected)
+    {
+      m_connectStart = std::chrono::steady_clock::now();
+      try { m_session->Connect("127.0.0.1", kServerPort); } catch (...) {}
+    }
+  }
+
   // ── Game tick ────────────────────────────────────────────────────────────
   void Tick()
   {
     // Push current settings selections to the live engine knobs.
     ApplySettings();
 
-    // 1. Network I/O.
-    m_session->Tick();
+    // 1. Network I/O. Defensive: a transport-layer fault (e.g. an unreachable host or a
+    //    WinRT socket error surfacing here) must degrade to "not connected", never crash
+    //    the client — the unreachable notice below tells the player gracefully.
+    try
+    {
+      m_session->Tick();
+    }
+    catch (...)
+    {
+      OutputDebugStringA("[EarthRise] session tick threw; treating as disconnected\n");
+    }
 
 #ifdef _DEBUG
     // 1b. Server-status overlay (F3): poll replies every frame, and re-query the
@@ -1454,7 +711,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 #endif
 
     // One-shot: how long from Connect() to fully connected (handshake cost).
-    if (!m_connectedLogged && m_session->GetState() == Neuron::Client::SessionState::Connected)
+    const bool connected = m_session->GetState() == Neuron::Client::SessionState::Connected;
+    if (!m_connectedLogged && connected)
     {
       m_connectedLogged = true;
       const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1463,6 +721,21 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       char buf[80];
       std::snprintf(buf, sizeof(buf), "[EarthRise] connected in %lld ms\n", ms);
       OutputDebugStringA(buf);
+    }
+
+    // Server-unreachable notice: if the first connection hasn't established within the
+    // budget, tell the player gracefully (once) instead of hanging silently. The session
+    // keeps retrying with backoff in the background (M5 area G), so this is informational.
+    if (!connected && !m_connectedLogged && !m_serverUnreachableNotified && !m_dialogOpen)
+    {
+      const long long waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::steady_clock::now() - m_connectStart)
+                                     .count();
+      if (waitedMs >= kConnectTimeoutMs)
+      {
+        m_serverUnreachableNotified = true;
+        ShowServerUnreachable();
+      }
     }
 
     // 2. Consume any new snapshots.
@@ -1478,7 +751,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     {
       const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
       m_onboarding.Observe(Neuron::Client::ObserveWorld(
-          m_interp.curr, self, static_cast<uint32_t>(m_selection.size())));
+          m_interp.curr, self, static_cast<uint32_t>(m_fleet.Selection().size())));
     }
 
     // 3. Render.
@@ -1514,7 +787,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const XMVECTOR eye = XMLoadFloat3(&eyeF);
     const XMVECTOR at = XMLoadFloat3(&atF);
     const XMVECTOR up = XMLoadFloat3(&upF);
-    const float fov = SettingFovRadians();
+    const float fov = m_menu.FovRadians();
     const float asp = (h > 0) ? static_cast<float>(w) / static_cast<float>(h) : 1.f;
 
     XMMATRIX view = XMMatrixLookAtRH(eye, at, up);
@@ -1678,14 +951,25 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_particles.Render(cl, vpf, camRight[0], camRight[1], camRight[2], camUp[0], camUp[1], camUp[2]);
     }
 
-    // Fleet command: a radar click issues a smart action against the nearest
-    // contact (must run before UpdateUi consumes the pointer-press, §23.1/area G).
+    // Fleet command: a radar click issues a smart action against the nearest contact
+    // (must run before the menu consumes the pointer-press, §23.1/area G).
     m_focus[0] = cx; m_focus[1] = cy; m_focus[2] = cz;
-    HandleRadarCommand(h, cx, cz);
-    HandleViewportSelection(w, h, vpf); // 3D-viewport click / box selection
+    er::FleetInput fin{};
+    fin.session = m_session.get();
+    fin.replica = &m_interp.curr;
+    fin.screenW = w; fin.screenH = h;
+    fin.ptrX = m_ptrX; fin.ptrY = m_ptrY;
+    fin.ptrPressed = m_ptrPressed; fin.ptrReleased = m_ptrReleased;
+    fin.menuScale = MenuScale(h);
+    fin.overMenuWindow = m_menu.PointerOverWindow(m_ptrX, m_ptrY, h);
+    m_fleet.HandleRadarClick(fin, cx, cz);
+    m_fleet.HandleViewportSelection(fin, vpf); // 3D-viewport click / box selection
 
-    // HUD + windowed UI. Interaction (hover/press/drag/dropdowns) runs first.
-    UpdateUi(w, h);
+    // HUD + windowed UI. Interaction (hover/press/drag/dropdowns) runs first; the menu
+    // consumes the pointer edges, App clears them, and a Quit selection ends the loop.
+    m_menu.Update(w, h, m_ptrX, m_ptrY, m_ptrDown, m_ptrPressed, m_ptrReleased);
+    m_ptrPressed = m_ptrReleased = false;
+    if (m_menu.QuitRequested()) m_running = false;
     m_canvas.Reset();
     const Neuron::Client::SessionState st = m_session->GetState();
     const char* stateStr = (st == Neuron::Client::SessionState::Connected)
@@ -1712,17 +996,34 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                         over ? 1.0f : 0.4f, over ? 0.4f : 0.9f, over ? 0.35f : 0.5f, hudS * 0.85f);
     }
 
-    // 2D radar disc (under the windowed UI).
-    DrawRadar(w, h, entities, entCount, cx, cy, cz);
+    // In-space HUD overlays (TacticalHud): build the per-frame view of App's state once,
+    // then delegate the radar / brackets / overview / banner draws to it.
+    er::TacticalHudFrame hud{};
+    hud.screenW = w; hud.screenH = h;
+    hud.hudScale = MenuScale(h);
+    hud.uiReady = m_menu.Ready();
+    hud.replica = &m_interp.curr;
+    hud.selection = &m_fleet.Selection();
+    hud.selfNetId = m_session ? m_session->PlayerNetId() : 0;
+    hud.targetNetId = m_fleet.TargetNetId();
+    hud.focus = m_focus;
+    hud.viewProj = &m_viewProj;
+    hud.objectiveText = m_onboarding.CurrentText();
+    hud.selDragging = m_fleet.DragActive(); hud.ptrDown = m_ptrDown;
+    hud.selX0 = m_fleet.DragStartX(); hud.selY0 = m_fleet.DragStartY(); hud.ptrX = m_ptrX; hud.ptrY = m_ptrY;
+    hud.sessionState = m_session ? m_session->GetState()
+                                 : Neuron::Client::SessionState::Connected;
+    hud.serverUnreachable = m_serverUnreachableNotified;
 
-    // In-world selection brackets + health bars (playable slice).
-    DrawWorldOverlays(w, h);
-
-    // Overview contact list + selection/target readout (M3 area G).
-    DrawCommandHud(w, h);
+    m_hud.DrawRadar(hud, entities, entCount, cx, cy, cz); // 2D radar disc (under the windowed UI)
+    m_hud.DrawWorldOverlays(hud);                         // selection brackets + health bars
+    m_hud.DrawCommandHud(hud);                            // overview contact list (M3 area G)
 
     // Darwinia windowed UI (Main Menu / Options / settings panels + dropdowns).
-    DrawUi(w, h);
+    m_menu.Draw(w, h, m_fps);
+
+    // Non-modal connection-status banner (hidden once connected) — on top of the HUD.
+    m_hud.DrawConnectionBanner(hud);
 
 #ifdef _DEBUG
     // Server-status overlay (F3, debug builds only) — on top of everything else.
@@ -1733,6 +1034,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     m_dr.EndFrame();
   }
+
 
 #ifdef _DEBUG
   // Server-status overlay (F3, debug builds only, §21): a translucent panel pinned
@@ -1786,7 +1088,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const VK key = args.VirtualKey();
 
     // Esc closes the active (frontmost) window; the previous one becomes active.
-    if (key == VK::Escape) { CloseTopWindow(); return; }
+    if (key == VK::Escape) { m_menu.CloseTopWindow(); return; }
 
 #ifdef _DEBUG
     // F3 toggles the server-status overlay (debug builds only, §21).
@@ -1801,28 +1103,21 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // Ctrl+# set / # recall control groups (0..9).
     if (key >= VK::Number0 && key <= VK::Number9) {
       const int group = static_cast<int>(key) - static_cast<int>(VK::Number0);
-      if (ctrl) m_controlGroups.Set(group, m_selection);
-      else      m_selection = m_controlGroups.Recall(group);
+      if (ctrl) m_fleet.SetControlGroup(group);
+      else      m_fleet.RecallControlGroup(group);
       return;
     }
 
     switch (key) {
     case VK::A: // select all own ships (smart-select)
-      SelectAllOwnShips();
+      m_fleet.SelectAllOwnShips(m_session.get(), m_interp.curr);
       return;
-    case VK::B: { // enqueue a ship build at the player's base
-      if (m_session) {
-        Neuron::Sim::FleetCommand c; c.intent = Neuron::Sim::IntentType::Build;
-        c.units = { m_session->PlayerNetId() };
-        m_session->SendFleetCommand(Neuron::Sim::EncodeFleetCommand(c));
-      }
+    case VK::B: // enqueue a ship build at the player's base
+      m_fleet.SendBuild(m_session.get());
       return;
-    }
-    case VK::S: { // stop the current selection
-      Neuron::Sim::FleetCommand c; c.intent = Neuron::Sim::IntentType::Stop; c.units = m_selection;
-      SendFleet(c);
+    case VK::S: // stop the current selection
+      m_fleet.SendStop(m_session.get());
       return;
-    }
     case VK::F: // toggle base-follow camera
       m_camera.SetFollow(!m_camera.Follow());
       return;
@@ -1834,19 +1129,6 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     }
   }
 
-  // Close an open dropdown first; else close the frontmost open window; if
-  // nothing is open, bring the Main Menu back.
-  void CloseTopWindow()
-  {
-    if (m_ddWin >= 0) { m_ddWin = m_ddRow = -1; return; }
-    for (int oi = Win_Count - 1; oi >= 0; --oi)
-    {
-      const int w = m_zorder[oi];
-      if (m_winOpen[w]) { m_winOpen[w] = false; return; }
-    }
-    m_winOpen[Win_MainMenu] = true;
-    RaiseWindow(Win_MainMenu);
-  }
 
   void OnClosed(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::CoreWindowEventArgs&)
   {

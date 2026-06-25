@@ -9,10 +9,11 @@
 
 > **Status:** pre-release / in active development. Milestones **M0–M2 complete**. The
 > platform-independent simulation, networking, persistence and **combat** logic through
-> **M6** is implemented and green on the Linux `testrunner` (**269 cases, 0 failed**); what
-> remains across **M3–M6** is the **Windows / real-infrastructure integration & verification**
-> — the DX12/UWP client glue, IOCP, the `ERServer` + ODBC/SQL Server persistence layer, and
-> the M6 deployment track (Azure SQL, Kubernetes, Store pass). See
+> **M6** is implemented and green on the Linux `testrunner` (**299 cases, 0 failed**), and the
+> Windows / real-infrastructure integration (DX12/UWP client, IOCP, `ERServer` + ODBC/SQL Server)
+> has been verified on the Windows build agent. What remains is the **M6 deployment track**
+> (Azure SQL migration, Kubernetes, Store pass, combat VFX/SFX, optional prediction) and all of
+> **M7** (sandbox: conquest / economy / PvE / onboarding). See
 > [`docs/masterplan.md`](docs/masterplan.md) §17 for the roadmap and
 > [`docs/implementation/`](docs/implementation/) for the per-milestone status.
 
