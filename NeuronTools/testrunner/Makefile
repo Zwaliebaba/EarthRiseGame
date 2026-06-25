@@ -21,7 +21,8 @@ SRCS := main.cpp WavParseTests.cpp DdsParseTests.cpp FontAtlasTests.cpp CmoParse
         SnapshotDeltaTests.cpp SnapshotSchedulerTests.cpp SnapshotJobsTests.cpp \
         TimeDilationTests.cpp TelemetryTests.cpp ConnectionTableTests.cpp \
         LoadHarnessTests.cpp CameraTests.cpp OnboardingTests.cpp PickingTests.cpp \
-        HudOverlayTests.cpp ReconnectTests.cpp OutboxTests.cpp WarmRestartTests.cpp \
+        HudOverlayTests.cpp ReconnectTests.cpp ReconnectControllerTests.cpp \
+        EconomyOutboxTests.cpp OutboxTests.cpp WarmRestartTests.cpp \
         WarmRestartCaptureTests.cpp Pbkdf2Tests.cpp PersistTelemetryTests.cpp \
         JsonParseTests.cpp ClientConfigTests.cpp ServerStatusTests.cpp
 BIN := testrunner

@@ -13,6 +13,9 @@
     <ClInclude Include="SessionImpl.h">
       <Filter>Session</Filter>
     </ClInclude>
+    <ClInclude Include="ReconnectController.h">
+      <Filter>Session</Filter>
+    </ClInclude>
     <ClInclude Include="Replica.h">
       <Filter>Replica</Filter>
     </ClInclude>

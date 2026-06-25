@@ -205,7 +205,15 @@ below are those logical groupings, not directories.
     ├── db/                 SQL schema + ordered, forward-only migrations
     └── deploy/             ERServer Dockerfile (Server Core) · docker-compose.dev.yml
 ```
-**Status (M2 complete; M3 active):** `NeuronAudio/` (XAudio2/X3DAudio client lib + `NeuronAudioTest`, §11.3) landed — voice graph / mixer / spatializer / WAV reader done; buffer-queue streaming, cue catalog and the Windows device smoke test **carried over** to M3 bring-up. The platform-independent asset parsers live in their **owning** libraries (`WavParse.h` in `NeuronAudio/`; `DdsParse.h`/`CmoParse.h`/`FontAtlasLayout.h` in `NeuronRender/`), kept dependency-free. `NeuronTools/` currently holds only a Linux `testrunner` that includes those parser headers — **a leaf with no dependents**, intended to be removed once asset checking runs natively on Windows; the `datacook`/`datacheck` executables for **universe-layout game data** (§12.6) are **now built** under `NeuronTools/datacook/` (model/codec/rules in `NeuronCore/UniverseData.h`); the remaining asset-cooker executables (`meshcook`/`ddscheck`/`wavcheck`/`fontpack`) are still to come. All follow the flat-files + VS Filters convention.
+**Status (M0–M6 platform-independent track complete; M6 deployment half + M7 open):** the
+portable simulation, networking, persistence and **combat** logic through **M6** is implemented
+and green on the Linux `testrunner` (**288 cases, 0 failed**); the Windows / real-infrastructure
+integration (DX12/UWP client, IOCP, ODBC/SQL Server, CNG) has been verified on the Windows build
+agent. What remains is the **M6 deployment track** (Kubernetes, Azure SQL migration, Store pass,
+combat VFX/SFX, optional prediction) and all of **M7** (sandbox: conquest / economy / PvE / onboarding).
+`NeuronAudio/` (XAudio2/X3DAudio client lib + `NeuronAudioTest`, §11.3) landed — voice graph /
+mixer / spatializer / WAV reader / buffer-queue streaming / cue catalog done. The platform-independent
+asset parsers live in their **owning** libraries (`WavParse.h` in `NeuronAudio/`; `DdsParse.h`/`CmoParse.h`/`FontAtlasLayout.h` in `NeuronRender/`), kept dependency-free. `NeuronTools/` currently holds only a Linux `testrunner` that includes those parser headers — **a leaf with no dependents**, intended to be removed once asset checking runs natively on Windows; the `datacook`/`datacheck` executables for **universe-layout game data** (§12.6) are **now built** under `NeuronTools/datacook/` (model/codec/rules in `NeuronCore/UniverseData.h`); the remaining asset-cooker executables (`meshcook`/`ddscheck`/`wavcheck`/`fontpack`) are still to come. All follow the flat-files + VS Filters convention.
 > Generated `CompiledShaders/` headers live under each project that compiles shaders
 > (per `$(ProjectDir)`), so they're picked up by `#include` at build time.
 
@@ -1647,4 +1655,8 @@ EVE-Echoes-style; shared by desktop & touch; box-select demoted; touch ambiguity
 out; R20 Med→Low; spec in `docs/design/touch-controls.md`), v0.11 completeness pass (DX12
 §11.1, camera/VFX §11.2, navigation §13.12, UI/HUD/radar §22, input §23, comms §24,
 platform services §25, game-data §12.6, live-ops §26), v0.10 audio (NeuronAudio), v0.9
-gameplay (§13). M0, M1a, M1b, M2 complete; M3 is next on the engineering track.*
+gameplay (§13). M0–M2 complete; the platform-independent track through **M6** (core 4X loop,
+scale/interest, accounts/persistence, combat model) is implemented and green on the Linux
+`testrunner` (288 cases) and verified on the Windows build agent; the **M6 deployment half**
+(Kubernetes, Azure SQL, Store, combat VFX/SFX, optional prediction) and **M7** (sandbox:
+conquest / economy / PvE / onboarding) are the open frontier.*

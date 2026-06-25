@@ -73,6 +73,11 @@ public:
     [[nodiscard]] bool      IsConnected() const noexcept { return m_state == ConnState::Connected; }
     [[nodiscard]] uint64_t  Token() const noexcept { return m_token; }
     [[nodiscard]] uint32_t  PlayerNetId() const noexcept { return m_playerNetId; }
+    // The expiring session token the server issued at login (§8.5/§14) — distinct from
+    // the connection token. A client presents this to resume after a reconnect (M5 area
+    // G, §26); 0 until login completes. (Previously the session exposed PlayerNetId here
+    // by mistake — they are different identifiers.)
+    [[nodiscard]] uint64_t  SessionToken() const noexcept { return m_sessionToken; }
     // Server time-dilation factor from the last clock-sync response (M4 area H,
     // §7.2/§8.5); 1.0 = full speed. The client interpolator scales server-time
     // advance by this so it tracks the dilated authoritative clock, not wall-clock.
