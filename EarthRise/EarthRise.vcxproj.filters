@@ -8,6 +8,7 @@
   <ItemGroup>
     <ClInclude Include="DatagramSocketAdapter.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="TacticalHud.h" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="Assets\Wide310x150Logo.scale-200.png">

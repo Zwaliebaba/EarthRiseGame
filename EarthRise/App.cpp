@@ -46,6 +46,7 @@
 #include "StringTable.h"
 #include "CmoLoader.h"
 #include "DdsLoader.h"
+#include "TacticalHud.h"      // in-space radar / overlays / overview / connection banner
 
 // NeuronClient
 #include "SessionImpl.h"
@@ -137,6 +138,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   Neuron::Render::ParticleRenderer m_particles;
   bool m_bloom{false}; // true once PostProcess initialized (HDR path active)
   std::chrono::steady_clock::time_point m_lastFrame{}; // for particle dt
+  // In-space HUD overlays (radar / brackets / overview / connection banner). Holds a
+  // reference to m_canvas (declared above), so it must be initialized after it.
+  er::TacticalHud m_hud{ m_canvas };
 
   // UI chrome textures (Darwinia menu skins, docs/design/darwinia-menu-ui.md).
   Neuron::Render::TextureGpu m_uiGrey; // InterfaceGrey — title bars, highlight beam
@@ -1029,88 +1033,6 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     }
   }
 
-  // Radar IFF colour per entity kind.
-  static void RadarColor(uint8_t kind, float& r, float& g, float& b) noexcept
-  {
-    using K = Neuron::Sim::EntityKind;
-    switch (static_cast<K>(kind))
-    {
-      case K::Base:      r = 0.35f; g = 0.65f; b = 1.00f; break; // blue (self/allied)
-      case K::Ship:      r = 1.00f; g = 0.55f; b = 0.15f; break; // orange
-      case K::Station:   r = 0.40f; g = 0.85f; b = 0.90f; break; // cyan
-      case K::Structure: r = 0.65f; g = 0.45f; b = 1.00f; break; // violet
-      case K::Asteroid:  r = 0.55f; g = 0.50f; b = 0.42f; break; // rock
-      default:           r = 0.70f; g = 0.70f; b = 0.70f; break; // grey
-    }
-  }
-
-  void DrawDisc(float cx, float cy, float rad, int seg, float r, float g, float b, float a)
-  {
-    float px = cx + rad, py = cy;
-    for (int i = 1; i <= seg; ++i)
-    {
-      const float ang = 6.2831853f * static_cast<float>(i) / static_cast<float>(seg);
-      const float x = cx + rad * std::cos(ang), y = cy + rad * std::sin(ang);
-      m_canvas.DrawTriangle(cx, cy, px, py, x, y, r, g, b, a);
-      px = x; py = y;
-    }
-  }
-  void DrawRing(float cx, float cy, float rad, int seg, float width, float r, float g, float b, float a)
-  {
-    float px = cx + rad, py = cy;
-    for (int i = 1; i <= seg; ++i)
-    {
-      const float ang = 6.2831853f * static_cast<float>(i) / static_cast<float>(seg);
-      const float x = cx + rad * std::cos(ang), y = cy + rad * std::sin(ang);
-      m_canvas.DrawLine(px, py, x, y, width, r, g, b, a);
-      px = x; py = y;
-    }
-  }
-
-  // 2D radar disc (bottom-left): top-down blips of nearby entities relative to
-  // the camera focus, with range rings (masterplan §22).
-  void DrawRadar(UINT screenW, UINT screenH, const Neuron::Render::SceneEntity* ents, UINT count,
-                 float fx, float fy, float fz)
-  {
-    (void)screenW; (void)fy;
-    if (!m_uiReady) return;
-    const float s = MenuScale(screenH);
-    const float R = 95.f * s;
-    const float cxr = 20.f * s + R;
-    const float cyr = static_cast<float>(screenH) - 20.f * s - R;
-    constexpr float kRange = 1800.f; // world metres mapped to the disc edge
-
-    DrawDisc(cxr, cyr, R, 44, 0.30f, 0.11f, 0.12f, 0.85f);           // dark-red disc (menu body tone)
-    // Rings + cross-hairs in the window's light grey-blue border colour.
-    constexpr float lr = 0.780f, lg = 0.839f, lb = 0.863f;
-    DrawRing(cxr, cyr, R, 48, 2.0f * s, lr, lg, lb, 0.90f);           // outer frame (bright)
-    DrawRing(cxr, cyr, R * 0.66f, 44, 1.0f * s, lr, lg, lb, 0.40f);   // mid range ring
-    DrawRing(cxr, cyr, R * 0.33f, 40, 1.0f * s, lr, lg, lb, 0.32f);   // inner range ring
-    m_canvas.DrawLine(cxr - R, cyr, cxr + R, cyr, 1.f * s, lr, lg, lb, 0.30f);
-    m_canvas.DrawLine(cxr, cyr - R, cxr, cyr + R, 1.f * s, lr, lg, lb, 0.30f);
-
-    for (UINT i = 0; i < count; ++i)
-    {
-      const auto& e = ents[i];
-      const float dx = e.x - fx, dz = e.z - fz;
-      const float dist = std::sqrt(dx * dx + dz * dz);
-      if (dist > kRange) continue;
-      // World +X → radar right, world +Z → radar up.
-      const float bx = cxr + (dx / kRange) * R;
-      const float by = cyr - (dz / kRange) * R;
-      float r, g, b; RadarColor(e.kind, r, g, b);
-      const float bs = 3.0f * s;
-      m_canvas.DrawRect(bx - bs * 0.5f, by - bs * 0.5f, bs, bs, r, g, b, 1.f);
-    }
-
-    // Player marker (centre, pointing up).
-    const float m = 5.f * s;
-    m_canvas.DrawTriangle(cxr, cyr - m, cxr - m * 0.7f, cyr + m * 0.6f, cxr + m * 0.7f, cyr + m * 0.6f,
-                          0.9f, 0.95f, 1.f, 1.f);
-    const float ts = s * 0.8f;
-    const char* lbl = er::ui::str("ui.radar");
-    m_canvas.DrawText(cxr - m_canvas.TextWidth(lbl, ts) * 0.5f, cyr - R - 16.f * s, lbl, 0.780f, 0.839f, 0.863f, ts);
-  }
 
   // --- fleet command interaction (§23.1/§23.4; M3 area G) --------------------
 
@@ -1270,116 +1192,6 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     }
   }
 
-  // Project a render-space point to screen pixels via the cached view-proj. Returns
-  // false when behind the camera or off-screen. Mirrors the renderer's column-major
-  // cbuffer convention (un-transposed view-proj) — verify alignment on Windows.
-  bool ProjectToScreen(float x, float y, float z, UINT screenW, UINT screenH,
-                       float& sx, float& sy) const
-  {
-    using namespace DirectX;
-    const XMMATRIX vp = XMLoadFloat4x4(&m_viewProj);
-    const XMVECTOR clip = XMVector3Transform(XMVectorSet(x, y, z, 1.f), vp);
-    const float wc = XMVectorGetW(clip);
-    if (wc <= 1e-4f) return false;
-    const float ndcx = XMVectorGetX(clip) / wc, ndcy = XMVectorGetY(clip) / wc;
-    if (ndcx < -1.f || ndcx > 1.f || ndcy < -1.f || ndcy > 1.f) return false;
-    sx = (ndcx * 0.5f + 0.5f) * static_cast<float>(screenW);
-    sy = (1.f - (ndcy * 0.5f + 0.5f)) * static_cast<float>(screenH);
-    return true;
-  }
-
-  // In-world feedback (playable slice): a green bracket under each selected unit and
-  // a health bar over every combat unit (own = green, hostile = red). Drawn in the
-  // 2D HUD pass by projecting each replica to screen.
-  void DrawWorldOverlays(UINT screenW, UINT screenH)
-  {
-    if (!m_uiReady) return;
-    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
-    const float s = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
-    const Neuron::Client::ReplicaSet& rs = m_interp.curr;
-    for (uint32_t i = 0; i < rs.count; ++i)
-    {
-      const auto& e = rs.entities[i];
-      if (!e.valid) continue;
-      const auto kind = static_cast<Neuron::Sim::EntityKind>(e.entityType);
-      const bool isMine = (e.ownerPlayer == self && self != 0);
-      const bool isNpc = (kind == Neuron::Sim::EntityKind::NpcUnit);
-      const bool selected =
-          std::find(m_selection.begin(), m_selection.end(), e.networkId) != m_selection.end();
-      const bool bar = Neuron::Client::ShowsHealthBar(kind);
-      if (!selected && !bar) continue;
-
-      float sx = 0.f, sy = 0.f;
-      if (!ProjectToScreen(e.x, e.y, e.z, screenW, screenH, sx, sy)) continue;
-
-      if (selected) // green selection bracket
-      {
-        const float rr = 14.f * s, t = 2.f * s;
-        m_canvas.DrawRect(sx - rr, sy - rr, 2 * rr, t, 0.4f, 0.9f, 0.5f, 0.9f);
-        m_canvas.DrawRect(sx - rr, sy + rr - t, 2 * rr, t, 0.4f, 0.9f, 0.5f, 0.9f);
-        m_canvas.DrawRect(sx - rr, sy - rr, t, 2 * rr, 0.4f, 0.9f, 0.5f, 0.9f);
-        m_canvas.DrawRect(sx + rr - t, sy - rr, t, 2 * rr, 0.4f, 0.9f, 0.5f, 0.9f);
-      }
-      if (bar) // health bar, IFF-coloured
-      {
-        const float f = Neuron::Client::HealthFraction(kind, e.hp);
-        if (f >= 0.f)
-        {
-          const float bw = 24.f * s, bh = 3.f * s, bx = sx - bw * 0.5f, by = sy - 18.f * s;
-          m_canvas.DrawRect(bx, by, bw, bh, 0.f, 0.f, 0.f, 0.6f);
-          const float r = isMine ? 0.3f : (isNpc ? 0.95f : 0.9f);
-          const float g = isMine ? 0.85f : (isNpc ? 0.3f : 0.8f);
-          const float b = isMine ? 0.4f : 0.3f;
-          m_canvas.DrawRect(bx, by, bw * f, bh, r, g, b, 0.9f);
-        }
-      }
-    }
-  }
-
-  // Minimal command HUD (§22.2/§22.3; M3 area G): the overview contact list (fog-
-  // filtered, IFF-coloured, nearest-first) plus the current selection + target.
-  void DrawCommandHud(UINT screenW, UINT screenH)
-  {
-    if (!m_uiReady) return;
-    const float s = MenuScale(screenH);
-
-    // Objective banner (playable-slice onboarding) — amber, top-left.
-    if (const char* obj = m_onboarding.CurrentText(); obj && obj[0])
-      m_canvas.DrawText(40.f * s, 18.f * s, obj, 1.0f, 0.85f, 0.4f, s * 0.95f);
-
-    // Live drag-select rectangle (playable slice).
-    if (m_selDragging && m_ptrDown)
-    {
-      const float lx = m_selX0 < m_ptrX ? m_selX0 : m_ptrX;
-      const float ly = m_selY0 < m_ptrY ? m_selY0 : m_ptrY;
-      m_canvas.DrawRect(lx, ly, std::fabs(m_ptrX - m_selX0), std::fabs(m_ptrY - m_selY0),
-                        0.4f, 0.8f, 1.0f, 0.15f);
-    }
-    const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
-    const auto overview = Neuron::Client::BuildOverview(m_interp.curr, self,
-                                                        m_focus[0], m_focus[1], m_focus[2]);
-    const float ts = s * 0.8f;
-    float y = 20.f * s;
-    const float x = static_cast<float>(screenW) - 230.f * s;
-    char line[96];
-    std::snprintf(line, sizeof(line), "OVERVIEW  sel:%u", static_cast<unsigned>(m_selection.size()));
-    m_canvas.DrawText(x, y, line, 0.78f, 0.84f, 0.86f, ts);
-    y += 14.f * s;
-    int shown = 0;
-    for (const auto& c : overview) {
-      if (shown++ >= 12) break; // cap the on-screen list
-      float r = 0.8f, g = 0.84f, b = 0.86f;
-      using ST = Neuron::Client::SmartTarget;
-      if (c.iff == ST::Enemy) { r = 0.95f; g = 0.4f; b = 0.35f; }
-      else if (c.iff == ST::Ally) { r = 0.45f; g = 0.85f; b = 0.5f; }
-      else if (c.iff == ST::ResourceNode) { r = 0.85f; g = 0.8f; b = 0.45f; }
-      std::snprintf(line, sizeof(line), "%c #%u  %.0fm  hp:%d",
-                    (c.netId == m_targetNetId) ? '>' : ' ',
-                    static_cast<unsigned>(c.netId), c.distance, c.hp);
-      m_canvas.DrawText(x, y, line, r, g, b, ts);
-      y += 12.f * s;
-    }
-  }
 
   void DrawUi(UINT screenW, UINT screenH)
   {
@@ -1802,20 +1614,34 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                         over ? 1.0f : 0.4f, over ? 0.4f : 0.9f, over ? 0.35f : 0.5f, hudS * 0.85f);
     }
 
-    // 2D radar disc (under the windowed UI).
-    DrawRadar(w, h, entities, entCount, cx, cy, cz);
+    // In-space HUD overlays (TacticalHud): build the per-frame view of App's state once,
+    // then delegate the radar / brackets / overview / banner draws to it.
+    er::TacticalHudFrame hud{};
+    hud.screenW = w; hud.screenH = h;
+    hud.hudScale = MenuScale(h);
+    hud.uiReady = m_uiReady;
+    hud.replica = &m_interp.curr;
+    hud.selection = &m_selection;
+    hud.selfNetId = m_session ? m_session->PlayerNetId() : 0;
+    hud.targetNetId = m_targetNetId;
+    hud.focus = m_focus;
+    hud.viewProj = &m_viewProj;
+    hud.objectiveText = m_onboarding.CurrentText();
+    hud.selDragging = m_selDragging; hud.ptrDown = m_ptrDown;
+    hud.selX0 = m_selX0; hud.selY0 = m_selY0; hud.ptrX = m_ptrX; hud.ptrY = m_ptrY;
+    hud.sessionState = m_session ? m_session->GetState()
+                                 : Neuron::Client::SessionState::Connected;
+    hud.serverUnreachable = m_serverUnreachableNotified;
 
-    // In-world selection brackets + health bars (playable slice).
-    DrawWorldOverlays(w, h);
-
-    // Overview contact list + selection/target readout (M3 area G).
-    DrawCommandHud(w, h);
+    m_hud.DrawRadar(hud, entities, entCount, cx, cy, cz); // 2D radar disc (under the windowed UI)
+    m_hud.DrawWorldOverlays(hud);                         // selection brackets + health bars
+    m_hud.DrawCommandHud(hud);                            // overview contact list (M3 area G)
 
     // Darwinia windowed UI (Main Menu / Options / settings panels + dropdowns).
     DrawUi(w, h);
 
     // Non-modal connection-status banner (hidden once connected) — on top of the HUD.
-    DrawConnectionBanner(w, h);
+    m_hud.DrawConnectionBanner(hud);
 
 #ifdef _DEBUG
     // Server-status overlay (F3, debug builds only) — on top of everything else.
@@ -1827,37 +1653,6 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_dr.EndFrame();
   }
 
-  // Non-modal connection-status banner: a centered line near the top that reads
-  // "CONNECTING TO SERVER..." while the handshake is in flight and escalates to
-  // "SERVER UNAVAILABLE - RETRYING" (amber → red) once the connect timeout has passed.
-  // Hidden once connected, so it never clutters normal play. Complements — and stays in
-  // sync with — the modal dialog (both keyed off the same m_serverUnreachableNotified).
-  void DrawConnectionBanner(UINT screenW, UINT screenH)
-  {
-    if (!m_session ||
-        m_session->GetState() == Neuron::Client::SessionState::Connected)
-      return;
-
-    const float hudS  = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
-    const float scale = 1.1f * hudS;
-
-    const bool  unreachable = m_serverUnreachableNotified;
-    const char* msg = unreachable ? er::ui::str("app.net.unavailable")
-                                  : er::ui::str("app.net.connecting");
-    const float r = unreachable ? 1.00f : 0.95f;
-    const float g = unreachable ? 0.35f : 0.80f;
-    const float b = unreachable ? 0.30f : 0.35f;
-
-    const float tw = m_canvas.TextWidth(msg, scale);
-    const float th = m_canvas.TextHeight(scale);
-    const float x  = (static_cast<float>(screenW) - tw) * 0.5f;
-    const float y  = static_cast<float>(screenH) * 0.12f;
-
-    // Subtle dark backing so the text stays legible over a bright scene.
-    const float pad = 10.f * hudS;
-    m_canvas.DrawRect(x - pad, y - pad * 0.5f, tw + pad * 2.f, th + pad, 0.f, 0.f, 0.f, 0.55f);
-    m_canvas.DrawText(x, y, msg, r, g, b, scale);
-  }
 
 #ifdef _DEBUG
   // Server-status overlay (F3, debug builds only, §21): a translucent panel pinned

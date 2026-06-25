@@ -97,6 +97,7 @@
   <ItemGroup>
     <ClInclude Include="DatagramSocketAdapter.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="TacticalHud.h" />
   </ItemGroup>
   <ItemGroup>
     <AppxManifest Include="Package.appxmanifest">
