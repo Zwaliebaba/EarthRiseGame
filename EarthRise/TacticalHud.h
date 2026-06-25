@@ -143,7 +143,17 @@ public:
             if (bar) // health bar, IFF-coloured
             {
                 const float fr = Neuron::Client::HealthFraction(kind, e.hp);
-                if (fr >= 0.f)
+                // Declutter (§22.2): only draw the bar when there's something worth
+                // showing — the unit is selected, or it's damaged and close enough to
+                // the camera focus to matter. Full-health and far-off units stay clean.
+                constexpr float kBarRange = 1200.f;        // world metres from focus
+                bool show = selected;
+                if (!show && fr >= 0.f && fr < 1.f && f.focus)
+                {
+                    const float dx = e.x - f.focus[0], dy = e.y - f.focus[1], dz = e.z - f.focus[2];
+                    show = (dx * dx + dy * dy + dz * dz) <= kBarRange * kBarRange;
+                }
+                if (show && fr >= 0.f)
                 {
                     const float bw = 24.f * s, bh = 3.f * s, bx = sx - bw * 0.5f, by = sy - 18.f * s;
                     m_canvas.DrawRect(bx, by, bw, bh, 0.f, 0.f, 0.f, 0.6f);
