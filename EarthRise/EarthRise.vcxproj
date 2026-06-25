@@ -59,7 +59,7 @@
     <Import Project="PropertySheet.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros">
-    <PackageCertificateThumbprint>4E76FEF6A42ABDB3A65B64594CD2AC4DA96F42EB</PackageCertificateThumbprint>
+    <PackageCertificateThumbprint>8D60AD06348237E7FAD89967F194043FAC3CDF4F</PackageCertificateThumbprint>
     <PackageCertificateKeyFile>EarthRise_TemporaryKey.pfx</PackageCertificateKeyFile>
     <AppxPackageSigningEnabled>True</AppxPackageSigningEnabled>
   </PropertyGroup>
