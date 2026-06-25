@@ -120,7 +120,7 @@ struct FitResult
     bool        ok{ false };
     std::string error;
     float       pgUsed{ 0.0f }, cpuUsed{ 0.0f };
-    uint8_t     used[kSlotTypeCount]{};
+    uint8_t     used[SLOT_TYPE_COUNT]{};
 };
 
 [[nodiscard]] inline FitResult ValidateFit(const HullClass& hull,
@@ -128,7 +128,7 @@ struct FitResult
                                            const CombatCatalog& cat)
 {
     FitResult r;
-    const uint8_t cap[kSlotTypeCount] = { hull.slotsHigh, hull.slotsMid, hull.slotsLow };
+    const uint8_t cap[SLOT_TYPE_COUNT] = { hull.slotsHigh, hull.slotsMid, hull.slotsLow };
     for (const auto& code : moduleCodes) {
         const ModuleDef* m = cat.FindModule(code);
         if (!m) { r.error = "fit references unknown module '" + code + "'"; return r; }
@@ -164,15 +164,15 @@ namespace combat_detail
     }
     inline void WriteResists(Serde::WriteBuffer& wb, const ResistProfile& rp)
     {
-        for (int l = 0; l < kDefenseLayerCount; ++l)
-            for (int t = 0; t < kDamageTypeCount; ++t)
+        for (int l = 0; l < DEFENSE_LAYER_COUNT; ++l)
+            for (int t = 0; t < DAMAGE_TYPE_COUNT; ++t)
                 wb.WriteFloat(rp.resist[l][t]);
     }
     inline ResistProfile ReadResists(Serde::ReadBuffer& rb)
     {
         ResistProfile rp;
-        for (int l = 0; l < kDefenseLayerCount; ++l)
-            for (int t = 0; t < kDamageTypeCount; ++t)
+        for (int l = 0; l < DEFENSE_LAYER_COUNT; ++l)
+            for (int t = 0; t < DAMAGE_TYPE_COUNT; ++t)
                 rp.resist[l][t] = rb.ReadFloat();
         return rp;
     }
@@ -309,8 +309,8 @@ namespace combat_detail
         if (h.shieldHp < 0 || h.armorHp < 0 || h.hullHp < 0) err("hull '" + h.code + "' has negative layer HP");
         if (h.shieldHp + h.armorHp + h.hullHp <= 0) err("hull '" + h.code + "' has no defense HP");
         if (h.shieldRegenPerSec < 0.0f) err("hull '" + h.code + "' has negative shield regen");
-        for (int l = 0; l < kDefenseLayerCount; ++l)
-            for (int t = 0; t < kDamageTypeCount; ++t)
+        for (int l = 0; l < DEFENSE_LAYER_COUNT; ++l)
+            for (int t = 0; t < DAMAGE_TYPE_COUNT; ++t)
                 if (h.resists.resist[l][t] <= -1.0f || h.resists.resist[l][t] >= 1.0f)
                     err("hull '" + h.code + "' resist out of (-1,1)");
     }

@@ -25,10 +25,10 @@ class RtsCamera
 public:
     // Tuning (metres / radians). Distance and pitch are clamped so the camera can't
     // invert or clip through the focus; pitch stays off the poles.
-    static constexpr float kMinDistance = 60.0f;
-    static constexpr float kMaxDistance = 6000.0f;
-    static constexpr float kMinPitch    = 0.12f; // ~7°  (near-horizon)
-    static constexpr float kMaxPitch    = 1.45f; // ~83° (near top-down)
+    static constexpr float MIN_DISTANCE = 60.0f;
+    static constexpr float MAX_DISTANCE = 6000.0f;
+    static constexpr float MIN_PITCH    = 0.12f; // ~7°  (near-horizon)
+    static constexpr float MAX_PITCH    = 1.45f; // ~83° (near top-down)
 
     // --- focus / follow ------------------------------------------------------
 
@@ -42,22 +42,22 @@ public:
 
     // --- mutators (input maps onto these) ------------------------------------
 
-    // Orbit: yaw wraps; pitch clamps to [kMinPitch, kMaxPitch].
+    // Orbit: yaw wraps; pitch clamps to [MIN_PITCH, MAX_PITCH].
     void Rotate(float dYaw, float dPitch) noexcept
     {
         m_yaw += dYaw;
-        m_pitch = std::clamp(m_pitch + dPitch, kMinPitch, kMaxPitch);
+        m_pitch = std::clamp(m_pitch + dPitch, MIN_PITCH, MAX_PITCH);
     }
 
     // Multiplicative zoom (factor < 1 zooms in, > 1 out) — natural for a mouse wheel.
     void Zoom(float factor) noexcept
     {
-        if (factor > 0.0f) m_distance = std::clamp(m_distance * factor, kMinDistance, kMaxDistance);
+        if (factor > 0.0f) m_distance = std::clamp(m_distance * factor, MIN_DISTANCE, MAX_DISTANCE);
     }
     // Additive zoom in metres (for key/step zoom).
     void ZoomBy(float deltaMetres) noexcept
     {
-        m_distance = std::clamp(m_distance + deltaMetres, kMinDistance, kMaxDistance);
+        m_distance = std::clamp(m_distance + deltaMetres, MIN_DISTANCE, MAX_DISTANCE);
     }
 
     // Pan the focus in the camera's ground plane: +dRight moves it screen-right,

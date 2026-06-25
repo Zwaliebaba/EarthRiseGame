@@ -189,7 +189,7 @@ public:
     [[nodiscard]] HsOutput Begin()
     {
         ClientHelloBody hello;
-        hello.protocolId = kProtocolId;
+        hello.protocolId = PROTOCOL_ID;
         std::vector<uint8_t> out;
         hello.Encode(out);
         return HsOutput::Message(MsgType::ClientHello, std::move(out));

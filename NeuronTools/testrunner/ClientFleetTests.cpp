@@ -142,7 +142,7 @@ ER_TEST(ClientFleet, OverviewSortsByDistanceAndClassifiesIff)
 namespace
 {
     // HUB ↔ A ↔ B ↔ C  plus a HUB ↔ C shortcut → two routes of different length.
-    const char* kGraph =
+    const char* GRAPH =
         "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
         "beacon HUB { region = R pos = 0 0 0      links = A C   kind = public }\n"
         "beacon A   { region = R pos = 100 0 0    links = HUB B kind = public }\n"
@@ -154,7 +154,7 @@ namespace
     {
         Neuron::Sim::UniverseDataset ds;
         std::vector<std::string> errs;
-        const bool ok = Neuron::Tools::ParseUniverseSource(kGraph, ds, errs);
+        const bool ok = Neuron::Tools::ParseUniverseSource(GRAPH, ds, errs);
         ER_CHECK(ok && errs.empty());
         return ds;
     }

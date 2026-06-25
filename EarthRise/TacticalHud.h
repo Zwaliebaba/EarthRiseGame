@@ -73,7 +73,7 @@ public:
         const float R = 95.f * s;
         const float cxr = 20.f * s + R;
         const float cyr = static_cast<float>(f.screenH) - 20.f * s - R;
-        constexpr float kRange = 1800.f; // world metres mapped to the disc edge
+        constexpr float RANGE = 1800.f; // world metres mapped to the disc edge
 
         DrawDisc(cxr, cyr, R, 44, 0.30f, 0.11f, 0.12f, 0.85f);           // dark-red disc (menu body tone)
         // Rings + cross-hairs in the window's light grey-blue border colour.
@@ -89,10 +89,10 @@ public:
             const auto& e = ents[i];
             const float dx = e.x - fx, dz = e.z - fz;
             const float dist = std::sqrt(dx * dx + dz * dz);
-            if (dist > kRange) continue;
+            if (dist > RANGE) continue;
             // World +X → radar right, world +Z → radar up.
-            const float bx = cxr + (dx / kRange) * R;
-            const float by = cyr - (dz / kRange) * R;
+            const float bx = cxr + (dx / RANGE) * R;
+            const float by = cyr - (dz / RANGE) * R;
             float r, g, b; RadarColor(e.kind, r, g, b);
             const float bs = 3.0f * s;
             m_canvas.DrawRect(bx - bs * 0.5f, by - bs * 0.5f, bs, bs, r, g, b, 1.f);

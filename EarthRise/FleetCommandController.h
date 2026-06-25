@@ -35,7 +35,7 @@ struct FleetInput
     float menuScale{ 1.f };       // App's MenuScale(screenH)
     bool  overMenuWindow{ false }; // m_menu.PointerOverWindow(ptrX, ptrY, screenH)
     // Right-click context menu: RMB is also camera-orbit, so a stationary right-click
-    // (release with < kCtxClickPx travel from the press anchor) opens the menu.
+    // (release with < CTX_CLICK_PX travel from the press anchor) opens the menu.
     bool  rmbReleased{ false };               // one-frame RMB-up edge
     float rmbDownX0{ 0.f }, rmbDownY0{ 0.f };  // RMB press anchor (click vs orbit-drag)
 };
@@ -97,14 +97,14 @@ public:
         const float R = 95.f * s;
         const float cxr = 20.f * s + R;
         const float cyr = static_cast<float>(in.screenH) - 20.f * s - R;
-        constexpr float kRange = 1800.f;
+        constexpr float RANGE = 1800.f;
 
         const float ddx = in.ptrX - cxr, ddy = in.ptrY - cyr;
         if (ddx * ddx + ddy * ddy > R * R) return; // click outside the radar disc
 
         // World point under the click (radar +X right, +Z up).
-        const float wx = fx + (ddx / R) * kRange;
-        const float wz = fz - (ddy / R) * kRange;
+        const float wx = fx + (ddx / R) * RANGE;
+        const float wz = fz - (ddy / R) * RANGE;
 
         // Nearest contact to the click (in render space) within a small pick radius.
         const uint32_t self = in.session ? in.session->PlayerNetId() : 0;
@@ -221,7 +221,7 @@ public:
         // A stationary right-click (not an orbit-drag) opens the menu on the picked entity.
         if (in.rmbReleased) {
             const float dx = in.ptrX - in.rmbDownX0, dy = in.ptrY - in.rmbDownY0;
-            if (dx * dx + dy * dy <= kCtxClickPx * kCtxClickPx && !in.overMenuWindow) {
+            if (dx * dx + dy * dy <= CTX_CLICK_PX * CTX_CLICK_PX && !in.overMenuWindow) {
                 Neuron::Sim::EntityKind kind = Neuron::Sim::EntityKind::Unknown; uint32_t owner = 0;
                 const uint32_t hit = PickAnyEntity(in, vpf, kind, owner);
                 if (hit) {
@@ -306,7 +306,7 @@ private:
         return static_cast<int>((py - m_ctxY) / m.rowH);
     }
 
-    static constexpr float kCtxClickPx = 6.0f; // RMB travel under this = a click, not an orbit
+    static constexpr float CTX_CLICK_PX = 6.0f; // RMB travel under this = a click, not an orbit
 
     Neuron::Client::ControlGroups m_controlGroups;
     std::vector<uint32_t>         m_selection;     // locally-selected owned net ids

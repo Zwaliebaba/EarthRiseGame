@@ -8,7 +8,7 @@
 //   Send:  plaintext payload → build header (AAD) → AEAD encrypt → datagram
 //   Recv:  parse header → replay-window check → AEAD decrypt/verify → payload
 //
-// Rekey: when the outgoing packet counter crosses kRekeyPacketThreshold the
+// Rekey: when the outgoing packet counter crosses REKEY_PACKET_THRESHOLD the
 // channel signals the owner to renegotiate keys (epoch++). For M1a the threshold
 // is far below any GCM/nonce-wrap risk, so a single epoch suffices in practice.
 
@@ -55,7 +55,7 @@ public:
     // True when the outgoing counter has crossed the rekey threshold.
     [[nodiscard]] bool NeedsRekey() const noexcept
     {
-        return m_sendCounter >= kRekeyPacketThreshold;
+        return m_sendCounter >= REKEY_PACKET_THRESHOLD;
     }
 
     // Encrypt a payload into a full datagram (header ‖ AEAD ciphertext+tag).
@@ -65,7 +65,7 @@ public:
         if (!m_hasKeys || !m_crypto) return false;
 
         PacketHeader hdr;
-        hdr.protocolId      = kProtocolId;
+        hdr.protocolId      = PROTOCOL_ID;
         hdr.connectionToken = m_token;
         hdr.packetNumber    = m_sendCounter;
 
@@ -109,8 +109,8 @@ public:
         if (!m_replay.CheckAndUpdate(hdr.packetNumber))
             return OpenResult::Replay;
 
-        std::span<const uint8_t> aad{ datagram.data(), PacketHeader::kWireSize };
-        std::span<const uint8_t> ct  = datagram.subspan(PacketHeader::kWireSize);
+        std::span<const uint8_t> aad{ datagram.data(), PacketHeader::WIRE_SIZE };
+        std::span<const uint8_t> ct  = datagram.subspan(PacketHeader::WIRE_SIZE);
 
         if (!m_crypto->Decrypt(m_recvKey, m_recvDir, hdr.packetNumber, aad, ct, outPayload))
             return OpenResult::AuthFailure;

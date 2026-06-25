@@ -132,11 +132,11 @@ struct MenuMetrics { float rowH; float width; };
 class ControlGroups
 {
 public:
-    static constexpr int kCount = 10;
+    static constexpr int COUNT = 10;
 
     void Set(int group, std::vector<uint32_t> units)
     {
-        if (group < 0 || group >= kCount) return;
+        if (group < 0 || group >= COUNT) return;
         std::sort(units.begin(), units.end());
         units.erase(std::unique(units.begin(), units.end()), units.end());
         m_groups[static_cast<size_t>(group)] = std::move(units);
@@ -144,8 +144,8 @@ public:
 
     [[nodiscard]] const std::vector<uint32_t>& Recall(int group) const
     {
-        static const std::vector<uint32_t> kEmpty;
-        if (group < 0 || group >= kCount) return kEmpty;
+        static const std::vector<uint32_t> EMPTY;
+        if (group < 0 || group >= COUNT) return EMPTY;
         return m_groups[static_cast<size_t>(group)];
     }
 
@@ -157,7 +157,7 @@ public:
     }
 
 private:
-    std::array<std::vector<uint32_t>, kCount> m_groups;
+    std::array<std::vector<uint32_t>, COUNT> m_groups;
 };
 
 // --- overview list (§22.3 primary surface) ----------------------------------

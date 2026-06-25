@@ -76,7 +76,7 @@ public:
     [[nodiscard]] unsigned LaneCount() const;
 
 private:
-    IocpUdpListenerImpl* impl_ = nullptr;
+    IocpUdpListenerImpl* m_impl = nullptr;
 };
 
 } // namespace Neuron::Server

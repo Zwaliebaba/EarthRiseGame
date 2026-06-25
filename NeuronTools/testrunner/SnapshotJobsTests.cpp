@@ -25,7 +25,7 @@ namespace
     {
         std::vector<uint32_t> clients;
         for (int p = 0; p < players; ++p) {
-            const int64_t bx = static_cast<int64_t>(p) * Neuron::Universe::kSectorSize;
+            const int64_t bx = static_cast<int64_t>(p) * Neuron::Universe::SECTOR_SIZE;
             const uint32_t base = su.SpawnBase({ bx, 0, 0 }, { 0, 0, 0 });
             clients.push_back(base);
             for (int i = 0; i < 3; ++i) su.SpawnProp(0, { bx + 100 + 10 * i, 0, 0 });

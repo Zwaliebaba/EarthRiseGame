@@ -147,7 +147,7 @@ namespace Neuron::Render
                                                        IID_PPV_ARGS(m_rootSig.put())));
 
     // --- Input layout ---
-    static constexpr D3D12_INPUT_ELEMENT_DESC kLayout[] = {
+    static constexpr D3D12_INPUT_ELEMENT_DESC LAYOUT[] = {
       // Stream 0: per-vertex
       {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
       {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
@@ -164,7 +164,7 @@ namespace Neuron::Render
     psoDesc.pRootSignature = m_rootSig.get();
     psoDesc.VS = {g_pSceneVS, sizeof(g_pSceneVS)};
     psoDesc.PS = {g_pScenePS, sizeof(g_pScenePS)};
-    psoDesc.InputLayout = {kLayout, static_cast<UINT>(std::size(kLayout))};
+    psoDesc.InputLayout = {LAYOUT, static_cast<UINT>(std::size(LAYOUT))};
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets = 1;
     psoDesc.RTVFormats[0] = sceneColorFormat;
@@ -232,7 +232,7 @@ namespace Neuron::Render
                                                          IID_PPV_ARGS(m_rootSigTex.put())));
 
       // Textured input layout: stream-0 adds the per-vertex UV (CMO offset 44).
-      static constexpr D3D12_INPUT_ELEMENT_DESC kLayoutTex[] = {
+      static constexpr D3D12_INPUT_ELEMENT_DESC LAYOUT_TEX[] = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
         {"TEXCOORD", 4, DXGI_FORMAT_R32G32_FLOAT, 0, 44, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
@@ -246,11 +246,11 @@ namespace Neuron::Render
       texPso.pRootSignature = m_rootSigTex.get();
       texPso.VS = {g_pSceneTexVS, sizeof(g_pSceneTexVS)};
       texPso.PS = {g_pSceneTexPS, sizeof(g_pSceneTexPS)};
-      texPso.InputLayout = {kLayoutTex, static_cast<UINT>(std::size(kLayoutTex))};
+      texPso.InputLayout = {LAYOUT_TEX, static_cast<UINT>(std::size(LAYOUT_TEX))};
       winrt::check_hresult(m_device->CreateGraphicsPipelineState(&texPso, IID_PPV_ARGS(m_psoTex.put())));
 
       D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
-      srvHeapDesc.NumDescriptors = kMaxShapes; // one diffuse SRV per registered shape
+      srvHeapDesc.NumDescriptors = MAX_SHAPES; // one diffuse SRV per registered shape
       srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
       srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
       winrt::check_hresult(m_device->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(m_srvHeap.put())));
@@ -303,7 +303,7 @@ namespace Neuron::Render
     m_ibView = {m_ib->GetGPUVirtualAddress(), sizeof(cubeIdx), DXGI_FORMAT_R16_UINT};
 
     // --- Per-instance upload buffers (one per in-flight frame, CPU-mapped) ---
-    constexpr UINT64 instBufSize = kMaxEntities * sizeof(InstanceData);
+    constexpr UINT64 instBufSize = MAX_ENTITIES * sizeof(InstanceData);
     D3D12_HEAP_PROPERTIES hpUpload{};
     hpUpload.Type = D3D12_HEAP_TYPE_UPLOAD;
     D3D12_RESOURCE_DESC instDesc{};
@@ -312,7 +312,7 @@ namespace Neuron::Render
     instDesc.Height = instDesc.DepthOrArraySize = instDesc.MipLevels = 1;
     instDesc.SampleDesc.Count = 1;
     instDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    for (UINT i = 0; i < DeviceResources::FRAME_COUNT; ++i)
     {
       winrt::check_hresult(m_device->CreateCommittedResource(&hpUpload, D3D12_HEAP_FLAG_NONE, &instDesc,
                                                              D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
@@ -326,7 +326,7 @@ namespace Neuron::Render
 
   void SceneRenderer::Uninitialize()
   {
-    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    for (UINT i = 0; i < DeviceResources::FRAME_COUNT; ++i)
     {
       if (m_instBuf[i] && m_instPtr[i])
       {
@@ -348,7 +348,7 @@ namespace Neuron::Render
     Shape shape;
     shape.mesh = std::move(mesh);
 
-    if (diffuse.valid() && m_srvHeap && m_nextSrv < kMaxShapes)
+    if (diffuse.valid() && m_srvHeap && m_nextSrv < MAX_SHAPES)
     {
       shape.srvIndex = m_nextSrv++;
       shape.diffuse = std::move(diffuse);
@@ -377,7 +377,7 @@ namespace Neuron::Render
     // still being read by the previous in-flight frame).
     const UINT fi = m_dr->FrameIndex();
     if (!count || !m_instPtr[fi]) return;
-    count = (std::min)(count, kMaxEntities);
+    count = (std::min)(count, MAX_ENTITIES);
 
     NEURON_PIX_SCOPED(cl, PixColors::Scene, "Scene (%u instances)", count);
 
@@ -385,7 +385,7 @@ namespace Neuron::Render
     // call. Sort a stable index list, fill the per-instance buffer in that order,
     // then issue one DrawRun per contiguous shapeId run (StartInstanceLocation
     // indexes into the shared instance buffer).
-    std::array<uint32_t, kMaxEntities> order;
+    std::array<uint32_t, MAX_ENTITIES> order;
     for (uint32_t i = 0; i < count; ++i) order[i] = i;
     std::stable_sort(order.begin(), order.begin() + count,
                      [&](uint32_t a, uint32_t b) { return entities[a].shapeId < entities[b].shapeId; });

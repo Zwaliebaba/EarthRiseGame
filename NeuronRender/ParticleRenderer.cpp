@@ -67,7 +67,7 @@ namespace Neuron::Render
                                              IID_PPV_ARGS(m_rootSig.put()))))
       return false;
 
-    static constexpr D3D12_INPUT_ELEMENT_DESC kLayout[] = {
+    static constexpr D3D12_INPUT_ELEMENT_DESC LAYOUT[] = {
       { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
       { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
       { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -77,7 +77,7 @@ namespace Neuron::Render
     pso.pRootSignature = m_rootSig.get();
     pso.VS = { g_pParticleVS, sizeof(g_pParticleVS) };
     pso.PS = { g_pParticlePS, sizeof(g_pParticlePS) };
-    pso.InputLayout = { kLayout, static_cast<UINT>(std::size(kLayout)) };
+    pso.InputLayout = { LAYOUT, static_cast<UINT>(std::size(LAYOUT)) };
     pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     pso.NumRenderTargets = 1;
     pso.RTVFormats[0] = sceneColorFormat;
@@ -116,7 +116,7 @@ namespace Neuron::Render
       return false;
 
     // Per-frame CPU-mapped vertex buffers (6 verts/particle; ambient + emitter).
-    constexpr UINT64 vbSize = static_cast<UINT64>(kMaxVerts) * sizeof(Vertex);
+    constexpr UINT64 vbSize = static_cast<UINT64>(MAX_VERTS) * sizeof(Vertex);
     D3D12_HEAP_PROPERTIES hp{};
     hp.Type = D3D12_HEAP_TYPE_UPLOAD;
     D3D12_RESOURCE_DESC rd{};
@@ -125,7 +125,7 @@ namespace Neuron::Render
     rd.Height = rd.DepthOrArraySize = rd.MipLevels = 1;
     rd.SampleDesc.Count = 1;
     rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    for (UINT i = 0; i < kFrameCount; ++i)
+    for (UINT i = 0; i < FRAME_COUNT; ++i)
     {
       if (FAILED(m_device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd,
                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
@@ -137,13 +137,13 @@ namespace Neuron::Render
     }
 
     // Seed the drifting field (offsets in a box around the focus).
-    m_particles.resize(kMaxParticles);
+    m_particles.resize(MAX_PARTICLES);
     Rng rng{ 0x1234567u };
     for (auto& p : m_particles)
     {
-      p.ox = rng.range(-kFieldHalf, kFieldHalf);
-      p.oy = rng.range(-kFieldHalf, kFieldHalf);
-      p.oz = rng.range(-kFieldHalf, kFieldHalf);
+      p.ox = rng.range(-FIELD_HALF, FIELD_HALF);
+      p.oy = rng.range(-FIELD_HALF, FIELD_HALF);
+      p.oz = rng.range(-FIELD_HALF, FIELD_HALF);
       p.vx = rng.range(-4.f, 4.f);
       p.vy = rng.range(-2.f, 2.f);
       p.vz = rng.range(-4.f, 4.f);
@@ -154,13 +154,13 @@ namespace Neuron::Render
       p.b = bright * 0.45f;
       p.a = rng.range(0.3f, 0.7f);
     }
-    m_emit.assign(kMaxEmitParticles, EmitP{}); // all dead (age==life==0 → not alive)
+    m_emit.assign(MAX_EMIT_PARTICLES, EmitP{}); // all dead (age==life==0 → not alive)
     return true;
   }
 
   void ParticleRenderer::Uninitialize()
   {
-    for (UINT i = 0; i < kFrameCount; ++i)
+    for (UINT i = 0; i < FRAME_COUNT; ++i)
       if (m_vb[i] && m_vbPtr[i]) { m_vb[i]->Unmap(0, nullptr); m_vbPtr[i] = nullptr; }
   }
 
@@ -195,9 +195,9 @@ namespace Neuron::Render
         while (v < -half) v += span;
         return v;
       };
-      p.ox = wrap(p.ox, kFieldHalf);
-      p.oy = wrap(p.oy, kFieldHalf);
-      p.oz = wrap(p.oz, kFieldHalf);
+      p.ox = wrap(p.ox, FIELD_HALF);
+      p.oy = wrap(p.oy, FIELD_HALF);
+      p.oz = wrap(p.oz, FIELD_HALF);
     }
 
     // Emitter particles: age + integrate the live ones.
@@ -221,10 +221,10 @@ namespace Neuron::Render
         expected -= 1.f;
         // Find the next dead slot via a rolling cursor.
         EmitP* slot = nullptr;
-        for (uint32_t scan = 0; scan < kMaxEmitParticles; ++scan)
+        for (uint32_t scan = 0; scan < MAX_EMIT_PARTICLES; ++scan)
         {
           EmitP& cand = m_emit[m_spawnCursor];
-          m_spawnCursor = (m_spawnCursor + 1) % kMaxEmitParticles;
+          m_spawnCursor = (m_spawnCursor + 1) % MAX_EMIT_PARTICLES;
           if (!cand.alive()) { slot = &cand; break; }
         }
         if (!slot) break; // pool full
@@ -252,7 +252,7 @@ namespace Neuron::Render
   {
     if (!m_tex.valid()) return;
     const UINT fi = m_dr->FrameIndex();
-    if (fi >= kFrameCount) return;
+    if (fi >= FRAME_COUNT) return;
     if (!m_vbPtr[fi]) return;
 
     NEURON_PIX_SCOPED(cl, PixColors::Scene, "Particles");
@@ -262,7 +262,7 @@ namespace Neuron::Render
     // Append one camera-facing additive quad (6 verts) at a world centre.
     auto billboard = [&](float cxp, float cyp, float czp, float hs,
                          float r, float g, float b, float a) {
-      if (n + 6 > kMaxVerts) return;
+      if (n + 6 > MAX_VERTS) return;
       const float rX = rightX * hs, rY = rightY * hs, rZ = rightZ * hs;
       const float uX = upX * hs, uY = upY * hs, uZ = upZ * hs;
       const float blX = cxp - rX - uX, blY = cyp - rY - uY, blZ = czp - rZ - uZ;

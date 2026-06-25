@@ -47,7 +47,7 @@ public:
 
         // Second pass: project every entity into render space.
         for (const auto& [netId, e] : ents) {
-            if (m_current.count >= ReplicaSet::kMaxEntities) break;
+            if (m_current.count >= ReplicaSet::MAX_ENTITIES) break;
 
             // Combine base UniversePos with the sub-metre localOffset before projection.
             const Neuron::Universe::UniversePos universeWithOffset{

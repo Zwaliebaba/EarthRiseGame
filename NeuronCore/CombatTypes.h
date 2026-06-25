@@ -18,16 +18,16 @@ namespace Neuron::Sim
 // the per-layer resist spreads (CombatData.h), not in code. Explosive is post-launch
 // (a trailing enum value + a catalog row when it lands), so it is data, not a rewrite.
 enum class DamageType : uint8_t { Kinetic = 0, Thermal = 1, EM = 2 };
-inline constexpr uint8_t kDamageTypeCount = 3;
+inline constexpr uint8_t DAMAGE_TYPE_COUNT = 3;
 
 // Three defense layers, depleted outside-in (combat-balance.md §2.1).
 enum class DefenseLayer : uint8_t { Shield = 0, Armor = 1, Hull = 2 };
-inline constexpr uint8_t kDefenseLayerCount = 3;
+inline constexpr uint8_t DEFENSE_LAYER_COUNT = 3;
 
 // Fitting slot families (combat-balance.md §5): High = weapons/remote-rep/mining,
 // Mid = shield/EWAR/propulsion/tackle, Low = armor/hull/damage-tracking mods.
 enum class SlotType : uint8_t { High = 0, Mid = 1, Low = 2 };
-inline constexpr uint8_t kSlotTypeCount = 3;
+inline constexpr uint8_t SLOT_TYPE_COUNT = 3;
 
 // Module archetypes (combat-balance.md §5; §13.2 EWAR/logi/tackle). The effect of a
 // fitted module on the sim is dispatched on this kind (Combat.h). Trailing-extensible.
@@ -45,7 +45,7 @@ enum class ModuleKind : uint8_t
     TrackingEnhancer = 9,  // Low  — passive: +'strength' weapon tracking
     Afterburner      = 10, // Mid  — passive: ×'strength' max speed
 };
-inline constexpr uint8_t kModuleKindCount = 11;
+inline constexpr uint8_t MODULE_KIND_COUNT = 11;
 
 // Hull size ladder (combat-balance.md §3) — drives signature / tracking interplay.
 enum class HullSize : uint8_t { Light = 0, Medium = 1, Heavy = 2, Industrial = 3, Capital = 4 };
@@ -55,7 +55,7 @@ enum class HullSize : uint8_t { Light = 0, Medium = 1, Heavy = 2, Industrial = 3
 // rule (Combat.h) reads this; the counter triangle lives entirely in these numbers.
 struct ResistProfile
 {
-    float resist[kDefenseLayerCount][kDamageTypeCount]{};
+    float resist[DEFENSE_LAYER_COUNT][DAMAGE_TYPE_COUNT]{};
 
     [[nodiscard]] float At(DefenseLayer l, DamageType t) const noexcept
     {

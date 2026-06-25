@@ -48,26 +48,26 @@ NEURON_DEFINE_COMPONENT(Neuron::Sim::HullInfo, Neuron::Sim::Slot_HullInfo);
 
 ER_TEST(ShapeCatalog, CountAndSequentialIds)
 {
-  ER_CHECK_EQ(kShapeCount, 70u);
-  for (uint16_t i = 0; i < kShapeCount; ++i)
+  ER_CHECK_EQ(SHAPE_COUNT, 70u);
+  for (uint16_t i = 0; i < SHAPE_COUNT; ++i)
   {
-    ER_CHECK_EQ(kShapes[i].id, i);
-    const auto p = kShapes[i].cmoPath;
+    ER_CHECK_EQ(SHAPES[i].id, i);
+    const auto p = SHAPES[i].cmoPath;
     ER_CHECK(p.size() > 4 && p.substr(p.size() - 4) == ".cmo");
   }
 }
 
 ER_TEST(ShapeCatalog, NameLookup)
 {
-  ER_CHECK(ShapeIdByName("Jumpgate01") != kInvalidShapeId);
-  ER_CHECK(ShapeIdByName("Outpost01") != kInvalidShapeId);
-  ER_CHECK(ShapeIdByName("HullAurora") != kInvalidShapeId);
-  ER_CHECK(ShapeIdByName("DoesNotExist") == kInvalidShapeId);
+  ER_CHECK(ShapeIdByName("Jumpgate01") != INVALID_SHAPE_ID);
+  ER_CHECK(ShapeIdByName("Outpost01") != INVALID_SHAPE_ID);
+  ER_CHECK(ShapeIdByName("HullAurora") != INVALID_SHAPE_ID);
+  ER_CHECK(ShapeIdByName("DoesNotExist") == INVALID_SHAPE_ID);
   // Round-trip: id -> def -> name.
   const uint16_t id = ShapeIdByName("HullAurora");
   ER_CHECK(ShapeById(id) != nullptr);
   ER_CHECK(ShapeById(id)->name == "HullAurora");
-  ER_CHECK(ShapeById(kInvalidShapeId) == nullptr);
+  ER_CHECK(ShapeById(INVALID_SHAPE_ID) == nullptr);
 }
 
 ER_TEST(ShapeCatalog, CategoryToKind)
@@ -82,7 +82,7 @@ ER_TEST(ShapeCatalog, CategoryToKind)
 ER_TEST(ShapeCatalog, EveryCategoryHasAtLeastOneShape)
 {
   for (uint8_t c = 0; c <= static_cast<uint8_t>(ShapeCategory::Station); ++c)
-    ER_CHECK(FirstShapeOfCategory(static_cast<ShapeCategory>(c)) != kInvalidShapeId);
+    ER_CHECK(FirstShapeOfCategory(static_cast<ShapeCategory>(c)) != INVALID_SHAPE_ID);
 }
 
 ER_TEST(ServerUniverse, ScenerySpawnedWithShapeAndKind)
@@ -96,7 +96,7 @@ ER_TEST(ServerUniverse, ScenerySpawnedWithShapeAndKind)
   const uint16_t gate = ShapeIdByName("Jumpgate01");
   for (const auto& e : snap.entities)
   {
-    ER_CHECK(e.shapeId != kInvalidShapeId);
+    ER_CHECK(e.shapeId != INVALID_SHAPE_ID);
     if (e.shapeId == gate)
     {
       sawGate = true;

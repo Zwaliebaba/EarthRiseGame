@@ -76,10 +76,10 @@ public:
 
     void Render(ID3D12GraphicsCommandList* cl, UINT screenWidth, UINT screenHeight);
 
-    static constexpr UINT kFrameCount = DeviceResources::kFrameCount;
-    static constexpr UINT kMaxQuads = 4096;
-    static constexpr UINT kMaxVerts = kMaxQuads * 6;
-    static constexpr UINT kMaxTextures = 16; // SRV-heap slots (font + chrome + ...)
+    static constexpr UINT FRAME_COUNT = DeviceResources::FRAME_COUNT;
+    static constexpr UINT MAX_QUADS = 4096;
+    static constexpr UINT MAX_VERTS = MAX_QUADS * 6;
+    static constexpr UINT MAX_TEXTURES = 16; // SRV-heap slots (font + chrome + ...)
 
 private:
     struct CanvasVertex { float x, y, u, v, r, g, b, a; };
@@ -101,12 +101,12 @@ private:
     // One CPU-mapped vertex buffer PER in-flight frame — a single shared buffer
     // races the GPU still reading the previous frame (flicker / garbage flashes
     // when the content changes, e.g. menu hover).
-    std::array<winrt::com_ptr<ID3D12Resource>, kFrameCount> m_vtxBuf;
-    std::array<CanvasVertex*, kFrameCount>                  m_vtxPtr{};
+    std::array<winrt::com_ptr<ID3D12Resource>, FRAME_COUNT> m_vtxBuf;
+    std::array<CanvasVertex*, FRAME_COUNT>                  m_vtxPtr{};
     UINT                                m_frame{ 0 }; // selected in Reset()
     UINT                                m_vtxCount{ 0 };
 
-    winrt::com_ptr<ID3D12DescriptorHeap> m_srvHeap; // shader-visible, kMaxTextures
+    winrt::com_ptr<ID3D12DescriptorHeap> m_srvHeap; // shader-visible, MAX_TEXTURES
     UINT m_srvSize{ 0 };
     UINT m_nextSrv{ 0 };
     std::unordered_map<ID3D12Resource*, UINT> m_srvByTex;

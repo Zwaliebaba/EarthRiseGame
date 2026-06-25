@@ -53,7 +53,7 @@ public:
     void Poll(const std::function<Neuron::Net::ServerStatus()>& makeStatus)
     {
         if (!m_open) return;
-        std::array<uint8_t, Neuron::Net::kStatusMaxDatagramBytes> buf{};
+        std::array<uint8_t, Neuron::Net::STATUS_MAX_DATAGRAM_BYTES> buf{};
         for (;;)
         {
             Neuron::Net::Endpoint from;

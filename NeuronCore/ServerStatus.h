@@ -35,25 +35,25 @@ namespace Neuron::Net
 
 // The status sub-protocol version (bumped if the JSON shape changes). Carried both
 // in the query token and in the reply so a client/server mismatch is detectable.
-inline constexpr uint8_t kStatusProtocolVersion = 1;
+inline constexpr uint8_t STATUS_PROTOCOL_VERSION = 1;
 
 // The fixed request token a status client sends. The server validates it exactly
 // before replying — a DoS guard so the port never answers arbitrary traffic. 8
 // bytes: 'E','R','S','T','A','T','?' + the 1-byte status-protocol version.
-inline constexpr char   kStatusQueryToken[8] = {
-    'E', 'R', 'S', 'T', 'A', 'T', '?', static_cast<char>(kStatusProtocolVersion) };
-inline constexpr size_t kStatusQueryTokenSize = sizeof(kStatusQueryToken);
+inline constexpr char   STATUS_QUERY_TOKEN[8] = {
+    'E', 'R', 'S', 'T', 'A', 'T', '?', static_cast<char>(STATUS_PROTOCOL_VERSION) };
+inline constexpr size_t STATUS_QUERY_TOKEN_SIZE = sizeof(STATUS_QUERY_TOKEN);
 
 // A status reply fits comfortably inside one safe-MTU datagram.
-inline constexpr size_t kStatusMaxDatagramBytes = 1024;
+inline constexpr size_t STATUS_MAX_DATAGRAM_BYTES = 1024;
 
 // True if 'dg' is a well-formed status query (exact token match). The server
 // endpoint uses this to decide whether to answer a received datagram.
 [[nodiscard]] inline bool IsStatusQuery(std::span<const uint8_t> dg) noexcept
 {
-    if (dg.size() != kStatusQueryTokenSize) return false;
-    for (size_t i = 0; i < kStatusQueryTokenSize; ++i)
-        if (dg[i] != static_cast<uint8_t>(kStatusQueryToken[i])) return false;
+    if (dg.size() != STATUS_QUERY_TOKEN_SIZE) return false;
+    for (size_t i = 0; i < STATUS_QUERY_TOKEN_SIZE; ++i)
+        if (dg[i] != static_cast<uint8_t>(STATUS_QUERY_TOKEN[i])) return false;
     return true;
 }
 
@@ -62,7 +62,7 @@ inline constexpr size_t kStatusMaxDatagramBytes = 1024;
 // so the JSON below is flat.
 struct ServerStatus
 {
-    uint8_t protocolVersion{ kStatusProtocolVersion };
+    uint8_t protocolVersion{ STATUS_PROTOCOL_VERSION };
 
     // -- liveness ---------------------------------------------------------------
     uint64_t uptimeSeconds{ 0 };
@@ -96,7 +96,7 @@ struct ServerStatus
 
 // Serialize a status record to a flat JSON object. Numbers only (no string fields),
 // so no escaping is needed; the doubles use a compact %.4g form the Json reader
-// round-trips. The output fits in kStatusMaxDatagramBytes.
+// round-trips. The output fits in STATUS_MAX_DATAGRAM_BYTES.
 [[nodiscard]] inline std::string EncodeStatusJson(const ServerStatus& s)
 {
     auto dbl = [](double d) {
@@ -140,7 +140,7 @@ struct ServerStatus
     if (!Neuron::Json::Parse(text, root) || !root.isObject())
         return false;
 
-    out.protocolVersion    = static_cast<uint8_t>(root.getUint32("protocolVersion", kStatusProtocolVersion));
+    out.protocolVersion    = static_cast<uint8_t>(root.getUint32("protocolVersion", STATUS_PROTOCOL_VERSION));
     out.uptimeSeconds      = root.getUint64("uptimeSeconds", 0);
     out.simTick            = root.getUint64("simTick", 0);
     out.connectionsPending = root.getUint32("connectionsPending", 0);

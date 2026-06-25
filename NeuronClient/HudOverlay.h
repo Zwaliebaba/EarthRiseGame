@@ -16,7 +16,7 @@ namespace Neuron::Client
 {
 
 // Per-kind nominal max HP (0 = entity shows no health bar). Mirrors the M3
-// placeholder values in ServerUniverse (kShipHp / kNpcHp / base 1000).
+// placeholder values in ServerUniverse (SHIP_HP / NPC_HP / base 1000).
 [[nodiscard]] inline int NominalMaxHp(Neuron::Sim::EntityKind kind) noexcept
 {
     switch (kind)

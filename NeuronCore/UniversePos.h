@@ -2,7 +2,7 @@
 // Universe coordinate system — §6 of the masterplan.
 //
 // Absolute position: int64_t per axis, 1 unit = 1 metre, signed, origin (0,0,0).
-// Sector: 2^kSectorShift metres per side (default 14 → 16 384 m).
+// Sector: 2^SECTOR_SHIFT metres per side (default 14 → 16 384 m).
 // Per-sector float offset: sub-metre precision ~1 mm @ S=14.
 // Float vectors (RelativeVec3) are only ever produced within interest range,
 // so the int64→float cast cannot overflow.
@@ -28,8 +28,8 @@ struct UniversePos
 // ---------------------------------------------------------------------------
 // Sector
 // ---------------------------------------------------------------------------
-static constexpr int     kSectorShift = 14;          // sector side = 2^14 = 16 384 m
-static constexpr int64_t kSectorSize  = int64_t(1) << kSectorShift;
+static constexpr int     SECTOR_SHIFT = 14;          // sector side = 2^14 = 16 384 m
+static constexpr int64_t SECTOR_SIZE  = int64_t(1) << SECTOR_SHIFT;
 
 struct SectorId
 {
@@ -61,19 +61,19 @@ struct SectorHash
 // Sector index for a universe coordinate (arithmetic right-shift preserves sign).
 [[nodiscard]] inline SectorId UniverseToSector(const UniversePos& p) noexcept
 {
-    return { p.x >> kSectorShift, p.y >> kSectorShift, p.z >> kSectorShift };
+    return { p.x >> SECTOR_SHIFT, p.y >> SECTOR_SHIFT, p.z >> SECTOR_SHIFT };
 }
 
 // Universe position of the sector's (0,0,0) corner.
 [[nodiscard]] inline UniversePos SectorToOrigin(const SectorId& s) noexcept
 {
-    return { s.x << kSectorShift, s.y << kSectorShift, s.z << kSectorShift };
+    return { s.x << SECTOR_SHIFT, s.y << SECTOR_SHIFT, s.z << SECTOR_SHIFT };
 }
 
-// Sector-local float offset in metres [0, kSectorSize) per axis.
+// Sector-local float offset in metres [0, SECTOR_SIZE) per axis.
 [[nodiscard]] inline XMFLOAT3 UniverseToLocalOffset(const UniversePos& p) noexcept
 {
-    const int64_t mask = kSectorSize - 1;
+    const int64_t mask = SECTOR_SIZE - 1;
     // Signed modulo: use bitwise AND (works for powers of two with signed types
     // only when we want the positive remainder — adjust for negative coords).
     const int64_t lx = p.x & mask; // This gives positive remainder (C++ truncation)
@@ -83,11 +83,11 @@ struct SectorHash
 }
 
 // Rebuild UniversePos from a sector and its floating local offset.
-// Call when the local float offset has left [0, kSectorSize) after physics integration.
+// Call when the local float offset has left [0, SECTOR_SIZE) after physics integration.
 [[nodiscard]] inline UniversePos RebuildFromSectorLocal(const SectorId& s, const XMFLOAT3& local) noexcept
 {
     const UniversePos origin = SectorToOrigin(s);
-    // Round to nearest integer metre; caller should rebase sector if |local| >= kSectorSize.
+    // Round to nearest integer metre; caller should rebase sector if |local| >= SECTOR_SIZE.
     return {
         origin.x + static_cast<int64_t>(local.x),
         origin.y + static_cast<int64_t>(local.y),
@@ -135,7 +135,7 @@ struct FloatingOriginHelper
     [[nodiscard]] bool NeedsRebase(const UniversePos& cameraPos) const noexcept
     {
         const XMFLOAT3 rel = RelativeVec3(origin, cameraPos);
-        const float    limit = static_cast<float>(kSectorSize);
+        const float    limit = static_cast<float>(SECTOR_SIZE);
         return std::abs(rel.x) >= limit ||
                std::abs(rel.y) >= limit ||
                std::abs(rel.z) >= limit;

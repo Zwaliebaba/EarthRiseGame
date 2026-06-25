@@ -51,12 +51,12 @@ inline void PickBox(std::span<const ScreenPoint> pts, float x0, float y0, float 
 }
 
 // A left-drag becomes a box-select once it exceeds this; below it, it's a click.
-inline constexpr float kDragThresholdPx = 6.0f;
+inline constexpr float DRAG_THRESHOLD_PX = 6.0f;
 
 [[nodiscard]] inline bool IsDrag(float x0, float y0, float x1, float y1) noexcept
 {
     const float dx = x1 - x0, dy = y1 - y0;
-    return (dx * dx + dy * dy) > kDragThresholdPx * kDragThresholdPx;
+    return (dx * dx + dy * dy) > DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX;
 }
 
 } // namespace Neuron::Client

@@ -126,13 +126,13 @@ public:
     }
 
     // Stage the full states a snapshot for 'tick' carried, so acking 'tick' makes
-    // them the new base. Bounded to the most recent kMaxPending unacked ticks (older
+    // them the new base. Bounded to the most recent MAX_PENDING unacked ticks (older
     // lost snapshots re-delta from the acked base anyway).
     void RecordSent(uint32_t tick, std::vector<SnapshotEntity> sent)
     {
         if (sent.empty()) return;
         m_pending[tick] = std::move(sent);
-        while (m_pending.size() > kMaxPending) m_pending.erase(m_pending.begin());
+        while (m_pending.size() > MAX_PENDING) m_pending.erase(m_pending.begin());
     }
 
     // Advance the known base to 'tick': fold every staged snapshot ≤ tick into the
@@ -160,7 +160,7 @@ public:
     }
 
 private:
-    static constexpr size_t kMaxPending = 64;
+    static constexpr size_t MAX_PENDING = 64;
     std::unordered_map<uint32_t, SnapshotEntity>      m_known;   // netId → last-acked state
     std::map<uint32_t, std::vector<SnapshotEntity>>   m_pending; // tick → sent states
 };

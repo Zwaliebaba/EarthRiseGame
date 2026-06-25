@@ -72,14 +72,14 @@ bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
     {
         D3D12_QUERY_HEAP_DESC qhd{};
         qhd.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
-        qhd.Count = kFrameCount * 2; // begin + end per in-flight frame
+        qhd.Count = FRAME_COUNT * 2; // begin + end per in-flight frame
         if (SUCCEEDED(m_device->CreateQueryHeap(&qhd, IID_PPV_ARGS(m_tsHeap.put()))))
         {
             D3D12_HEAP_PROPERTIES hpReadback{};
             hpReadback.Type = D3D12_HEAP_TYPE_READBACK;
             D3D12_RESOURCE_DESC rb{};
             rb.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-            rb.Width = static_cast<UINT64>(kFrameCount) * 2 * sizeof(UINT64);
+            rb.Width = static_cast<UINT64>(FRAME_COUNT) * 2 * sizeof(UINT64);
             rb.Height = rb.DepthOrArraySize = rb.MipLevels = 1;
             rb.SampleDesc.Count = 1;
             rb.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
@@ -88,7 +88,7 @@ bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
                     IID_PPV_ARGS(m_tsReadback.put()))) &&
                 SUCCEEDED(m_tsReadback->Map(0, nullptr, reinterpret_cast<void**>(&m_tsMapped))))
             {
-                for (UINT i = 0; i < kFrameCount * 2; ++i) m_tsMapped[i] = 0; // avoid first-frame garbage
+                for (UINT i = 0; i < FRAME_COUNT * 2; ++i) m_tsMapped[i] = 0; // avoid first-frame garbage
                 m_tsOk = true;
             }
         }
@@ -103,7 +103,7 @@ bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
     scDesc.Format      = DXGI_FORMAT_B8G8R8A8_UNORM;
     scDesc.SampleDesc  = { 1, 0 };
     scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    scDesc.BufferCount = kFrameCount;
+    scDesc.BufferCount = FRAME_COUNT;
     scDesc.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     scDesc.AlphaMode   = DXGI_ALPHA_MODE_IGNORE;
     scDesc.Scaling     = DXGI_SCALING_NONE;
@@ -117,7 +117,7 @@ bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
     // Descriptor heaps
     // -----------------------------------------------------------------------
     D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
-    rtvDesc.NumDescriptors = kFrameCount;
+    rtvDesc.NumDescriptors = FRAME_COUNT;
     rtvDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     winrt::check_hresult(m_device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(m_rtvHeap.put())));
     m_rtvDescSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -130,7 +130,7 @@ bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
     // -----------------------------------------------------------------------
     // Per-frame command allocators + single command list
     // -----------------------------------------------------------------------
-    for (UINT i = 0; i < kFrameCount; ++i)
+    for (UINT i = 0; i < FRAME_COUNT; ++i)
         winrt::check_hresult(m_device->CreateCommandAllocator(
             D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(m_cmdAllocators[i].put())));
 
@@ -161,7 +161,7 @@ void DeviceResources::CreateRenderTargetViews()
 {
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle =
         m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
-    for (UINT i = 0; i < kFrameCount; ++i) {
+    for (UINT i = 0; i < FRAME_COUNT; ++i) {
         winrt::check_hresult(m_swapChain->GetBuffer(i, IID_PPV_ARGS(m_renderTargets[i].put())));
         m_device->CreateRenderTargetView(m_renderTargets[i].get(), nullptr, rtvHandle);
         rtvHandle.ptr += m_rtvDescSize;
@@ -242,8 +242,8 @@ void DeviceResources::BeginFrame()
     // Clear render target and depth.
     const D3D12_CPU_DESCRIPTOR_HANDLE rtv = CurrentRtv();
     const D3D12_CPU_DESCRIPTOR_HANDLE dsv = m_dsvHeap->GetCPUDescriptorHandleForHeapStart();
-    constexpr float kSkyColor[] = { 0.018f, 0.014f, 0.013f, 1.0f }; // near-black warm void
-    m_cmdList->ClearRenderTargetView(rtv, kSkyColor, 0, nullptr);
+    constexpr float SKY_COLOR[] = { 0.018f, 0.014f, 0.013f, 1.0f }; // near-black warm void
+    m_cmdList->ClearRenderTargetView(rtv, SKY_COLOR, 0, nullptr);
     m_cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
     m_cmdList->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
@@ -302,7 +302,7 @@ void DeviceResources::Resize(UINT width, UINT height)
     for (auto& rt : m_renderTargets) rt = nullptr;
     m_depthStencil = nullptr;
     winrt::check_hresult(m_swapChain->ResizeBuffers(
-        kFrameCount, width, height, DXGI_FORMAT_B8G8R8A8_UNORM, 0));
+        FRAME_COUNT, width, height, DXGI_FORMAT_B8G8R8A8_UNORM, 0));
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
     CreateRenderTargetViews();
     CreateDepthStencil();

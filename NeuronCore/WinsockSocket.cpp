@@ -127,23 +127,23 @@ WinsockSocket::~WinsockSocket()
 }
 
 WinsockSocket::WinsockSocket(WinsockSocket&& other) noexcept
-    : sock_(other.sock_), localPort_(other.localPort_), isV6_(other.isV6_)
+    : m_sock(other.m_sock), m_localPort(other.m_localPort), m_isV6(other.m_isV6)
 {
-    other.sock_      = kInvalidSocket;
-    other.localPort_ = 0;
-    other.isV6_      = false;
+    other.m_sock      = INVALID_SOCKET_SENTINEL;
+    other.m_localPort = 0;
+    other.m_isV6      = false;
 }
 
 WinsockSocket& WinsockSocket::operator=(WinsockSocket&& other) noexcept
 {
     if (this != &other) {
         Close();
-        sock_      = other.sock_;
-        localPort_ = other.localPort_;
-        isV6_      = other.isV6_;
-        other.sock_      = kInvalidSocket;
-        other.localPort_ = 0;
-        other.isV6_      = false;
+        m_sock      = other.m_sock;
+        m_localPort = other.m_localPort;
+        m_isV6      = other.m_isV6;
+        other.m_sock      = INVALID_SOCKET_SENTINEL;
+        other.m_localPort = 0;
+        other.m_isV6      = false;
     }
     return *this;
 }
@@ -211,34 +211,34 @@ bool WinsockSocket::Open(uint16_t localPort)
             actualPort = ntohs(reinterpret_cast<sockaddr_in*>(&bound)->sin_port);
     }
 
-    sock_      = static_cast<uintptr_t>(s);
-    localPort_ = actualPort;
-    isV6_      = v6;
+    m_sock      = static_cast<uintptr_t>(s);
+    m_localPort = actualPort;
+    m_isV6      = v6;
     return true;
 }
 
 void WinsockSocket::Close()
 {
-    if (sock_ != kInvalidSocket) {
-        ::closesocket(ToSocket(sock_));
-        sock_ = kInvalidSocket;
+    if (m_sock != INVALID_SOCKET_SENTINEL) {
+        ::closesocket(ToSocket(m_sock));
+        m_sock = INVALID_SOCKET_SENTINEL;
     }
-    localPort_ = 0;
-    isV6_      = false;
+    m_localPort = 0;
+    m_isV6      = false;
 }
 
 int WinsockSocket::SendTo(const Endpoint& to, std::span<const uint8_t> data)
 {
-    if (sock_ == kInvalidSocket)
+    if (m_sock == INVALID_SOCKET_SENTINEL)
         return -1;
 
     sockaddr_storage dst{};
     int dstLen = 0;
-    if (!EndpointToSockaddr(to, /*preferV6=*/isV6_, dst, dstLen))
+    if (!EndpointToSockaddr(to, /*preferV6=*/m_isV6, dst, dstLen))
         return -1; // unparseable destination address
 
     const int n = ::sendto(
-        ToSocket(sock_),
+        ToSocket(m_sock),
         reinterpret_cast<const char*>(data.data()),
         static_cast<int>(data.size()),
         0,
@@ -256,14 +256,14 @@ int WinsockSocket::SendTo(const Endpoint& to, std::span<const uint8_t> data)
 
 int WinsockSocket::RecvFrom(Endpoint& from, std::span<uint8_t> buffer)
 {
-    if (sock_ == kInvalidSocket)
+    if (m_sock == INVALID_SOCKET_SENTINEL)
         return -1;
 
     sockaddr_storage src{};
     int srcLen = sizeof(src);
 
     const int n = ::recvfrom(
-        ToSocket(sock_),
+        ToSocket(m_sock),
         reinterpret_cast<char*>(buffer.data()),
         static_cast<int>(buffer.size()),
         0,
@@ -291,7 +291,7 @@ int WinsockSocket::RecvFrom(Endpoint& from, std::span<uint8_t> buffer)
 
 uint16_t WinsockSocket::LocalPort() const
 {
-    return localPort_;
+    return m_localPort;
 }
 
 } // namespace Neuron::Net

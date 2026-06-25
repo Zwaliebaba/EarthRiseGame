@@ -30,23 +30,23 @@ namespace Neuron::Net
 // Protocol identity / versioning (§8.5 step 2 — version gate)
 // ---------------------------------------------------------------------------
 // High 16 bits: fixed magic ('ER'). Low 16 bits: protocol version.
-inline constexpr uint16_t kProtocolMagic   = 0x4552; // 'E','R'
-inline constexpr uint16_t kProtocolVersion = 1;
-inline constexpr uint32_t kProtocolId =
-    (static_cast<uint32_t>(kProtocolMagic) << 16) | kProtocolVersion;
+inline constexpr uint16_t PROTOCOL_MAGIC   = 0x4552; // 'E','R'
+inline constexpr uint16_t PROTOCOL_VERSION = 1;
+inline constexpr uint32_t PROTOCOL_ID =
+    (static_cast<uint32_t>(PROTOCOL_MAGIC) << 16) | PROTOCOL_VERSION;
 
 [[nodiscard]] inline bool IsProtocolCompatible(uint32_t protocolId) noexcept
 {
-    return protocolId == kProtocolId;
+    return protocolId == PROTOCOL_ID;
 }
 
 // ---------------------------------------------------------------------------
 // Transport limits
 // ---------------------------------------------------------------------------
-inline constexpr uint16_t kMaxPayloadBytes  = 1200; // safe UDP MTU payload (App. B)
-inline constexpr uint16_t kMaxDatagramBytes = 1280; // header + payload + AEAD tag
-inline constexpr uint16_t kAeadTagBytes     = 16;   // AES-GCM tag
-inline constexpr uint16_t kAeadNonceBytes   = 12;   // GCM nonce (dir-bit ‖ counter)
+inline constexpr uint16_t MAX_PAYLOAD_BYTES  = 1200; // safe UDP MTU payload (App. B)
+inline constexpr uint16_t MAX_DATAGRAM_BYTES = 1280; // header + payload + AEAD tag
+inline constexpr uint16_t AEAD_TAG_BYTES     = 16;   // AES-GCM tag
+inline constexpr uint16_t AEAD_NONCE_BYTES   = 12;   // GCM nonce (dir-bit ‖ counter)
 
 // ---------------------------------------------------------------------------
 // Channels (§8.2)
@@ -59,7 +59,7 @@ enum class Channel : uint8_t
     Count
     // No Bulk channel: the universe is never shipped as one large artifact (§8.4).
 };
-inline constexpr uint8_t kChannelCount = static_cast<uint8_t>(Channel::Count);
+inline constexpr uint8_t CHANNEL_COUNT = static_cast<uint8_t>(Channel::Count);
 
 // ---------------------------------------------------------------------------
 // Message types (payload-level; §8.5 connection sequence + gameplay)
@@ -97,12 +97,12 @@ enum class MsgType : uint8_t
 // type — see ServerHost's header note). Both ServerHost (server) and
 // ClientConnection (client) reference these so the wire format can't drift.
 //   request  (client → server): [opcode u8][u16 userLen LE][user][u16 passLen LE][pass]
-//   result   (server → client): [kAuthOpcodeResult][AuthResult u8][netId u32 LE][tokenLo u64 LE]
+//   result   (server → client): [AUTH_OPCODE_RESULT][AuthResult u8][netId u32 LE][tokenLo u64 LE]
 enum AuthOpcode : uint8_t
 {
-    kAuthOpcodeRegister = 0xA0, // register a new account, then auto-login
-    kAuthOpcodeLogin    = 0xA1, // login to an existing account
-    kAuthOpcodeResult   = 0xA2, // server → client auth result
+    AUTH_OPCODE_REGISTER = 0xA0, // register a new account, then auto-login
+    AUTH_OPCODE_LOGIN    = 0xA1, // login to an existing account
+    AUTH_OPCODE_RESULT   = 0xA2, // server → client auth result
 };
 
 // Wire values of Persist::AuthResult the client needs to branch on. Kept in sync
@@ -110,8 +110,8 @@ enum AuthOpcode : uint8_t
 // layer, so the two on-the-wire codes the client reacts to are mirrored here).
 enum AuthResultWire : uint8_t
 {
-    kAuthResultOk                 = 0, // success → bound to a base, enter snapshot loop
-    kAuthResultInvalidCredentials = 2, // no such account / wrong password (also "doesn't exist yet")
+    AUTH_RESULT_OK                 = 0, // success → bound to a base, enter snapshot loop
+    AUTH_RESULT_INVALID_CREDENTIALS = 2, // no such account / wrong password (also "doesn't exist yet")
 };
 
 // ---------------------------------------------------------------------------
@@ -119,11 +119,11 @@ enum AuthResultWire : uint8_t
 // ---------------------------------------------------------------------------
 struct PacketHeader
 {
-    uint32_t protocolId{ kProtocolId };
+    uint32_t protocolId{ PROTOCOL_ID };
     uint64_t connectionToken{ 0 };
     uint64_t packetNumber{ 0 };
 
-    static constexpr size_t kWireSize = sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint64_t); // 20
+    static constexpr size_t WIRE_SIZE = sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint64_t); // 20
 };
 
 // Per-message framing within the encrypted payload.

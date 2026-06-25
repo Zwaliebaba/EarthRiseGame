@@ -34,7 +34,7 @@ namespace Neuron::Sim
 enum class SecurityTier : uint8_t { High = 0, Low = 1, Null = 2 };
 enum class BeaconKind   : uint8_t { Public = 0, Claimable = 1 };
 enum class ResourceType : uint8_t { Ore = 0, Ice = 1, Gas = 2 };
-inline constexpr uint8_t kResourceTypeCount = 3;
+inline constexpr uint8_t RESOURCE_TYPE_COUNT = 3;
 
 [[nodiscard]] inline std::string_view ToString(SecurityTier t) noexcept
 {

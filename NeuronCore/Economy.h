@@ -6,7 +6,7 @@
 
 #include "Components.h"
 #include "Navigation.h"   // UniverseDistance
-#include "UniverseData.h" // EconomyTuning, ResourceType, kResourceTypeCount
+#include "UniverseData.h" // EconomyTuning, ResourceType, RESOURCE_TYPE_COUNT
 #include "UniversePos.h"
 
 #include <algorithm>
@@ -15,14 +15,14 @@
 namespace Neuron::Sim
 {
 
-static_assert(kResourceSlots == kResourceTypeCount, "Cargo/Storage slots must match ResourceType");
+static_assert(RESOURCE_SLOTS == RESOURCE_TYPE_COUNT, "Cargo/Storage slots must match ResourceType");
 
 // --- cargo / storage helpers -----------------------------------------------
 
-[[nodiscard]] inline float SumSlots(const float (&a)[kResourceSlots]) noexcept
+[[nodiscard]] inline float SumSlots(const float (&a)[RESOURCE_SLOTS]) noexcept
 {
     float t = 0.0f;
-    for (int i = 0; i < kResourceSlots; ++i) t += a[i];
+    for (int i = 0; i < RESOURCE_SLOTS; ++i) t += a[i];
     return t;
 }
 [[nodiscard]] inline float CargoFree(const Cargo& c) noexcept     { const float f = c.capacity - SumSlots(c.amount); return f > 0.0f ? f : 0.0f; }
@@ -34,7 +34,7 @@ static_assert(kResourceSlots == kResourceTypeCount, "Cargo/Storage slots must ma
 // node's remaining yield and the cargo's free space. Returns the amount moved.
 inline float HarvestStep(ResourceNodeTag& node, Cargo& cargo, float rate, float dt) noexcept
 {
-    const int slot = node.type < kResourceSlots ? node.type : 0;
+    const int slot = node.type < RESOURCE_SLOTS ? node.type : 0;
     float want = rate * dt;
     want = std::min(want, node.remaining);
     want = std::min(want, CargoFree(cargo));
@@ -49,7 +49,7 @@ inline float HarvestStep(ResourceNodeTag& node, Cargo& cargo, float rate, float 
 inline float DepositAll(Cargo& cargo, Storage& storage) noexcept
 {
     float moved = 0.0f;
-    for (int i = 0; i < kResourceSlots; ++i) {
+    for (int i = 0; i < RESOURCE_SLOTS; ++i) {
         const float room = StorageFree(storage);
         if (room <= 0.0f) break;
         const float take = std::min(cargo.amount[i], room);

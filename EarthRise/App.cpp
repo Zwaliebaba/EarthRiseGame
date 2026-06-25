@@ -75,22 +75,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
-static constexpr uint16_t kServerPort = 7777;
-static constexpr float kInterpAlpha = 0.0f; // M1b: snap-on-ack (alpha unused)
+static constexpr uint16_t SERVER_PORT = 7777;
+static constexpr float INTERP_ALPHA = 0.0f; // M1b: snap-on-ack (alpha unused)
 
 // How long to wait for the very first connection before telling the player the server
 // can't be reached (§8.5 handshake is sub-second on a live server; this is the "server
 // is down / wrong address / loopback not exempt" budget). After this the client keeps
 // retrying in the background — the notice is informational, not a hard stop.
-static constexpr long long kConnectTimeoutMs = 8000;
+static constexpr long long CONNECT_TIMEOUT_MS = 8000;
 
 #ifdef _DEBUG
 // The server's SEPARATE diagnostic status port (must match server.statusPort in the
 // ERServer config). Debug-only; the F3 overlay polls this UDP port for the read-only
 // server status. 0 in the server config disables it (then the overlay stays empty).
-static constexpr uint16_t kStatusPort = 7778;
+static constexpr uint16_t STATUS_PORT = 7778;
 // How many frames between status queries (~0.5 s at 60 Hz) — the port is low-traffic.
-static constexpr int kStatusQueryIntervalFrames = 30;
+static constexpr int STATUS_QUERY_INTERVAL_FRAMES = 30;
 #endif
 
 // M5 real-auth credentials (§14). The server (server.devAuthStub = false) only spawns
@@ -98,8 +98,8 @@ static constexpr int kStatusQueryIntervalFrames = 30;
 // authenticate. These dev defaults auto-register on first run and log in thereafter.
 // TODO(M6 UX): replace with a login/registration screen that collects these from the
 // player (SessionImpl::SetCredentials + LastAuthResult() already expose the seam).
-static constexpr const char* kDevAuthUser     = "player1";
-static constexpr const char* kDevAuthPassword = "player1-devpass";
+static constexpr const char* DEV_AUTH_USER     = "player1";
+static constexpr const char* DEV_AUTH_PASSWORD = "player1-devpass";
 
 // Read a file packaged with the app (relative to the install location) into a
 // byte buffer. Read-only access to the package folder is permitted on UWP.
@@ -165,9 +165,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   // detects the RMB-click edge; the menu state/logic lives in m_fleet, the draw in m_hud.
   bool  m_rmbReleased{false};               // one-frame RMB-up edge
   float m_rmbDownX0{0.f}, m_rmbDownY0{0.f};  // RMB press anchor (click vs orbit-drag)
-  static constexpr float kCamYawPerPx   = 0.005f;
-  static constexpr float kCamPitchPerPx = 0.005f;
-  static constexpr float kCamPanFrac    = 0.02f; // pan step as a fraction of zoom distance
+  static constexpr float CAM_YAW_PER_PX   = 0.005f;
+  static constexpr float CAM_PITCH_PER_PX = 0.005f;
+  static constexpr float CAM_PAN_FRAC    = 0.02f; // pan step as a fraction of zoom distance
 
   // ---- HUD / settings-applied state ----
   float m_fps{0.f};
@@ -214,12 +214,12 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   bool m_dialogOpen{false};
   // Per-shape bounding radius (indexed by ShapeCatalog id; 0 = not loaded / cube
   // fallback) used to normalize each mesh to a per-kind on-screen size.
-  std::array<float, Neuron::Sim::kShapeCount> m_shapeRadius{};
+  std::array<float, Neuron::Sim::SHAPE_COUNT> m_shapeRadius{};
 
   // Bounding radius of a shape (0 if unknown). Safe for any id.
   float ShapeRadius(uint16_t shapeId) const noexcept
   {
-    return (shapeId < Neuron::Sim::kShapeCount) ? m_shapeRadius[shapeId] : 0.f;
+    return (shapeId < Neuron::Sim::SHAPE_COUNT) ? m_shapeRadius[shapeId] : 0.f;
   }
 
   // Target on-screen size (metres) the mesh is normalized to, per entity kind.
@@ -270,17 +270,17 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // Real account auth (§14): bind to an account so the server spawns + replicates our
     // world. Requires the server to run real auth (server.devAuthStub = false); for a
     // dev-stub server, drop this line and pass a name to the ctor instead.
-    m_session->SetCredentials(kDevAuthUser, kDevAuthPassword);
+    m_session->SetCredentials(DEV_AUTH_USER, DEV_AUTH_PASSWORD);
 
 #ifdef _DEBUG
     // Server-status overlay (F3): its own ephemeral socket so status traffic never
     // interleaves with the game session's reliable-UDP. Points at the server's
-    // separate diagnostic port (kStatusPort); if the server has statusPort 0 the
+    // separate diagnostic port (STATUS_PORT); if the server has statusPort 0 the
     // queries simply go unanswered and the overlay shows "no data".
     m_statusSocket = std::make_unique<Neuron::Net::DatagramSocketAdapter>();
     if (m_statusSocket->Open(0))
       m_statusClient = std::make_unique<Neuron::Client::ServerStatusClient>(
-          m_statusSocket.get(), "127.0.0.1", kStatusPort);
+          m_statusSocket.get(), "127.0.0.1", STATUS_PORT);
 #endif
   }
 
@@ -306,7 +306,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // HDR target and is composited to the back buffer; otherwise we fall back to
     // rendering the scene straight to the LDR back buffer (no glow, no crash).
     m_bloom = m_post.Initialize(&m_dr);
-    const DXGI_FORMAT sceneFmt = m_bloom ? Neuron::Render::PostProcess::kHdrFormat
+    const DXGI_FORMAT sceneFmt = m_bloom ? Neuron::Render::PostProcess::HDR_FORMAT
                                          : DXGI_FORMAT_B8G8R8A8_UNORM;
     OutputDebugStringA(m_bloom ? "[EarthRise] PostProcess: HDR+bloom enabled\n"
                                : "[EarthRise] PostProcess: init failed (LDR direct path)\n");
@@ -340,7 +340,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     // Start connecting to ERServer.
     m_connectStart = std::chrono::steady_clock::now();
-    m_session->Connect("127.0.0.1", kServerPort);
+    m_session->Connect("127.0.0.1", SERVER_PORT);
 
     // Keep the back buffer matched to the window across resize / maximize.
     window.SizeChanged([this](Windows::UI::Core::CoreWindow const&,
@@ -407,7 +407,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     {
       const float dx = m_ptrX - m_prevPtrX;
       const float dy = m_ptrY - m_prevPtrY;
-      m_camera.Rotate(dx * kCamYawPerPx, -dy * kCamPitchPerPx);
+      m_camera.Rotate(dx * CAM_YAW_PER_PX, -dy * CAM_PITCH_PER_PX);
     }
     m_prevPtrX = m_ptrX;
     m_prevPtrY = m_ptrY;
@@ -424,7 +424,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       using VK = Windows::System::VirtualKey;
       using KS = Windows::UI::Core::CoreVirtualKeyStates;
       auto down = [&](VK k) { return (m_window.GetKeyState(k) & KS::Down) == KS::Down; };
-      const float step = m_camera.Distance() * kCamPanFrac;
+      const float step = m_camera.Distance() * CAM_PAN_FRAC;
       float r = 0.0f, f = 0.0f;
       if (down(VK::Left))  r -= step;
       if (down(VK::Right)) r += step;
@@ -595,7 +595,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const auto t0 = std::chrono::steady_clock::now();
     uint32_t loaded = 0, textured = 0, failed = 0;
 
-    for (const auto& def : Neuron::Sim::kShapes)
+    for (const auto& def : Neuron::Sim::SHAPES)
     {
       // Widen the (ASCII) package-relative paths for the file APIs.
       const std::wstring cmoW(def.cmoPath.begin(), def.cmoPath.end());
@@ -629,7 +629,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     char buf[160];
     std::snprintf(buf, sizeof(buf),
                   "[EarthRise] ShapeCatalog: %u/%u meshes loaded (%u textured, %u failed) in %lld ms\n",
-                  loaded, static_cast<unsigned>(Neuron::Sim::kShapeCount), textured, failed, ms);
+                  loaded, static_cast<unsigned>(Neuron::Sim::SHAPE_COUNT), textured, failed, ms);
     OutputDebugStringA(buf);
   }
 
@@ -681,7 +681,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     if (m_session && m_session->GetState() != Neuron::Client::SessionState::Connected)
     {
       m_connectStart = std::chrono::steady_clock::now();
-      try { m_session->Connect("127.0.0.1", kServerPort); } catch (...) {}
+      try { m_session->Connect("127.0.0.1", SERVER_PORT); } catch (...) {}
     }
   }
 
@@ -712,7 +712,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       if (m_showServerStatus && --m_statusReqCountdown <= 0)
       {
         m_statusClient->RequestStatus();
-        m_statusReqCountdown = kStatusQueryIntervalFrames;
+        m_statusReqCountdown = STATUS_QUERY_INTERVAL_FRAMES;
       }
     }
 #endif
@@ -738,7 +738,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       const long long waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                      std::chrono::steady_clock::now() - m_connectStart)
                                      .count();
-      if (waitedMs >= kConnectTimeoutMs)
+      if (waitedMs >= CONNECT_TIMEOUT_MS)
       {
         m_serverUnreachableNotified = true;
         ShowServerUnreachable();
@@ -874,10 +874,10 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     // Gather scene entities from the interp buffer.
     const Neuron::Client::ReplicaSet& rs = m_interp.curr;
-    Neuron::Render::SceneEntity entities[Neuron::Client::ReplicaSet::kMaxEntities];
+    Neuron::Render::SceneEntity entities[Neuron::Client::ReplicaSet::MAX_ENTITIES];
     UINT entCount = 0;
 
-    for (uint32_t i = 0; i < rs.count && entCount < Neuron::Render::SceneRenderer::kMaxEntities; ++i)
+    for (uint32_t i = 0; i < rs.count && entCount < Neuron::Render::SceneRenderer::MAX_ENTITIES; ++i)
     {
       const auto& re = rs.entities[i];
       if (!re.valid)
@@ -906,7 +906,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // Per-entity emitter glow (engine/structure auras) from the scene list, then
     // advance the particle field. Drawn in the scene pass below.
     {
-      Neuron::Render::ParticleRenderer::EmitterDesc ems[Neuron::Render::SceneRenderer::kMaxEntities];
+      Neuron::Render::ParticleRenderer::EmitterDesc ems[Neuron::Render::SceneRenderer::MAX_ENTITIES];
       int emCount = 0;
       for (UINT i = 0; i < entCount; ++i)
       {
@@ -1068,10 +1068,10 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const float pad   = 10.f * s;
 
     // Parsed status lines, or a single hint line if no reply has arrived yet.
-    static const std::vector<std::string> kWaiting{
+    static const std::vector<std::string> WAITING{
         "SERVER STATUS", "(no data - is server.statusPort set?)" };
     const std::vector<std::string>& lines =
-        (m_statusClient && m_statusClient->Valid()) ? m_statusClient->Lines() : kWaiting;
+        (m_statusClient && m_statusClient->Valid()) ? m_statusClient->Lines() : WAITING;
 
     // Size the panel from the widest line.
     float maxW = 0.f;

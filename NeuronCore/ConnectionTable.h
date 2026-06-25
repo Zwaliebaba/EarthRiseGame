@@ -30,8 +30,8 @@ namespace Neuron::Net
 //   bytes 1..4        : protocol_id  u32   (clear, AEAD AAD)
 //   bytes 5..12       : connection_token u64 (clear, AEAD AAD)   ← what we route on
 //   bytes 13..20      : packet_number u64
-inline constexpr uint8_t kDatagramKindEncrypted = 0x01;
-inline constexpr size_t  kTokenByteOffset       = 1 + sizeof(uint32_t); // kind + protocol_id
+inline constexpr uint8_t DATAGRAM_KIND_ENCRYPTED = 0x01;
+inline constexpr size_t  TOKEN_BYTE_OFFSET       = 1 + sizeof(uint32_t); // kind + protocol_id
 
 // Peek the 64-bit connection token out of an *encrypted* datagram's clear header
 // (App. A) without decrypting — the fast routing key for ConnectionTable::Find. The
@@ -41,11 +41,11 @@ inline constexpr size_t  kTokenByteOffset       = 1 + sizeof(uint32_t); // kind 
 // or a runt too short to contain the token. Little-endian, matching PacketCodec.h.
 [[nodiscard]] inline std::optional<uint64_t> PeekConnectionToken(std::span<const uint8_t> dg) noexcept
 {
-    if (dg.empty() || dg[0] != kDatagramKindEncrypted) return std::nullopt;
-    if (dg.size() < kTokenByteOffset + sizeof(uint64_t)) return std::nullopt;
+    if (dg.empty() || dg[0] != DATAGRAM_KIND_ENCRYPTED) return std::nullopt;
+    if (dg.size() < TOKEN_BYTE_OFFSET + sizeof(uint64_t)) return std::nullopt;
     uint64_t token = 0;
     for (size_t i = 0; i < sizeof(uint64_t); ++i)
-        token |= static_cast<uint64_t>(dg[kTokenByteOffset + i]) << (8 * i);
+        token |= static_cast<uint64_t>(dg[TOKEN_BYTE_OFFSET + i]) << (8 * i);
     return token;
 }
 

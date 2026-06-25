@@ -156,18 +156,18 @@ public:
 private:
     static const Value& nullValue() noexcept
     {
-        static const Value kNull{};
-        return kNull;
+        static const Value NULL_VALUE{};
+        return NULL_VALUE;
     }
     static const std::string& emptyString() noexcept
     {
-        static const std::string kEmpty{};
-        return kEmpty;
+        static const std::string EMPTY{};
+        return EMPTY;
     }
     static const std::vector<Value>& emptyArray() noexcept
     {
-        static const std::vector<Value> kEmpty{};
-        return kEmpty;
+        static const std::vector<Value> EMPTY{};
+        return EMPTY;
     }
 
     Type        m_type{ Type::Null };

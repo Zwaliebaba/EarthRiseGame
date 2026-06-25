@@ -73,10 +73,10 @@ namespace Neuron::Render
                 float rightX, float rightY, float rightZ,
                 float upX, float upY, float upZ);
 
-    static constexpr UINT kFrameCount = DeviceResources::kFrameCount;
-    static constexpr UINT kMaxParticles = 1500;      // ambient dust field
-    static constexpr UINT kMaxEmitParticles = 1024;  // emitter-spawned glow
-    static constexpr UINT kMaxVerts = (kMaxParticles + kMaxEmitParticles) * 6;
+    static constexpr UINT FRAME_COUNT = DeviceResources::FRAME_COUNT;
+    static constexpr UINT MAX_PARTICLES = 1500;      // ambient dust field
+    static constexpr UINT MAX_EMIT_PARTICLES = 1024;  // emitter-spawned glow
+    static constexpr UINT MAX_VERTS = (MAX_PARTICLES + MAX_EMIT_PARTICLES) * 6;
 
   private:
     struct Particle
@@ -104,8 +104,8 @@ namespace Neuron::Render
     TextureGpu                          m_tex;
 
     // One CPU-mapped vertex buffer per in-flight frame (avoid GPU races).
-    std::array<winrt::com_ptr<ID3D12Resource>, kFrameCount> m_vb;
-    std::array<Vertex*, kFrameCount>                        m_vbPtr{};
+    std::array<winrt::com_ptr<ID3D12Resource>, FRAME_COUNT> m_vb;
+    std::array<Vertex*, FRAME_COUNT>                        m_vbPtr{};
 
     std::vector<Particle> m_particles;
     float m_fx{ 0.f }, m_fy{ 0.f }, m_fz{ 0.f }; // field centre (camera focus)
@@ -116,6 +116,6 @@ namespace Neuron::Render
     uint32_t                m_rng{ 0x9e3779b9u };
     float                   m_density{ 1.f }; // ambient-field draw fraction (settings)
 
-    static constexpr float kFieldHalf = 600.f; // field box half-extent (m)
+    static constexpr float FIELD_HALF = 600.f; // field box half-extent (m)
   };
 } // namespace Neuron::Render

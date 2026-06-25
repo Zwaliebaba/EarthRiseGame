@@ -213,11 +213,11 @@ public:
         m_loginName   = std::move(username);
         m_password    = std::move(password);
         m_realAuth    = true;
-        m_authOpcode  = kAuthOpcodeLogin; // first attempt: login; fall back to register
+        m_authOpcode  = AUTH_OPCODE_LOGIN; // first attempt: login; fall back to register
         m_triedRegister = false;
     }
 
-    // Result of the last completed auth exchange (kAuthResult* wire codes); 0xFF until
+    // Result of the last completed auth exchange (AUTH_RESULT* wire codes); 0xFF until
     // the server replies. A login screen reads this to show "wrong password", etc.
     [[nodiscard]] uint8_t LastAuthResult() const noexcept { return m_lastAuthResult; }
 
@@ -262,9 +262,9 @@ private:
     void HandleAppMessage(const DecodedMessage& m, std::vector<AppMessage>& appOut,
                           std::vector<std::vector<uint8_t>>& sendOut)
     {
-        // M5 real-auth result: a Command frame opening with kAuthOpcodeResult, shape
+        // M5 real-auth result: a Command frame opening with AUTH_OPCODE_RESULT, shape
         // [opcode][AuthResult u8][netId u32 LE][tokenLo u64 LE] (ServerHost::SendAuthResult).
-        if (m.type == MsgType::Command && !m.body.empty() && m.body[0] == kAuthOpcodeResult) {
+        if (m.type == MsgType::Command && !m.body.empty() && m.body[0] == AUTH_OPCODE_RESULT) {
             if (m.body.size() < 1 + 1 + 4 + 8) return; // malformed — ignore
             // Auth (re)sends fire each tick until we connect, so several credential frames
             // can be in flight and the server answers each one. Only act while the auth is
@@ -272,7 +272,7 @@ private:
             if (m_state != ConnState::Authenticating) return;
             const uint8_t res = m.body[1];
             m_lastAuthResult = res;
-            if (res == kAuthResultOk) {
+            if (res == AUTH_RESULT_OK) {
                 uint32_t netId = 0;
                 for (int i = 0; i < 4; ++i) netId |= static_cast<uint32_t>(m.body[2 + i]) << (i * 8);
                 uint64_t tokenLo = 0;
@@ -280,13 +280,13 @@ private:
                 m_playerNetId  = netId;
                 m_sessionToken = tokenLo;
                 m_state        = ConnState::Connected;
-            } else if (res == kAuthResultInvalidCredentials && !m_triedRegister
-                       && m_authOpcode == kAuthOpcodeLogin) {
+            } else if (res == AUTH_RESULT_INVALID_CREDENTIALS && !m_triedRegister
+                       && m_authOpcode == AUTH_OPCODE_LOGIN) {
                 // Account doesn't exist yet → auto-provision: register, which auto-logs in.
                 m_triedRegister = true;
-                m_authOpcode    = kAuthOpcodeRegister;
+                m_authOpcode    = AUTH_OPCODE_REGISTER;
                 SendAuth(sendOut, m_authOpcode);
-            } else if (res == kAuthResultInvalidCredentials && m_authOpcode == kAuthOpcodeRegister) {
+            } else if (res == AUTH_RESULT_INVALID_CREDENTIALS && m_authOpcode == AUTH_OPCODE_REGISTER) {
                 // A duplicate login frame's "no such account" arriving after we already
                 // switched to register — stale, ignore (the register result is authoritative).
             } else {
@@ -336,7 +336,7 @@ private:
     std::string m_password;
     bool        m_realAuth{ false };
     bool        m_triedRegister{ false };
-    uint8_t     m_authOpcode{ kAuthOpcodeLogin };
+    uint8_t     m_authOpcode{ AUTH_OPCODE_LOGIN };
     uint8_t     m_lastAuthResult{ 0xFF };
     std::vector<uint8_t> m_lastHandshakeDatagram;
 };

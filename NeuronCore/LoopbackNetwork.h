@@ -43,25 +43,25 @@ public:
     // sends gets a reproducible sequence regardless of prior activity.
     void Configure(const Impairments& imp)
     {
-        imp_ = imp;
+        m_imp = imp;
         ResetRng();
         // Flush any packets being held for reorder so a fresh config starts clean.
-        holdBuffer_.clear();
+        m_holdBuffer.clear();
     }
 
-    const Impairments& GetImpairments() const noexcept { return imp_; }
+    const Impairments& GetImpairments() const noexcept { return m_imp; }
 
     // Register / unregister a virtual socket by its bound port.
     void Register(uint16_t port)
     {
-        queues_.try_emplace(port);
+        m_queues.try_emplace(port);
     }
     void Unregister(uint16_t port)
     {
-        queues_.erase(port);
+        m_queues.erase(port);
         // Drop any held packets destined for this port.
-        for (auto it = holdBuffer_.begin(); it != holdBuffer_.end();)
-            it = (it->dstPort == port) ? holdBuffer_.erase(it) : it + 1;
+        for (auto it = m_holdBuffer.begin(); it != m_holdBuffer.end();)
+            it = (it->dstPort == port) ? m_holdBuffer.erase(it) : it + 1;
     }
 
     // A virtual socket sends a datagram. Applies loss / duplication / reordering.
@@ -69,7 +69,7 @@ public:
               std::span<const uint8_t> data)
     {
         // 1) Loss.
-        if (imp_.lossProbability > 0.0 && NextDouble() < imp_.lossProbability)
+        if (m_imp.lossProbability > 0.0 && NextDouble() < m_imp.lossProbability)
             return; // dropped
 
         // Build the datagram (one copy; duplication will copy again).
@@ -81,17 +81,17 @@ public:
 
         // 2) Duplication: deliver an extra identical copy.
         const bool duplicate =
-            imp_.dupProbability > 0.0 && NextDouble() < imp_.dupProbability;
+            m_imp.dupProbability > 0.0 && NextDouble() < m_imp.dupProbability;
 
         // 3) Reordering: if enabled, route through the hold buffer.
-        if (imp_.reorderDepth > 0) {
-            holdBuffer_.push_back(dg);
+        if (m_imp.reorderDepth > 0) {
+            m_holdBuffer.push_back(dg);
             if (duplicate)
-                holdBuffer_.push_back(dg);
+                m_holdBuffer.push_back(dg);
 
             // When the hold buffer exceeds reorderDepth, release one packet chosen
             // pseudo-randomly from the buffer (this is what produces reordering).
-            while (holdBuffer_.size() > imp_.reorderDepth)
+            while (m_holdBuffer.size() > m_imp.reorderDepth)
                 ReleaseOneHeld();
             return;
         }
@@ -106,7 +106,7 @@ public:
     // queues. Tests call this after the send loop so nothing is left in flight.
     void Step()
     {
-        while (!holdBuffer_.empty())
+        while (!m_holdBuffer.empty())
             ReleaseOneHeld();
     }
 
@@ -118,8 +118,8 @@ public:
     };
     bool Receive(uint16_t port, Inbound& out)
     {
-        auto it = queues_.find(port);
-        if (it == queues_.end() || it->second.empty())
+        auto it = m_queues.find(port);
+        if (it == m_queues.end() || it->second.empty())
             return false;
         out.from  = std::move(it->second.front().from);
         out.bytes = std::move(it->second.front().bytes);
@@ -137,8 +137,8 @@ private:
 
     void Deliver(const Datagram& dg)
     {
-        auto it = queues_.find(dg.dstPort);
-        if (it == queues_.end())
+        auto it = m_queues.find(dg.dstPort);
+        if (it == m_queues.end())
             return; // nothing bound on that port — dropped on the floor
         Datagram copy = dg;
         it->second.push_back(std::move(copy));
@@ -148,26 +148,26 @@ private:
     // deterministic out-of-order delivery.
     void ReleaseOneHeld()
     {
-        if (holdBuffer_.empty())
+        if (m_holdBuffer.empty())
             return;
         const size_t idx =
-            static_cast<size_t>(NextU64() % holdBuffer_.size());
-        Deliver(holdBuffer_[idx]);
-        holdBuffer_.erase(holdBuffer_.begin() + static_cast<std::ptrdiff_t>(idx));
+            static_cast<size_t>(NextU64() % m_holdBuffer.size());
+        Deliver(m_holdBuffer[idx]);
+        m_holdBuffer.erase(m_holdBuffer.begin() + static_cast<std::ptrdiff_t>(idx));
     }
 
     // --- Deterministic PRNG (SplitMix64) -----------------------------------
     void ResetRng()
     {
         // Mix the 32-bit seed into a 64-bit state.
-        rngState_ = (static_cast<uint64_t>(imp_.seed) << 32) ^ 0x9E3779B97F4A7C15ull;
-        if (rngState_ == 0)
-            rngState_ = 0x9E3779B97F4A7C15ull;
+        m_rngState = (static_cast<uint64_t>(m_imp.seed) << 32) ^ 0x9E3779B97F4A7C15ull;
+        if (m_rngState == 0)
+            m_rngState = 0x9E3779B97F4A7C15ull;
     }
 
     uint64_t NextU64()
     {
-        uint64_t z = (rngState_ += 0x9E3779B97F4A7C15ull);
+        uint64_t z = (m_rngState += 0x9E3779B97F4A7C15ull);
         z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
         z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
         return z ^ (z >> 31);
@@ -180,11 +180,11 @@ private:
         return static_cast<double>(NextU64() >> 11) * (1.0 / 9007199254740992.0);
     }
 
-    Impairments imp_{};
-    uint64_t    rngState_ = 0;
+    Impairments m_imp{};
+    uint64_t    m_rngState = 0;
 
-    std::unordered_map<uint16_t, std::deque<Datagram>> queues_;
-    std::vector<Datagram>                              holdBuffer_;
+    std::unordered_map<uint16_t, std::deque<Datagram>> m_queues;
+    std::vector<Datagram>                              m_holdBuffer;
 };
 
 // ----------------------------------------------------------------------------
@@ -193,45 +193,45 @@ private:
 class LoopbackSocket final : public ISocket
 {
 public:
-    explicit LoopbackSocket(LoopbackNetwork* net) : net_(net) {}
+    explicit LoopbackSocket(LoopbackNetwork* net) : m_net(net) {}
     ~LoopbackSocket() override { Close(); }
 
     bool Open(uint16_t localPort) override
     {
-        if (!net_)
+        if (!m_net)
             return false;
         Close();
         // Port 0 = ephemeral: pick a deterministic-but-unique port.
-        port_ = (localPort != 0) ? localPort : AllocEphemeral();
-        net_->Register(port_);
-        open_ = true;
+        m_port = (localPort != 0) ? localPort : AllocEphemeral();
+        m_net->Register(m_port);
+        m_open = true;
         return true;
     }
 
     void Close() override
     {
-        if (open_ && net_)
-            net_->Unregister(port_);
-        open_ = false;
+        if (m_open && m_net)
+            m_net->Unregister(m_port);
+        m_open = false;
     }
 
     int SendTo(const Endpoint& to, std::span<const uint8_t> data) override
     {
-        if (!open_ || !net_)
+        if (!m_open || !m_net)
             return -1;
         Endpoint self;
         self.ip   = "127.0.0.1";
-        self.port = port_;
-        net_->Post(port_, self, to.port, data);
+        self.port = m_port;
+        m_net->Post(m_port, self, to.port, data);
         return static_cast<int>(data.size());
     }
 
     int RecvFrom(Endpoint& from, std::span<uint8_t> buffer) override
     {
-        if (!open_ || !net_)
+        if (!m_open || !m_net)
             return -1;
         LoopbackNetwork::Inbound in;
-        if (!net_->Receive(port_, in))
+        if (!m_net->Receive(m_port, in))
             return 0; // nothing available
         from = in.from;
         const size_t n = (in.bytes.size() < buffer.size()) ? in.bytes.size()
@@ -241,7 +241,7 @@ public:
         return static_cast<int>(n); // truncates silently if buffer too small (like UDP)
     }
 
-    [[nodiscard]] uint16_t LocalPort() const override { return port_; }
+    [[nodiscard]] uint16_t LocalPort() const override { return m_port; }
 
 private:
     static uint16_t AllocEphemeral()
@@ -253,9 +253,9 @@ private:
         return s_next++;
     }
 
-    LoopbackNetwork* net_  = nullptr;
-    uint16_t         port_ = 0;
-    bool             open_ = false;
+    LoopbackNetwork* m_net  = nullptr;
+    uint16_t         m_port = 0;
+    bool             m_open = false;
 };
 
 } // namespace Neuron::Net

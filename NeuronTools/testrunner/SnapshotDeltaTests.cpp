@@ -50,8 +50,8 @@ ER_TEST(SnapshotDelta, FirstSightRoundTripWithinQuantBound)
     ER_CHECK(got != nullptr);
 
     // Position reconstructs within one quantization step on every axis.
-    const double step = static_cast<double>(Neuron::Universe::kSectorSize) /
-                        static_cast<double>(uint64_t(1) << kPosQuantBitsPerAxis);
+    const double step = static_cast<double>(Neuron::Universe::SECTOR_SIZE) /
+                        static_cast<double>(uint64_t(1) << POS_QUANT_BITS_PER_AXIS);
     ER_CHECK(std::fabs(AbsMetres(got->pos.x, got->localOffset.x) - 1000.25) <= step);
     ER_CHECK(std::fabs(AbsMetres(got->pos.y, got->localOffset.y) - 2000.5) <= step);
     ER_CHECK(std::fabs(AbsMetres(got->pos.z, got->localOffset.z) - 3000.75) <= step);
@@ -95,7 +95,7 @@ ER_TEST(SnapshotDelta, SectorCrossingReAnchorsPosition)
 {
     const SnapshotEntity base = MakeEntity(7, { 100, 0, 0 }, { 0, 0, 0 }, 1, 0, EntityKind::Base, 1);
     SnapshotEntity cur = base;
-    cur.pos.x = Neuron::Universe::kSectorSize + 100; // crossed into the next sector on x
+    cur.pos.x = Neuron::Universe::SECTOR_SIZE + 100; // crossed into the next sector on x
     const DeltaRecord r = MakeDeltaRecord(cur, &base);
     ER_CHECK((r.mask & DeltaSector) != 0);
     ER_CHECK((r.mask & DeltaPos) != 0); // crossing forces position to be re-sent
@@ -105,10 +105,10 @@ ER_TEST(SnapshotDelta, SectorCrossingReAnchorsPosition)
     dec.Apply(EncodeDeltaSnapshot(s0));
     DeltaSnapshot s1; s1.tick = 2; s1.records.push_back(r);
     dec.Apply(EncodeDeltaSnapshot(s1));
-    const double step = static_cast<double>(Neuron::Universe::kSectorSize) /
-                        static_cast<double>(uint64_t(1) << kPosQuantBitsPerAxis);
+    const double step = static_cast<double>(Neuron::Universe::SECTOR_SIZE) /
+                        static_cast<double>(uint64_t(1) << POS_QUANT_BITS_PER_AXIS);
     ER_CHECK(std::fabs(AbsMetres(dec.Find(7)->pos.x, dec.Find(7)->localOffset.x) -
-                       static_cast<double>(Neuron::Universe::kSectorSize + 100)) <= step);
+                       static_cast<double>(Neuron::Universe::SECTOR_SIZE + 100)) <= step);
 }
 
 // --- MTU budget + spillover -------------------------------------------------
@@ -173,8 +173,8 @@ ER_TEST(SnapshotDelta, EncodesLiveServerEntityRoundTrip)
     ER_CHECK(dec.Apply(EncodeDeltaSnapshot(snap)));
     const SnapshotEntity* got = dec.Find(base);
     ER_CHECK(got != nullptr);
-    const double step = static_cast<double>(Neuron::Universe::kSectorSize) /
-                        static_cast<double>(uint64_t(1) << kPosQuantBitsPerAxis);
+    const double step = static_cast<double>(Neuron::Universe::SECTOR_SIZE) /
+                        static_cast<double>(uint64_t(1) << POS_QUANT_BITS_PER_AXIS);
     ER_CHECK(std::fabs(AbsMetres(got->pos.x, got->localOffset.x) -
                        AbsMetres(cur.pos.x, cur.localOffset.x)) <= step);
     ER_CHECK(got->shapeId == cur.shapeId);
