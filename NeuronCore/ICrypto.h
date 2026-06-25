@@ -21,19 +21,19 @@ namespace Neuron::Net
 {
 
 // Key / buffer sizes.
-inline constexpr size_t kEcPubKeyBytes  = 64; // P-256 X||Y
-inline constexpr size_t kEcSigBytes     = 64; // P-256 r||s
-inline constexpr size_t kAeadKeyBytes   = 32; // AES-256
-inline constexpr size_t kSharedSecretBytes = 32;
-inline constexpr size_t kCookieBytes    = 32; // HMAC-SHA256
-inline constexpr size_t kPwHashBytes    = 64; // PBKDF2-HMAC-SHA512
-inline constexpr size_t kPwSaltBytes    = 32;
+inline constexpr size_t EC_PUB_KEY_BYTES  = 64; // P-256 X||Y
+inline constexpr size_t EC_SIG_BYTES     = 64; // P-256 r||s
+inline constexpr size_t AEAD_KEY_BYTES   = 32; // AES-256
+inline constexpr size_t SHARED_SECRET_BYTES = 32;
+inline constexpr size_t COOKIE_BYTES    = 32; // HMAC-SHA256
+inline constexpr size_t PW_HASH_BYTES    = 64; // PBKDF2-HMAC-SHA512
+inline constexpr size_t PW_SALT_BYTES    = 32;
 
-using EcPubKey      = std::array<uint8_t, kEcPubKeyBytes>;
-using EcSignature   = std::array<uint8_t, kEcSigBytes>;
-using AeadKey       = std::array<uint8_t, kAeadKeyBytes>;
-using SharedSecret  = std::array<uint8_t, kSharedSecretBytes>;
-using Cookie        = std::array<uint8_t, kCookieBytes>;
+using EcPubKey      = std::array<uint8_t, EC_PUB_KEY_BYTES>;
+using EcSignature   = std::array<uint8_t, EC_SIG_BYTES>;
+using AeadKey       = std::array<uint8_t, AEAD_KEY_BYTES>;
+using SharedSecret  = std::array<uint8_t, SHARED_SECRET_BYTES>;
+using Cookie        = std::array<uint8_t, COOKIE_BYTES>;
 
 // An ephemeral ECDH keypair handle (opaque; implementation-defined storage).
 struct EcdhKeyPair
@@ -106,6 +106,6 @@ public:
 
 // Default rekey threshold: rekey before the 64-bit packet counter approaches
 // any risk of wrap (we rekey far earlier, by epoch, well within GCM limits).
-inline constexpr uint64_t kRekeyPacketThreshold = (1ull << 48);
+inline constexpr uint64_t REKEY_PACKET_THRESHOLD = (1ull << 48);
 
 } // namespace Neuron::Net

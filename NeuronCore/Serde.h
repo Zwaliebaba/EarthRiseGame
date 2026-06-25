@@ -12,7 +12,7 @@ namespace Neuron::Serde
 {
 
 // Protocol version — increment on any wire-format change.
-inline constexpr uint32_t kProtocolVersion = 1;
+inline constexpr uint32_t PROTOCOL_VERSION = 1;
 
 // ---------------------------------------------------------------------------
 // WriteBuffer — serialise data into a flat byte array with version header.
@@ -23,7 +23,7 @@ public:
     explicit WriteBuffer(size_t reserveBytes = 512)
         : m_writer(reserveBytes)
     {
-        m_writer.WriteUint32(kProtocolVersion);
+        m_writer.WriteUint32(PROTOCOL_VERSION);
     }
 
     void WriteUint8 (uint8_t  v) { m_writer.WriteUint8(v);  }
@@ -65,7 +65,7 @@ public:
         : m_reader(data)
     {
         const uint32_t ver = m_reader.ReadUint32();
-        if (ver != kProtocolVersion)
+        if (ver != PROTOCOL_VERSION)
             m_versionMismatch = true;
     }
 

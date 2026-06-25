@@ -1,30 +1,35 @@
 {
   "_comment": [
-    "ERServer configuration. Copy this file to 'erserver.config.json' next to the",
-    "ERServer executable (or pass --config <path>) and fill in the real values.",
-    "ERServer reads ALL of its settings from this file - no environment variables.",
-    "This file holds SECRETS (database.password, auth.serverPepper): keep the real",
-    "erserver.config.json out of source control (it is gitignored) and protect it",
-    "with filesystem permissions / a mounted secret.",
-    "Every key is optional; omitted keys fall back to the documented defaults."
+    "ERServer configuration (§20). Copy this file to 'erserver.config.json' next to",
+    "the ERServer executable (or pass --config <path>). The daemon reads ALL of its",
+    "settings from this one JSON document - nothing from the process environment.",
+    "Every key is optional; an omitted section falls back to defaults. Omitting the",
+    "'database' section (or leaving connectionString empty) runs the server sim-only,",
+    "with no persistence (auth then reports DbUnavailable).",
+    "",
+    "server.statusPort enables the OPTIONAL out-of-band diagnostic status port (§21):",
+    "a SEPARATE read-only UDP port the debug client's F3 server-status overlay polls",
+    "for live connection / object / telemetry counters. 0 (default) disables it. The",
+    "endpoint is compiled ONLY into _DEBUG server builds, so a retail build ignores",
+    "this key. It is read-only and answers only the fixed status query token, but it",
+    "is still a diagnostics channel - only enable it on a trusted operator network."
   ],
 
   "server": {
     "listenPort": 7777,
-    "devAuthStub": false
+    "devAuthStub": false,
+    "statusPort": 7778
   },
 
   "database": {
-    "_comment": "Empty connectionString => run WITHOUT persistence (sim only). The base string carries NO credentials; user/password are appended for SQL-login auth.",
-    "connectionString": "Driver={ODBC Driver 18 for SQL Server};Server=tcp:localhost,1433;Database=EarthRise;Encrypt=yes;TrustServerCertificate=yes",
+    "connectionString": "Driver={ODBC Driver 18 for SQL Server};Server=tcp:127.0.0.1,1433;Database=EarthRise;Encrypt=yes;TrustServerCertificate=yes;",
     "user": "er_app",
-    "password": "ChangeMe_Strong!1",
+    "password": "CHANGE_ME",
     "authMode": "sql"
   },
 
   "auth": {
-    "_comment": "serverPepper is applied in-process and NEVER stored in SQL. Generate a strong random value once and keep it stable.",
-    "serverPepper": "REPLACE_WITH_A_STRONG_RANDOM_BASE64_VALUE",
+    "serverPepper": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET",
     "pbkdf2Iterations": 210000,
     "maxLoginFailures": 5,
     "lockoutSeconds": 900,

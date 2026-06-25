@@ -33,8 +33,8 @@ namespace Neuron::Render::Ui
     Rect window;   // full window (title + body)
     Rect titleBar; // title strip
     Rect closeBox; // close square (top-right)
-    static constexpr int kMaxButtons = 16;
-    Rect buttons[kMaxButtons]{}; // [0..count-2] list items, [count-1] = the trailing Close
+    static constexpr int MAX_BUTTONS = 16;
+    Rect buttons[MAX_BUTTONS]{}; // [0..count-2] list items, [count-1] = the trailing Close
     int  count{ 0 };
   };
 
@@ -57,7 +57,7 @@ namespace Neuron::Render::Ui
 
     float by = gy + m.titleH + m.pad;
     int n = 0;
-    for (int i = 0; i < listCount && n < MainMenuLayout::kMaxButtons - 1; ++i)
+    for (int i = 0; i < listCount && n < MainMenuLayout::MAX_BUTTONS - 1; ++i)
     {
       L.buttons[n++] = { gx + m.pad, by, m.w - 2 * m.pad, m.btnH };
       by += m.btnH + m.gap;
@@ -90,8 +90,8 @@ namespace Neuron::Render::Ui
   struct PanelLayout
   {
     Rect window, titleBar, closeBox;
-    static constexpr int kMaxRows = 16;
-    Rect rows[kMaxRows]{}; // dropdown/label row rects (full width inside padding)
+    static constexpr int MAX_ROWS = 16;
+    Rect rows[MAX_ROWS]{}; // dropdown/label row rects (full width inside padding)
     int  rowCount{ 0 };
     bool hasFooter{ false };
     Rect footerClose{}, footerApply{};
@@ -116,7 +116,7 @@ namespace Neuron::Render::Ui
 
     float ry = gy + m.titleH + m.pad;
     int n = 0;
-    for (int i = 0; i < rowCount && n < PanelLayout::kMaxRows; ++i)
+    for (int i = 0; i < rowCount && n < PanelLayout::MAX_ROWS; ++i)
     {
       L.rows[n++] = { gx + m.pad, ry, width - 2 * m.pad, m.rowH };
       ry += m.rowH + m.gap;

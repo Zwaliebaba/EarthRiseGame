@@ -26,10 +26,10 @@ namespace Neuron::Crypto
 class Sha512
 {
 public:
-    static constexpr size_t kDigest = 64;
-    static constexpr size_t kBlock  = 128;
+    static constexpr size_t DIGEST = 64;
+    static constexpr size_t BLOCK  = 128;
 
-    [[nodiscard]] static std::array<uint8_t, kDigest> Hash(std::span<const uint8_t> msg)
+    [[nodiscard]] static std::array<uint8_t, DIGEST> Hash(std::span<const uint8_t> msg)
     {
         std::array<uint64_t, 8> h{ 0x6a09e667f3bcc908ull, 0xbb67ae8584caa73bull,
                                    0x3c6ef372fe94f82bull, 0xa54ff53a5f1d36f1ull,
@@ -40,14 +40,14 @@ public:
         const uint64_t bitLen = static_cast<uint64_t>(msg.size()) * 8ull;
         std::vector<uint8_t> data(msg.begin(), msg.end());
         data.push_back(0x80);
-        while (data.size() % kBlock != 112) data.push_back(0x00);
+        while (data.size() % BLOCK != 112) data.push_back(0x00);
         for (int i = 0; i < 8; ++i) data.push_back(0x00);          // high 64 bits of length = 0
         for (int i = 7; i >= 0; --i) data.push_back(static_cast<uint8_t>(bitLen >> (i * 8)));
 
-        for (size_t off = 0; off < data.size(); off += kBlock)
+        for (size_t off = 0; off < data.size(); off += BLOCK)
             Compress(h, data.data() + off);
 
-        std::array<uint8_t, kDigest> out{};
+        std::array<uint8_t, DIGEST> out{};
         for (int i = 0; i < 8; ++i)
             for (int b = 0; b < 8; ++b)
                 out[static_cast<size_t>(i) * 8 + b] = static_cast<uint8_t>(h[i] >> ((7 - b) * 8));
@@ -113,28 +113,28 @@ private:
 [[nodiscard]] inline std::array<uint8_t, 64>
 HmacSha512(std::span<const uint8_t> key, std::span<const uint8_t> msg)
 {
-    std::array<uint8_t, Sha512::kBlock> k0{};
-    if (key.size() > Sha512::kBlock) {
+    std::array<uint8_t, Sha512::BLOCK> k0{};
+    if (key.size() > Sha512::BLOCK) {
         const auto hk = Sha512::Hash(key);
         std::memcpy(k0.data(), hk.data(), hk.size());     // remaining bytes stay 0
     } else {
         std::memcpy(k0.data(), key.data(), key.size());
     }
 
-    std::array<uint8_t, Sha512::kBlock> ipad{}, opad{};
-    for (size_t i = 0; i < Sha512::kBlock; ++i) {
+    std::array<uint8_t, Sha512::BLOCK> ipad{}, opad{};
+    for (size_t i = 0; i < Sha512::BLOCK; ++i) {
         ipad[i] = static_cast<uint8_t>(k0[i] ^ 0x36);
         opad[i] = static_cast<uint8_t>(k0[i] ^ 0x5c);
     }
 
     std::vector<uint8_t> inner;
-    inner.reserve(Sha512::kBlock + msg.size());
+    inner.reserve(Sha512::BLOCK + msg.size());
     inner.insert(inner.end(), ipad.begin(), ipad.end());
     inner.insert(inner.end(), msg.begin(), msg.end());
     const auto innerHash = Sha512::Hash(inner);
 
     std::vector<uint8_t> outer;
-    outer.reserve(Sha512::kBlock + innerHash.size());
+    outer.reserve(Sha512::BLOCK + innerHash.size());
     outer.insert(outer.end(), opad.begin(), opad.end());
     outer.insert(outer.end(), innerHash.begin(), innerHash.end());
     return Sha512::Hash(outer);
@@ -148,7 +148,7 @@ HmacSha512(std::span<const uint8_t> key, std::span<const uint8_t> msg)
 Pbkdf2HmacSha512(std::span<const uint8_t> password, std::span<const uint8_t> salt,
                  uint32_t iterations, size_t dkLen)
 {
-    constexpr size_t hLen = Sha512::kDigest;
+    constexpr size_t hLen = Sha512::DIGEST;
     std::vector<uint8_t> dk;
     dk.reserve(((dkLen + hLen - 1) / hLen) * hLen);
 

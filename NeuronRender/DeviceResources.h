@@ -27,7 +27,7 @@ namespace Neuron::Render
 class DeviceResources
 {
 public:
-    static constexpr UINT kFrameCount = 3; // triple-buffered (frames in flight = 3, §11.1)
+    static constexpr UINT FRAME_COUNT = 3; // triple-buffered (frames in flight = 3, §11.1)
 
     bool Initialize(IUnknown* coreWindow, UINT width, UINT height);
     void Resize(UINT width, UINT height);
@@ -79,9 +79,9 @@ private:
     winrt::com_ptr<ID3D12DescriptorHeap>   m_dsvHeap;
     UINT                                   m_rtvDescSize{ 0 };
 
-    std::array<winrt::com_ptr<ID3D12Resource>,          kFrameCount> m_renderTargets;
-    std::array<winrt::com_ptr<ID3D12CommandAllocator>,  kFrameCount> m_cmdAllocators;
-    std::array<UINT64,                                  kFrameCount> m_fenceValues{};
+    std::array<winrt::com_ptr<ID3D12Resource>,          FRAME_COUNT> m_renderTargets;
+    std::array<winrt::com_ptr<ID3D12CommandAllocator>,  FRAME_COUNT> m_cmdAllocators;
+    std::array<UINT64,                                  FRAME_COUNT> m_fenceValues{};
 
     winrt::com_ptr<ID3D12GraphicsCommandList> m_cmdList;
     winrt::com_ptr<ID3D12Resource>            m_depthStencil;

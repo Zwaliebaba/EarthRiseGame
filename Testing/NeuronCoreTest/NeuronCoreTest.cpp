@@ -14,6 +14,7 @@
 #include "Interest.h"
 #include "Navigation.h"
 #include "ServerUniverse.h"
+#include "ServerStatus.h"
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
 #include "SnapshotJobs.h"
@@ -73,11 +74,11 @@ NEURON_DEFINE_COMPONENT(Neuron::Sim::HullInfo, Neuron::Sim::Slot_HullInfo);
 
 namespace
 {
-  constexpr int kOre = static_cast<int>(ResourceType::Ore);
-  constexpr int kIce = static_cast<int>(ResourceType::Ice);
+  constexpr int ORE = static_cast<int>(ResourceType::Ore);
+  constexpr int ICE = static_cast<int>(ResourceType::Ice);
 
   // Small connected graph + fast tuning for the navigation integration tests.
-  const char* kNavSrc =
+  const char* NAV_SRC =
       "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
       "beacon HUB { region = R pos = 0 0 0        links = RIM     kind = public }\n"
       "beacon RIM { region = R pos = 100000 0 0   links = HUB FAR kind = public }\n"
@@ -86,14 +87,14 @@ namespace
       "         jump_spool_base = 1  jump_cooldown = 1  beacon_range = 2000  base_fuel_max = 100 }\n";
 
   // Tiny economy for fast build/cap tests.
-  const char* kEconSrc =
+  const char* ECON_SRC =
       "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
       "economy { fleet_cap = 2  cargo_capacity = 500  storage_capacity = 2000  harvest_rate = 100\n"
       "          sensor_range_ship = 4000  sensor_range_base = 9000  build_ore = 100  build_ice = 50\n"
       "          build_seconds = 1  build_ship_type = 1 }\n";
 
   // Fast economy: small cargo, instant travel, cheap ore-only ship, quick build.
-  const char* kHarvestEcon =
+  const char* HARVEST_ECON =
       "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
       "economy { fleet_cap = 8  cargo_capacity = 200  storage_capacity = 10000  harvest_rate = 1000\n"
       "          build_ore = 300  build_ice = 0  build_seconds = 0.1  build_ship_type = 1\n"
@@ -101,7 +102,7 @@ namespace
 
   // A minimal, fully valid universe dataset (2 regions, a connected public
   // beacon chain, one resource field) for the cook/check pipeline tests.
-  const char* kGoodUniverse =
+  const char* GOOD_UNIVERSE =
       "region HOME { security = high  bounds = -16 16 -16 16 -4 4  yield_mult = 0.6 }\n"
       "region EDGE { security = low   bounds = 17 64 -16 16 -4 4   yield_mult = 1.0 }\n"
       "beacon A { region = HOME  pos = 0 0 0        links = B          kind = public }\n"
@@ -139,26 +140,26 @@ namespace NeuronCoreTest
   public:
     TEST_METHOD(CountAndSequentialIds)
     {
-      Assert::IsTrue(kShapeCount == 70u);
-      for (uint16_t i = 0; i < kShapeCount; ++i)
+      Assert::IsTrue(SHAPE_COUNT == 70u);
+      for (uint16_t i = 0; i < SHAPE_COUNT; ++i)
       {
-        Assert::IsTrue(kShapes[i].id == i);
-        const auto p = kShapes[i].cmoPath;
+        Assert::IsTrue(SHAPES[i].id == i);
+        const auto p = SHAPES[i].cmoPath;
         Assert::IsTrue(p.size() > 4 && p.substr(p.size() - 4) == ".cmo");
       }
     }
 
     TEST_METHOD(NameLookup)
     {
-      Assert::IsTrue(ShapeIdByName("Jumpgate01") != kInvalidShapeId);
-      Assert::IsTrue(ShapeIdByName("Outpost01") != kInvalidShapeId);
-      Assert::IsTrue(ShapeIdByName("HullAurora") != kInvalidShapeId);
-      Assert::IsTrue(ShapeIdByName("DoesNotExist") == kInvalidShapeId);
+      Assert::IsTrue(ShapeIdByName("Jumpgate01") != INVALID_SHAPE_ID);
+      Assert::IsTrue(ShapeIdByName("Outpost01") != INVALID_SHAPE_ID);
+      Assert::IsTrue(ShapeIdByName("HullAurora") != INVALID_SHAPE_ID);
+      Assert::IsTrue(ShapeIdByName("DoesNotExist") == INVALID_SHAPE_ID);
       // Round-trip: id -> def -> name.
       const uint16_t id = ShapeIdByName("HullAurora");
       Assert::IsTrue(ShapeById(id) != nullptr);
       Assert::IsTrue(ShapeById(id)->name == "HullAurora");
-      Assert::IsTrue(ShapeById(kInvalidShapeId) == nullptr);
+      Assert::IsTrue(ShapeById(INVALID_SHAPE_ID) == nullptr);
     }
 
     TEST_METHOD(CategoryToKind)
@@ -173,7 +174,7 @@ namespace NeuronCoreTest
     TEST_METHOD(EveryCategoryHasAtLeastOneShape)
     {
       for (uint8_t c = 0; c <= static_cast<uint8_t>(ShapeCategory::Station); ++c)
-        Assert::IsTrue(FirstShapeOfCategory(static_cast<ShapeCategory>(c)) != kInvalidShapeId);
+        Assert::IsTrue(FirstShapeOfCategory(static_cast<ShapeCategory>(c)) != INVALID_SHAPE_ID);
     }
   };
 
@@ -191,7 +192,7 @@ namespace NeuronCoreTest
       const uint16_t gate = ShapeIdByName("Jumpgate01");
       for (const auto& e : snap.entities)
       {
-        Assert::IsTrue(e.shapeId != kInvalidShapeId);
+        Assert::IsTrue(e.shapeId != INVALID_SHAPE_ID);
         if (e.shapeId == gate)
         {
           sawGate = true;
@@ -255,8 +256,8 @@ namespace NeuronCoreTest
     static double Abs(int64_t pos, float local) { return static_cast<double>(pos) + local; }
     static double Step()
     {
-      return static_cast<double>(Neuron::Universe::kSectorSize) /
-             static_cast<double>(uint64_t(1) << kPosQuantBitsPerAxis);
+      return static_cast<double>(Neuron::Universe::SECTOR_SIZE) /
+             static_cast<double>(uint64_t(1) << POS_QUANT_BITS_PER_AXIS);
     }
 
   public:
@@ -452,7 +453,7 @@ namespace NeuronCoreTest
     {
       std::vector<uint32_t> clients;
       for (int p = 0; p < players; ++p) {
-        const int64_t bx = static_cast<int64_t>(p) * Neuron::Universe::kSectorSize;
+        const int64_t bx = static_cast<int64_t>(p) * Neuron::Universe::SECTOR_SIZE;
         const uint32_t base = su.SpawnBase({ bx, 0, 0 }, { 0, 0, 0 });
         clients.push_back(base);
         for (int i = 0; i < 3; ++i) su.SpawnProp(0, { bx + 100 + 10 * i, 0, 0 });
@@ -498,11 +499,11 @@ namespace NeuronCoreTest
 
   TEST_CLASS(DilationTests)
   {
-    static constexpr double kBudget = 1.0 / 30.0;
+    static constexpr double BUDGET = 1.0 / 30.0;
     static double Settle(DilationController& c, const DilationConfig& cfg, double cost, int n)
     {
       double f = c.Factor();
-      for (int i = 0; i < n; ++i) f = c.Update(cost, kBudget, cfg);
+      for (int i = 0; i < n; ++i) f = c.Update(cost, BUDGET, cfg);
       return f;
     }
 
@@ -510,14 +511,14 @@ namespace NeuronCoreTest
     TEST_METHOD(FullSpeedWhenUnderBudget)
     {
       DilationController c; DilationConfig cfg;
-      Assert::IsTrue(Settle(c, cfg, kBudget * 0.5, 50) >= 0.999);
+      Assert::IsTrue(Settle(c, cfg, BUDGET * 0.5, 50) >= 0.999);
       Assert::IsTrue(!c.IsDilated());
     }
 
     TEST_METHOD(DilatesTowardOnsetOverLoad)
     {
       DilationController c; DilationConfig cfg;
-      const double f = Settle(c, cfg, kBudget * 3.0, 200);
+      const double f = Settle(c, cfg, BUDGET * 3.0, 200);
       Assert::IsTrue(f > 0.30 && f < 0.37); // ~ onset/load = 1/3
       Assert::IsTrue(c.IsDilated());
     }
@@ -525,16 +526,16 @@ namespace NeuronCoreTest
     TEST_METHOD(ClampsAtFloorUnderExtremeOverload)
     {
       DilationController c; DilationConfig cfg;
-      const double f = Settle(c, cfg, kBudget * 50.0, 300);
+      const double f = Settle(c, cfg, BUDGET * 50.0, 300);
       Assert::IsTrue(f >= cfg.floor - 1e-9 && f <= cfg.floor + 1e-6);
     }
 
     TEST_METHOD(RecoversToFullSpeedWhenLoadDrops)
     {
       DilationController c; DilationConfig cfg;
-      Settle(c, cfg, kBudget * 4.0, 200);
+      Settle(c, cfg, BUDGET * 4.0, 200);
       Assert::IsTrue(c.IsDilated());
-      Assert::IsTrue(Settle(c, cfg, kBudget * 0.2, 500) >= 0.999);
+      Assert::IsTrue(Settle(c, cfg, BUDGET * 0.2, 500) >= 0.999);
       Assert::IsTrue(!c.IsDilated());
     }
 
@@ -542,8 +543,8 @@ namespace NeuronCoreTest
     {
       DilationController c; DilationConfig cfg;
       for (int i = 0; i < 500; ++i) {
-        const double cost = (i % 2 == 0) ? kBudget * 8.0 : kBudget * 0.1;
-        const double f = c.Update(cost, kBudget, cfg);
+        const double cost = (i % 2 == 0) ? BUDGET * 8.0 : BUDGET * 0.1;
+        const double f = c.Update(cost, BUDGET, cfg);
         Assert::IsTrue(f >= cfg.floor - 1e-9 && f <= 1.0 + 1e-9);
       }
     }
@@ -608,7 +609,7 @@ namespace NeuronCoreTest
 
   TEST_CLASS(LoadHarnessTests)
   {
-    static constexpr size_t kSafeMtu = 1100;
+    static constexpr size_t SAFE_MTU = 1100;
 
     // Run the full per-tick pipeline until every client converges; return the tick
     // count and whether the safe-MTU budget held for every client every tick.
@@ -627,9 +628,9 @@ namespace NeuronCoreTest
       for (int t = 0; t < maxTicks && convergedAt < 0; ++t) {
         bool all = true;
         for (size_t i = 0; i < clients.size(); ++i) {
-          const DeltaSnapshot snap = su.BuildClientSnapshot(clients[i], kSafeMtu);
+          const DeltaSnapshot snap = su.BuildClientSnapshot(clients[i], SAFE_MTU);
           const auto bytes = EncodeDeltaSnapshot(snap);
-          if (bytes.size() > kSafeMtu) budgetHeld = false;
+          if (bytes.size() > SAFE_MTU) budgetHeld = false;
           if (!snap.records.empty()) {
             decoders[i].Apply(bytes);
             su.RecordClientSnapshotSent(clients[i], snap);
@@ -654,7 +655,7 @@ namespace NeuronCoreTest
     {
       std::vector<uint32_t> c;
       for (int i = 0; i < n; ++i)
-        c.push_back(su.SpawnBase({ static_cast<int64_t>(i) * Neuron::Universe::kSectorSize * 6, 0, 0 }, { 0, 0, 0 }));
+        c.push_back(su.SpawnBase({ static_cast<int64_t>(i) * Neuron::Universe::SECTOR_SIZE * 6, 0, 0 }, { 0, 0, 0 }));
       return c;
     }
 
@@ -792,7 +793,7 @@ namespace NeuronCoreTest
     {
       ServerUniverse su(false);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
-      const UniversePos dest{ int64_t(40) * Neuron::Universe::kSectorSize, 0, 0 };
+      const UniversePos dest{ int64_t(40) * Neuron::Universe::SECTOR_SIZE, 0, 0 };
       const SectorId destSec = Neuron::Universe::UniverseToSector(dest);
       Assert::IsTrue(su.BeginWarpTo(base, dest));            // R21 prefetch fires
       Assert::IsTrue(su.Interest().IsSubscribed(base, destSec)); // before arrival
@@ -816,7 +817,12 @@ namespace NeuronCoreTest
       su.Step(0.1f);
       su.Step(0.1f);
       Assert::AreEqual(v1, su.ReplVersion(base)); // idle holds its version
-      su.SetBaseVelocity(base, { 50, 0, 0 });
+      // The base relocates by a Move order now (legacy SetBaseVelocity is retired).
+      Neuron::Sim::FleetCommand mv;
+      mv.intent      = Neuron::Sim::IntentType::Move;
+      mv.units       = { base };
+      mv.targetPoint = { 1'000'000, 0, 0 };
+      su.ApplyFleetCommand(base, mv);
       su.Step(0.1f);
       Assert::IsTrue(su.ReplVersion(base) > v1);  // position changed → bump
     }
@@ -990,7 +996,7 @@ namespace NeuronCoreTest
     TEST_METHOD(LoadUniverseSpawnsBeacons)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kNavSrc);
+      LoadFrom(su, NAV_SRC);
       Assert::IsTrue(su.Universe().beacons.size() == size_t(3));
       Assert::IsTrue(su.BeaconNetId("HUB") != 0);
       Assert::IsTrue(su.BeaconNetId("RIM") != 0);
@@ -1000,7 +1006,7 @@ namespace NeuronCoreTest
     TEST_METHOD(JumpAcrossLinkedBeaconsConsumesFuelAndArrives)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kNavSrc);
+      LoadFrom(su, NAV_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 }); // sitting on HUB
       Assert::IsTrue(su.FuelOf(base)->current == 100.0f);
 
@@ -1027,7 +1033,7 @@ namespace NeuronCoreTest
     TEST_METHOD(JumpRejectedWhenNotLinked)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kNavSrc);
+      LoadFrom(su, NAV_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 }); // on HUB
       // HUB links only RIM; FAR is not reachable in one jump from HUB.
       Assert::IsTrue(su.BeginJumpTo(base, "FAR") == JumpReject::NotLinked);
@@ -1036,7 +1042,7 @@ namespace NeuronCoreTest
     TEST_METHOD(JumpRejectedWhenNotAtBeacon)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kNavSrc);
+      LoadFrom(su, NAV_SRC);
       const uint32_t base = su.SpawnBase({ 50000, 0, 0 }, { 0, 0, 0 }); // far from every beacon
       Assert::IsTrue(su.BeginJumpTo(base, "RIM") == JumpReject::NotAtBeacon);
     }
@@ -1044,7 +1050,7 @@ namespace NeuronCoreTest
     TEST_METHOD(JumpRejectedWhenOutOfFuel)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kNavSrc);
+      LoadFrom(su, NAV_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       su.FuelOf(base)->current = 5.0f; // below the 20 cost
       Assert::IsTrue(su.BeginJumpTo(base, "RIM") == JumpReject::NoFuel);
@@ -1054,7 +1060,7 @@ namespace NeuronCoreTest
     TEST_METHOD(InterdictionDropsBaseOutOfWarp)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kNavSrc);
+      LoadFrom(su, NAV_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       Assert::IsTrue(su.BeginWarpTo(base, { 300000, 0, 0 })); // align 0, base speed 10000 m/s
 
@@ -1074,7 +1080,7 @@ namespace NeuronCoreTest
     TEST_METHOD(BusyUnitCannotStartASecondTravel)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kNavSrc);
+      LoadFrom(su, NAV_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       Assert::IsTrue(su.BeginWarpTo(base, { 300000, 0, 0 }));
       // already aligning/warping -> a jump must be refused
@@ -1086,7 +1092,7 @@ namespace NeuronCoreTest
     TEST_METHOD(InterestPrefetchRecordsDestinationSector)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kNavSrc);
+      LoadFrom(su, NAV_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       su.BeginWarpTo(base, { 1310720, 0, 0 }); // sector x = 1310720 >> 14 = 80
       Assert::IsTrue(su.LastTravelSector().x == 80);
@@ -1105,7 +1111,7 @@ namespace NeuronCoreTest
 
       Assert::IsTrue(HarvestStep(node, cargo, 50.0f, 1.0f) == 50.0f); // rate 50 x dt 1
       Assert::IsTrue(node.remaining == 50.0f);
-      Assert::IsTrue(cargo.amount[kOre] == 50.0f);
+      Assert::IsTrue(cargo.amount[ORE] == 50.0f);
 
       Assert::IsTrue(HarvestStep(node, cargo, 1000.0f, 1.0f) == 50.0f); // clamps to remaining
       Assert::IsTrue(node.remaining == 0.0f);
@@ -1122,27 +1128,27 @@ namespace NeuronCoreTest
 
     TEST_METHOD(DepositMovesCargoToStorageClamped)
     {
-      Cargo c; c.capacity = 1000.0f; c.amount[kOre] = 100.0f; c.amount[kIce] = 50.0f;
+      Cargo c; c.capacity = 1000.0f; c.amount[ORE] = 100.0f; c.amount[ICE] = 50.0f;
       Storage s; s.capacity = 1000.0f;
       Assert::IsTrue(DepositAll(c, s) == 150.0f);
-      Assert::IsTrue(s.amount[kOre] == 100.0f && s.amount[kIce] == 50.0f);
-      Assert::IsTrue(c.amount[kOre] == 0.0f && c.amount[kIce] == 0.0f);
+      Assert::IsTrue(s.amount[ORE] == 100.0f && s.amount[ICE] == 50.0f);
+      Assert::IsTrue(c.amount[ORE] == 0.0f && c.amount[ICE] == 0.0f);
 
-      Cargo c2; c2.capacity = 1000.0f; c2.amount[kOre] = 100.0f;
+      Cargo c2; c2.capacity = 1000.0f; c2.amount[ORE] = 100.0f;
       Storage s2; s2.capacity = 40.0f; // only 40 room
       Assert::IsTrue(DepositAll(c2, s2) == 40.0f);
-      Assert::IsTrue(s2.amount[kOre] == 40.0f && c2.amount[kOre] == 60.0f);
+      Assert::IsTrue(s2.amount[ORE] == 40.0f && c2.amount[ORE] == 60.0f);
     }
 
     TEST_METHOD(BuildPaysOnceThenCompletes)
     {
       EconomyTuning e; e.buildOreCost = 100.0f; e.buildIceCost = 50.0f; e.buildSeconds = 2.0f;
       BuildQueue q; q.active = true;
-      Storage s; s.capacity = 1000.0f; s.amount[kOre] = 200.0f; s.amount[kIce] = 100.0f;
+      Storage s; s.capacity = 1000.0f; s.amount[ORE] = 200.0f; s.amount[ICE] = 100.0f;
 
       Assert::IsTrue(BuildStep(q, s, e, 1.0f) == BuildResult::InProgress);
       Assert::IsTrue(q.paid);
-      Assert::IsTrue(s.amount[kOre] == 100.0f && s.amount[kIce] == 50.0f); // charged once
+      Assert::IsTrue(s.amount[ORE] == 100.0f && s.amount[ICE] == 50.0f); // charged once
       Assert::IsTrue(BuildStep(q, s, e, 1.0f) == BuildResult::Completed);  // progress 2 >= 2
       Assert::IsTrue(!q.active);
     }
@@ -1151,10 +1157,10 @@ namespace NeuronCoreTest
     {
       EconomyTuning e; e.buildOreCost = 100.0f; e.buildIceCost = 50.0f; e.buildSeconds = 2.0f;
       BuildQueue q; q.active = true;
-      Storage s; s.capacity = 1000.0f; s.amount[kOre] = 50.0f; // not enough ore
+      Storage s; s.capacity = 1000.0f; s.amount[ORE] = 50.0f; // not enough ore
       Assert::IsTrue(BuildStep(q, s, e, 1.0f) == BuildResult::Insufficient);
       Assert::IsTrue(!q.active);
-      Assert::IsTrue(s.amount[kOre] == 50.0f); // not charged
+      Assert::IsTrue(s.amount[ORE] == 50.0f); // not charged
     }
 
     TEST_METHOD(FuelAndSensorRules)
@@ -1173,7 +1179,7 @@ namespace NeuronCoreTest
     TEST_METHOD(BaseHasStorageAndSensorFromTuning)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kEconSrc);
+      LoadFrom(su, ECON_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       Assert::IsTrue(su.StorageOf(base) != nullptr);
       Assert::IsTrue(su.StorageOf(base)->capacity == 2000.0f);
@@ -1184,7 +1190,7 @@ namespace NeuronCoreTest
     TEST_METHOD(FleetCapIsEnforced)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kEconSrc);
+      LoadFrom(su, ECON_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t player = base; // a player ~ their base net id
       Assert::IsTrue(su.SpawnFleetShip(player, ServerUniverse::ShipShapeId(), { 0, 0, 0 }) != 0);
@@ -1196,11 +1202,11 @@ namespace NeuronCoreTest
     TEST_METHOD(BuildQueueSpawnsAShip)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kEconSrc);
+      LoadFrom(su, ECON_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       // stock the base storage with enough to build (needs 100 ore, 50 ice)
-      su.StorageOf(base)->amount[kOre] = 200.0f;
-      su.StorageOf(base)->amount[kIce] = 100.0f;
+      su.StorageOf(base)->amount[ORE] = 200.0f;
+      su.StorageOf(base)->amount[ICE] = 100.0f;
 
       Assert::IsTrue(su.EnqueueBuild(base));
       Assert::IsTrue(su.OwnedShipCount(base) == 0);
@@ -1212,14 +1218,14 @@ namespace NeuronCoreTest
       auto completed = su.DrainBuildCompleted();
       Assert::IsTrue(completed.size() == size_t(1));
       Assert::IsTrue(su.OwnedShipCount(base) == 1);
-      Assert::IsTrue(su.StorageOf(base)->amount[kOre] == 100.0f); // charged once
+      Assert::IsTrue(su.StorageOf(base)->amount[ORE] == 100.0f); // charged once
       Assert::IsTrue(!su.BuildQueueOf(base)->active);
     }
 
     TEST_METHOD(BuildWithEmptyStorageSpawnsNothing)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kEconSrc);
+      LoadFrom(su, ECON_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 }); // storage empty
       Assert::IsTrue(su.EnqueueBuild(base));
       su.Step(0.5f);
@@ -1255,7 +1261,7 @@ namespace NeuronCoreTest
     TEST_METHOD(FullLoopNodeToCargoToStorageToShip)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kHarvestEcon);
+      LoadFrom(su, HARVEST_ECON);
 
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t harv = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 500, 0, 0 });
@@ -1266,10 +1272,10 @@ namespace NeuronCoreTest
       Assert::IsTrue(su.OrderHarvest(harv, node));
 
       // Run the loop: the harvester shuttles node<->base, ore flows node -> cargo -> storage.
-      for (int i = 0; i < 80 && su.StorageOf(base)->amount[kOre] < 400.0f; ++i)
+      for (int i = 0; i < 80 && su.StorageOf(base)->amount[ORE] < 400.0f; ++i)
         su.Step(0.1f);
 
-      Assert::IsTrue(su.StorageOf(base)->amount[kOre] >= 400.0f); // returned + deposited
+      Assert::IsTrue(su.StorageOf(base)->amount[ORE] >= 400.0f); // returned + deposited
       Assert::IsTrue(su.ResourceNodeOf(node)->remaining < 2000.0f); // node depleted
 
       // Enqueue a build off the deposited ore -> a ship is born.
@@ -1284,7 +1290,7 @@ namespace NeuronCoreTest
     TEST_METHOD(HarvesterDepositsThenIdlesWhenNodeEmpty)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kHarvestEcon);
+      LoadFrom(su, HARVEST_ECON);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t harv = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 100, 0, 0 });
       const uint32_t node = su.SpawnResourceNode(ResourceType::Ore, 150.0f, { 2000, 0, 0 }); // less than one cargo
@@ -1295,14 +1301,14 @@ namespace NeuronCoreTest
 
       Assert::IsTrue(su.HarvestOrderOf(harv)->phase == HarvestPhase::Idle); // finished (node drained)
       Assert::IsTrue(su.ResourceNodeOf(node)->remaining == 0.0f);
-      Assert::IsTrue(su.StorageOf(base)->amount[kOre] == 150.0f);          // all of it banked
-      Assert::IsTrue(su.CargoOf(harv)->amount[kOre] == 0.0f);              // cargo emptied on deposit
+      Assert::IsTrue(su.StorageOf(base)->amount[ORE] == 150.0f);          // all of it banked
+      Assert::IsTrue(su.CargoOf(harv)->amount[ORE] == 0.0f);              // cargo emptied on deposit
     }
 
     TEST_METHOD(OrderHarvestValidates)
     {
       ServerUniverse su(false);
-      LoadFrom(su, kHarvestEcon);
+      LoadFrom(su, HARVEST_ECON);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t harv = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
       const uint32_t node = su.SpawnResourceNode(ResourceType::Ore, 100.0f, { 1000, 0, 0 });
@@ -1336,7 +1342,7 @@ namespace NeuronCoreTest
   public:
     TEST_METHOD(ParsesCountsAndFields)
     {
-      UniverseDataset ds = ParseUniverseOk(kGoodUniverse);
+      UniverseDataset ds = ParseUniverseOk(GOOD_UNIVERSE);
       Assert::IsTrue(ds.regions.size() == size_t(2));
       Assert::IsTrue(ds.beacons.size() == size_t(3));
       Assert::IsTrue(ds.fields.size() == size_t(1));
@@ -1357,7 +1363,7 @@ namespace NeuronCoreTest
 
     TEST_METHOD(ValidGraphPasses)
     {
-      UniverseDataset ds = ParseUniverseOk(kGoodUniverse);
+      UniverseDataset ds = ParseUniverseOk(GOOD_UNIVERSE);
       std::vector<std::string> errs;
       Assert::IsTrue(ValidateUniverseDataset(ds, errs));
       Assert::IsTrue(errs.empty());
@@ -1365,7 +1371,7 @@ namespace NeuronCoreTest
 
     TEST_METHOD(BinaryRoundTrip)
     {
-      UniverseDataset ds = ParseUniverseOk(kGoodUniverse);
+      UniverseDataset ds = ParseUniverseOk(GOOD_UNIVERSE);
       const auto bytes = EncodeUniverseDataset(ds);
       auto rt = DecodeUniverseDataset(bytes);
       Assert::IsTrue(rt.has_value());
@@ -1474,7 +1480,7 @@ namespace NeuronCoreTest
   // --- fleet command / fog / PvE (M3 areas B, E, F) ---------------------------
   // Mirrors NeuronTools/testrunner/FleetTests.cpp.
 
-  const char* kFleetSrc =
+  const char* FLEET_SRC =
       "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
       "economy { fleet_cap = 8  cargo_capacity = 500  storage_capacity = 2000  harvest_rate = 100\n"
       "          sensor_range_ship = 8000  sensor_range_base = 20000  build_ore = 100  build_ice = 0\n"
@@ -1506,7 +1512,7 @@ namespace NeuronCoreTest
 
     TEST_METHOD(MoveIntentSteersOwnedShipToPoint)
     {
-      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      ServerUniverse su(false); LoadFrom(su, FLEET_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t ship = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
       FleetCommand cmd; cmd.intent = IntentType::Move; cmd.units = { ship }; cmd.targetPoint = { 6000, 0, 0 };
@@ -1518,7 +1524,7 @@ namespace NeuronCoreTest
 
     TEST_METHOD(CommandRejectedForUnownedUnit)
     {
-      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      ServerUniverse su(false); LoadFrom(su, FLEET_SRC);
       const uint32_t baseA = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t baseB = su.SpawnBase({ 0, 5000, 0 }, { 0, 0, 0 });
       const uint32_t shipB = su.SpawnFleetShip(baseB, ServerUniverse::ShipShapeId(), { 0, 5000, 0 });
@@ -1529,7 +1535,7 @@ namespace NeuronCoreTest
 
     TEST_METHOD(OrdersQueuePreserveOrder)
     {
-      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      ServerUniverse su(false); LoadFrom(su, FLEET_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t ship = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
       auto move = [&](int64_t x, bool q) {
@@ -1544,9 +1550,9 @@ namespace NeuronCoreTest
 
     TEST_METHOD(BuildIntentEnqueuesAtBase)
     {
-      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      ServerUniverse su(false); LoadFrom(su, FLEET_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
-      su.StorageOf(base)->amount[kOre] = 1000.0f;
+      su.StorageOf(base)->amount[ORE] = 1000.0f;
       FleetCommand c; c.intent = IntentType::Build; c.units = { base };
       Assert::IsTrue(su.ApplyFleetCommand(base, c) == 1 && su.BuildQueueOf(base)->active);
       for (int i = 0; i < 40 && su.OwnedShipCount(base) < 1; ++i) su.Step(0.1f);
@@ -1555,7 +1561,7 @@ namespace NeuronCoreTest
 
     TEST_METHOD(DetectedSetAndFog)
     {
-      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      ServerUniverse su(false); LoadFrom(su, FLEET_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t nearN = su.SpawnResourceNode(ResourceType::Ore, 100.0f, { 10000, 0, 0 });
       const uint32_t farN  = su.SpawnResourceNode(ResourceType::Ore, 100.0f, { 80000, 0, 0 });
@@ -1577,7 +1583,7 @@ namespace NeuronCoreTest
 
     TEST_METHOD(LowDpsStillDamagesAtSimTickRate)
     {
-      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      ServerUniverse su(false); LoadFrom(su, FLEET_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t ship = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
       su.WeaponOf(ship)->dps = 20.0f; // below the 30 Hz tick → < 1 dmg per tick
@@ -1592,7 +1598,7 @@ namespace NeuronCoreTest
 
     TEST_METHOD(AttackerClosesToItsOwnWeaponRange)
     {
-      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      ServerUniverse su(false); LoadFrom(su, FLEET_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint32_t ship = su.SpawnFleetShip(base, ServerUniverse::ShipShapeId(), { 0, 0, 0 });
       const float shipRange = su.WeaponOf(ship)->range;
@@ -1612,7 +1618,7 @@ namespace NeuronCoreTest
 
     TEST_METHOD(FleetClearsNpcSiteAndFiresOnce)
     {
-      ServerUniverse su(false); LoadFrom(su, kFleetSrc);
+      ServerUniverse su(false); LoadFrom(su, FLEET_SRC);
       const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
       const uint16_t site = su.SpawnNpcSite({ 4000, 0, 0 }, 2, 400.0f);
       std::vector<uint32_t> ships;
@@ -1636,7 +1642,7 @@ namespace NeuronCoreTest
   // Mirrors NeuronTools/testrunner/DeterminismTests.cpp (sans the NeuronClient
   // ScriptedController dep — commands are applied inline).
 
-  const char* kDetSrc =
+  const char* DET_SRC =
       "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
       "beacon HUB { region = R pos = 0 0 0       links = RIM kind = public }\n"
       "beacon RIM { region = R pos = 200000 0 0  links = HUB kind = public }\n"
@@ -1673,11 +1679,95 @@ namespace NeuronCoreTest
   public:
     TEST_METHOD(SameLogReproducesSimHash)
     {
-      Assert::IsTrue(RunScript(kDetSrc, 120, true) == RunScript(kDetSrc, 120, true));
+      Assert::IsTrue(RunScript(DET_SRC, 120, true) == RunScript(DET_SRC, 120, true));
     }
     TEST_METHOD(DivergentLogChangesSimHash)
     {
-      Assert::IsTrue(RunScript(kDetSrc, 120, true) != RunScript(kDetSrc, 120, false));
+      Assert::IsTrue(RunScript(DET_SRC, 120, true) != RunScript(DET_SRC, 120, false));
+    }
+  };
+
+  // --- Out-of-band server status (§21) ----------------------------------------
+  // Mirrors NeuronTools/testrunner/ServerStatusTests.cpp: the diagnostic-port wire
+  // format (EncodeStatusJson/ParseStatusJson) and the fixed query-token validation.
+  TEST_CLASS(ServerStatusTests)
+  {
+    static Neuron::Net::ServerStatus Sample()
+    {
+      Neuron::Net::ServerStatus s;
+      s.uptimeSeconds      = 12345;
+      s.simTick            = 67890;
+      s.connectionsPending = 7;
+      s.connectionsActive  = 4;
+      s.objectsSpawned     = 1024;
+      s.projectiles        = 33;
+      s.simP99Ms           = 1.25;  // %.4g-safe
+      s.encodeP99Ms        = 0.5;
+      s.dilation           = 0.75;
+      s.downstreamBytes    = 500000;
+      s.upstreamBytes      = 250000;
+      s.datagramsIn        = 900;
+      s.datagramsOut       = 1100;
+      s.baselineBytes      = 4096;
+      s.listenPort         = 7777;
+      s.devAuthStub        = true;
+      s.persistenceEnabled = true;
+      return s;
+    }
+
+  public:
+    TEST_METHOD(EncodeParseRoundTrip)
+    {
+      const Neuron::Net::ServerStatus in = Sample();
+      const std::string json = Neuron::Net::EncodeStatusJson(in);
+      Assert::IsTrue(json.size() < Neuron::Net::STATUS_MAX_DATAGRAM_BYTES);
+
+      Neuron::Net::ServerStatus out;
+      Assert::IsTrue(Neuron::Net::ParseStatusJson(json, out));
+      Assert::AreEqual(in.uptimeSeconds, out.uptimeSeconds);
+      Assert::AreEqual(in.simTick, out.simTick);
+      Assert::AreEqual(in.connectionsPending, out.connectionsPending);
+      Assert::AreEqual(in.connectionsActive, out.connectionsActive);
+      Assert::AreEqual(in.objectsSpawned, out.objectsSpawned);
+      Assert::AreEqual(in.projectiles, out.projectiles);
+      Assert::AreEqual(in.simP99Ms, out.simP99Ms);
+      Assert::AreEqual(in.encodeP99Ms, out.encodeP99Ms);
+      Assert::AreEqual(in.dilation, out.dilation);
+      Assert::AreEqual(in.downstreamBytes, out.downstreamBytes);
+      Assert::AreEqual(in.upstreamBytes, out.upstreamBytes);
+      Assert::AreEqual(in.baselineBytes, out.baselineBytes);
+      Assert::AreEqual(uint32_t{ in.listenPort }, uint32_t{ out.listenPort });
+      Assert::AreEqual(in.devAuthStub, out.devAuthStub);
+      Assert::AreEqual(in.persistenceEnabled, out.persistenceEnabled);
+    }
+
+    TEST_METHOD(ParseRejectsGarbageAndDefaultsMissing)
+    {
+      Neuron::Net::ServerStatus out;
+      Assert::IsFalse(Neuron::Net::ParseStatusJson("not json", out));
+      Assert::IsFalse(Neuron::Net::ParseStatusJson("[1,2,3]", out));
+
+      Neuron::Net::ServerStatus partial;
+      Assert::IsTrue(Neuron::Net::ParseStatusJson("{\"connectionsActive\":3}", partial));
+      Assert::AreEqual(uint32_t{ 3 }, partial.connectionsActive);
+      Assert::AreEqual(uint64_t{ 0 }, partial.objectsSpawned);
+      Assert::AreEqual(1.0, partial.dilation); // default
+    }
+
+    TEST_METHOD(QueryTokenValidation)
+    {
+      Assert::IsTrue(Neuron::Net::IsStatusQuery(std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(Neuron::Net::STATUS_QUERY_TOKEN),
+          Neuron::Net::STATUS_QUERY_TOKEN_SIZE)));
+
+      const uint8_t shortBuf[3] = { 'E', 'R', 'S' };
+      Assert::IsFalse(Neuron::Net::IsStatusQuery(std::span<const uint8_t>(shortBuf, sizeof(shortBuf))));
+
+      uint8_t bad[Neuron::Net::STATUS_QUERY_TOKEN_SIZE];
+      for (size_t i = 0; i < sizeof(bad); ++i)
+        bad[i] = static_cast<uint8_t>(Neuron::Net::STATUS_QUERY_TOKEN[i]);
+      bad[sizeof(bad) - 1] ^= 0xFF;
+      Assert::IsFalse(Neuron::Net::IsStatusQuery(std::span<const uint8_t>(bad, sizeof(bad))));
     }
   };
 } // namespace NeuronCoreTest

@@ -38,7 +38,7 @@ public:
     void Reset() noexcept { m_factor = 1.0; }
 
     // Feed the real time 'measuredSeconds' the last sim tick took against the
-    // real-time step 'budgetSeconds' (kSimDeltaSeconds). Returns the updated factor.
+    // real-time step 'budgetSeconds' (SIM_DELTA_SECONDS). Returns the updated factor.
     // Over budget → ease down toward onset/load (clamped to the floor); under budget
     // → ease back up toward full speed. Asymmetric easing: shed fast, recover slow.
     double Update(double measuredSeconds, double budgetSeconds, const DilationConfig& cfg) noexcept

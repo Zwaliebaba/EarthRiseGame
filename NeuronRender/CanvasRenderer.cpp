@@ -64,7 +64,7 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
         IID_PPV_ARGS(m_rootSig.put())));
 
     // --- Input layout: float2 pos + float2 uv + float4 color ---
-    static constexpr D3D12_INPUT_ELEMENT_DESC kLayout[] = {
+    static constexpr D3D12_INPUT_ELEMENT_DESC LAYOUT[] = {
         { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,       0,  0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0,  8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
         { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -75,7 +75,7 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
     psoDesc.pRootSignature        = m_rootSig.get();
     psoDesc.VS                    = { g_pCanvasVS, sizeof(g_pCanvasVS) };
     psoDesc.PS                    = { g_pCanvasPS, sizeof(g_pCanvasPS) };
-    psoDesc.InputLayout           = { kLayout, static_cast<UINT>(std::size(kLayout)) };
+    psoDesc.InputLayout           = { LAYOUT, static_cast<UINT>(std::size(LAYOUT)) };
     psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     psoDesc.NumRenderTargets      = 1;
     psoDesc.RTVFormats[0]         = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -104,14 +104,14 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
 
     // --- Shader-visible SRV heap (font + chrome textures) ---
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
-    heapDesc.NumDescriptors = kMaxTextures;
+    heapDesc.NumDescriptors = MAX_TEXTURES;
     heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     winrt::check_hresult(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(m_srvHeap.put())));
     m_srvSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
     // --- Dynamic vertex buffers (one per in-flight frame, CPU-mapped) ---
-    constexpr UINT64 vtxBufSize = kMaxVerts * sizeof(CanvasVertex);
+    constexpr UINT64 vtxBufSize = MAX_VERTS * sizeof(CanvasVertex);
     D3D12_HEAP_PROPERTIES hpUpload{};
     hpUpload.Type = D3D12_HEAP_TYPE_UPLOAD;
     D3D12_RESOURCE_DESC rd{};
@@ -120,7 +120,7 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
     rd.Height = rd.DepthOrArraySize = rd.MipLevels = 1;
     rd.SampleDesc.Count = 1;
     rd.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    for (UINT i = 0; i < FRAME_COUNT; ++i)
     {
         winrt::check_hresult(m_device->CreateCommittedResource(
             &hpUpload, D3D12_HEAP_FLAG_NONE, &rd,
@@ -134,7 +134,7 @@ bool CanvasRenderer::Initialize(DeviceResources* dr)
 
 void CanvasRenderer::Uninitialize()
 {
-    for (UINT i = 0; i < DeviceResources::kFrameCount; ++i)
+    for (UINT i = 0; i < FRAME_COUNT; ++i)
         if (m_vtxBuf[i] && m_vtxPtr[i]) { m_vtxBuf[i]->Unmap(0, nullptr); m_vtxPtr[i] = nullptr; }
 }
 
@@ -150,7 +150,7 @@ UINT CanvasRenderer::EnsureSrv(const TextureGpu& tex)
 {
     auto it = m_srvByTex.find(tex.resource.get());
     if (it != m_srvByTex.end()) return it->second;
-    if (m_nextSrv >= kMaxTextures) return 0; // out of slots: reuse slot 0 (font)
+    if (m_nextSrv >= MAX_TEXTURES) return 0; // out of slots: reuse slot 0 (font)
 
     const UINT idx = m_nextSrv++;
     D3D12_CPU_DESCRIPTOR_HANDLE h = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -184,7 +184,7 @@ void CanvasRenderer::Prim(Mode mode, UINT srvIndex)
 
 void CanvasRenderer::Vtx(float x, float y, float u, float v, float r, float g, float b, float a)
 {
-    if (m_vtxCount >= kMaxVerts || !m_vtxPtr[m_frame]) return;
+    if (m_vtxCount >= MAX_VERTS || !m_vtxPtr[m_frame]) return;
     m_vtxPtr[m_frame][m_vtxCount++] = { x, y, u, v, r, g, b, a };
     if (!m_batches.empty()) ++m_batches.back().count;
 }
@@ -262,16 +262,16 @@ void CanvasRenderer::DrawText(float x, float y, const char* text, float r, float
     // height, advance = width), sampled from a TRIMMED sub-rect of each cell (so
     // the cell's transparent padding is cropped and the glyph fills the quad),
     // and drawn with LINEAR filtering for smooth edges.
-    constexpr float kHoriz   = 0.6f;             // HORIZONTAL_SIZE
-    constexpr float kMargin  = 0.003f;           // TEX_MARGIN
-    constexpr float kStretch = 1.0f - 26.0f * kMargin; // TEX_STRETCH (~0.922)
+    constexpr float HORIZ   = 0.6f;             // HORIZONTAL_SIZE
+    constexpr float MARGIN  = 0.003f;           // TEX_MARGIN
+    constexpr float STRETCH = 1.0f - 26.0f * MARGIN; // TEX_STRETCH (~0.922)
 
     const float H  = static_cast<float>(m_fontCfg.cellPx) * scale; // glyph box height
-    const float gw = H * kHoriz;                                    // width = advance
+    const float gw = H * HORIZ;                                    // width = advance
     const float cellU = (m_fontCfg.cols ? 1.0f / static_cast<float>(m_fontCfg.cols) : 0.f);
     const float cellV = (m_fontCfg.rows ? 1.0f / static_cast<float>(m_fontCfg.rows) : 0.f);
-    const float texW = cellU * kStretch * 0.9f; // TEX_WIDTH
-    const float texH = cellV * kStretch;        // TEX_HEIGHT
+    const float texW = cellU * STRETCH * 0.9f; // TEX_WIDTH
+    const float texH = cellV * STRETCH;        // TEX_HEIGHT
 
     float cx = x;
     for (const unsigned char* p = reinterpret_cast<const unsigned char*>(text); *p; ++p)
@@ -282,8 +282,8 @@ void CanvasRenderer::DrawText(float x, float y, const char* text, float r, float
             const uint32_t idx = c - m_fontCfg.firstCodepoint;
             const uint32_t col = m_fontCfg.cols ? idx % m_fontCfg.cols : 0;
             const uint32_t row = m_fontCfg.cols ? idx / m_fontCfg.cols : 0;
-            const float u0 = static_cast<float>(col) * cellU + kMargin + 0.002f;
-            const float v0 = static_cast<float>(row) * cellV + kMargin + 0.001f;
+            const float u0 = static_cast<float>(col) * cellU + MARGIN + 0.002f;
+            const float v0 = static_cast<float>(row) * cellV + MARGIN + 0.001f;
             const float u1 = u0 + texW, v1 = v0 + texH;
 
             Prim(Mode::TexLinear, m_fontSrv); // smooth glyphs (Darwinia GL_LINEAR)

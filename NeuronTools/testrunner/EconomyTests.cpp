@@ -18,11 +18,11 @@ using Neuron::Universe::UniversePos;
 
 namespace
 {
-    constexpr int kOre = static_cast<int>(ResourceType::Ore);
-    constexpr int kIce = static_cast<int>(ResourceType::Ice);
+    constexpr int ORE = static_cast<int>(ResourceType::Ore);
+    constexpr int ICE = static_cast<int>(ResourceType::Ice);
 
     // Tiny economy for fast build/cap tests.
-    const char* kSrc =
+    const char* SRC =
         "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
         "economy { fleet_cap = 2  cargo_capacity = 500  storage_capacity = 2000  harvest_rate = 100\n"
         "          sensor_range_ship = 4000  sensor_range_base = 9000  build_ore = 100  build_ice = 50\n"
@@ -32,7 +32,7 @@ namespace
     {
         UniverseDataset ds;
         std::vector<std::string> errs;
-        const bool ok = Neuron::Tools::ParseUniverseSource(kSrc, ds, errs);
+        const bool ok = Neuron::Tools::ParseUniverseSource(SRC, ds, errs);
         ER_CHECK(ok && errs.empty());
         su.LoadUniverse(ds);
     }
@@ -47,7 +47,7 @@ ER_TEST(Economy, HarvestDepletesNodeAndFillsCargo)
 
     ER_CHECK(HarvestStep(node, cargo, 50.0f, 1.0f) == 50.0f); // rate 50 × dt 1
     ER_CHECK(node.remaining == 50.0f);
-    ER_CHECK(cargo.amount[kOre] == 50.0f);
+    ER_CHECK(cargo.amount[ORE] == 50.0f);
 
     ER_CHECK(HarvestStep(node, cargo, 1000.0f, 1.0f) == 50.0f); // clamps to remaining
     ER_CHECK(node.remaining == 0.0f);
@@ -64,27 +64,27 @@ ER_TEST(Economy, HarvestClampsToCargoCapacity)
 
 ER_TEST(Economy, DepositMovesCargoToStorageClamped)
 {
-    Cargo c; c.capacity = 1000.0f; c.amount[kOre] = 100.0f; c.amount[kIce] = 50.0f;
+    Cargo c; c.capacity = 1000.0f; c.amount[ORE] = 100.0f; c.amount[ICE] = 50.0f;
     Storage s; s.capacity = 1000.0f;
     ER_CHECK(DepositAll(c, s) == 150.0f);
-    ER_CHECK(s.amount[kOre] == 100.0f && s.amount[kIce] == 50.0f);
-    ER_CHECK(c.amount[kOre] == 0.0f && c.amount[kIce] == 0.0f);
+    ER_CHECK(s.amount[ORE] == 100.0f && s.amount[ICE] == 50.0f);
+    ER_CHECK(c.amount[ORE] == 0.0f && c.amount[ICE] == 0.0f);
 
-    Cargo c2; c2.capacity = 1000.0f; c2.amount[kOre] = 100.0f;
+    Cargo c2; c2.capacity = 1000.0f; c2.amount[ORE] = 100.0f;
     Storage s2; s2.capacity = 40.0f; // only 40 room
     ER_CHECK(DepositAll(c2, s2) == 40.0f);
-    ER_CHECK(s2.amount[kOre] == 40.0f && c2.amount[kOre] == 60.0f);
+    ER_CHECK(s2.amount[ORE] == 40.0f && c2.amount[ORE] == 60.0f);
 }
 
 ER_TEST(Economy, BuildPaysOnceThenCompletes)
 {
     EconomyTuning e; e.buildOreCost = 100.0f; e.buildIceCost = 50.0f; e.buildSeconds = 2.0f;
     BuildQueue q; q.active = true;
-    Storage s; s.capacity = 1000.0f; s.amount[kOre] = 200.0f; s.amount[kIce] = 100.0f;
+    Storage s; s.capacity = 1000.0f; s.amount[ORE] = 200.0f; s.amount[ICE] = 100.0f;
 
     ER_CHECK(BuildStep(q, s, e, 1.0f) == BuildResult::InProgress);
     ER_CHECK(q.paid);
-    ER_CHECK(s.amount[kOre] == 100.0f && s.amount[kIce] == 50.0f); // charged once
+    ER_CHECK(s.amount[ORE] == 100.0f && s.amount[ICE] == 50.0f); // charged once
     ER_CHECK(BuildStep(q, s, e, 1.0f) == BuildResult::Completed);  // progress 2 ≥ 2
     ER_CHECK(!q.active);
 }
@@ -93,10 +93,10 @@ ER_TEST(Economy, BuildRejectedWhenInsufficient)
 {
     EconomyTuning e; e.buildOreCost = 100.0f; e.buildIceCost = 50.0f; e.buildSeconds = 2.0f;
     BuildQueue q; q.active = true;
-    Storage s; s.capacity = 1000.0f; s.amount[kOre] = 50.0f; // not enough ore
+    Storage s; s.capacity = 1000.0f; s.amount[ORE] = 50.0f; // not enough ore
     ER_CHECK(BuildStep(q, s, e, 1.0f) == BuildResult::Insufficient);
     ER_CHECK(!q.active);
-    ER_CHECK(s.amount[kOre] == 50.0f); // not charged
+    ER_CHECK(s.amount[ORE] == 50.0f); // not charged
 }
 
 ER_TEST(Economy, FuelAndSensorRules)
@@ -143,8 +143,8 @@ ER_TEST(Economy, BuildQueueSpawnsAShip)
     Load(su);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
     // stock the base storage with enough to build (needs 100 ore, 50 ice)
-    su.StorageOf(base)->amount[kOre] = 200.0f;
-    su.StorageOf(base)->amount[kIce] = 100.0f;
+    su.StorageOf(base)->amount[ORE] = 200.0f;
+    su.StorageOf(base)->amount[ICE] = 100.0f;
 
     ER_CHECK(su.EnqueueBuild(base));
     ER_CHECK(su.OwnedShipCount(base) == 0);
@@ -156,7 +156,7 @@ ER_TEST(Economy, BuildQueueSpawnsAShip)
     auto completed = su.DrainBuildCompleted();
     ER_CHECK_EQ(completed.size(), size_t(1));
     ER_CHECK(su.OwnedShipCount(base) == 1);
-    ER_CHECK(su.StorageOf(base)->amount[kOre] == 100.0f); // charged once
+    ER_CHECK(su.StorageOf(base)->amount[ORE] == 100.0f); // charged once
     ER_CHECK(!su.BuildQueueOf(base)->active);
 }
 

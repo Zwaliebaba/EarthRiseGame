@@ -87,8 +87,10 @@
     <ClInclude Include="Interpolator.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Replica.h" />
+    <ClInclude Include="ReconnectController.h" />
     <ClInclude Include="ReplicaManager.h" />
     <ClInclude Include="ScriptedController.h" />
+    <ClInclude Include="ServerStatusClient.h" />
     <ClInclude Include="Session.h" />
     <ClInclude Include="SessionImpl.h" />
     <ClInclude Include="Starmap.h" />

@@ -101,6 +101,7 @@ struct Bot
     BotPhase phase{ BotPhase::Connecting };
     uint32_t cooldownTicks{ 0 }; // throttle command issuance
     bool builtOnce{ false };
+    uint64_t lastResendMs{ 0 }; // throttle handshake/auth retransmit (PBKDF2 cost, §14)
 };
 
 // Decode the latest snapshot into a SeenWorld for 'self' (the bot's player id).
@@ -180,15 +181,21 @@ int main(int argc, char* argv[])
         b.sock = std::make_unique<Neuron::Net::WinsockSocket>();
         if (!b.sock->Open(0)) { EARTHRISE_LOG_ERROR("bot {} socket open failed\n", i); continue; }
         b.conn = std::make_unique<Neuron::Net::ClientConnection>(&crypto, pinnedPub);
+        // M5 real auth (§14): each bot binds to its own account (unique username so the
+        // one-session-per-account rule doesn't evict its peers), auto-registering on the
+        // first run. This requires the server to run real auth (server.devAuthStub =
+        // false); for a dev-stub server, drop this and call SetLoginName(botUser) instead.
+        const std::string botUser = "bot" + std::to_string(i);
+        b.conn->SetCredentials(botUser, botUser + "-devpass");
         auto hello = b.conn->Start(static_cast<uint64_t>(GetTickCount64()) * 1000 + i);
         b.sock->SendTo(serverEp, hello);
         bots.push_back(std::move(b));
     }
 
     std::array<uint8_t, 2048> buf{};
-    constexpr int kMaxIterations = 20000; // safety bound for the dev run
+    constexpr int MAX_ITERATIONS = 20000; // safety bound for the dev run
 
-    for (int iter = 0; iter < kMaxIterations; ++iter) {
+    for (int iter = 0; iter < MAX_ITERATIONS; ++iter) {
         for (auto& b : bots) {
             const uint32_t self = b.conn->PlayerNetId();
             Neuron::Sim::Snapshot latest;
@@ -217,9 +224,15 @@ int main(int argc, char* argv[])
             }
 
             if (!b.conn->IsConnected()) {
-                std::vector<std::vector<uint8_t>> rs;
-                b.conn->ResendPending(rs);
-                for (auto& d : rs) b.sock->SendTo(serverEp, d);
+                // Throttle retransmit — auth re-sends re-run the server's PBKDF2 (§14), so
+                // firing every ~1 ms loop iteration would flood expensive login attempts.
+                const uint64_t nowMs = GetTickCount64();
+                if (nowMs - b.lastResendMs >= 200) {
+                    std::vector<std::vector<uint8_t>> rs;
+                    b.conn->ResendPending(rs);
+                    for (auto& d : rs) b.sock->SendTo(serverEp, d);
+                    b.lastResendMs = nowMs;
+                }
                 continue;
             }
             if (b.cooldownTicks > 0) { --b.cooldownTicks; continue; }

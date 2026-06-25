@@ -73,6 +73,11 @@ public:
     [[nodiscard]] bool      IsConnected() const noexcept { return m_state == ConnState::Connected; }
     [[nodiscard]] uint64_t  Token() const noexcept { return m_token; }
     [[nodiscard]] uint32_t  PlayerNetId() const noexcept { return m_playerNetId; }
+    // The expiring session token the server issued at login (§8.5/§14) — distinct from
+    // the connection token. A client presents this to resume after a reconnect (M5 area
+    // G, §26); 0 until login completes. (Previously the session exposed PlayerNetId here
+    // by mistake — they are different identifiers.)
+    [[nodiscard]] uint64_t  SessionToken() const noexcept { return m_sessionToken; }
     // Server time-dilation factor from the last clock-sync response (M4 area H,
     // §7.2/§8.5); 1.0 = full speed. The client interpolator scales server-time
     // advance by this so it tracks the dilated authoritative clock, not wall-clock.
@@ -120,16 +125,10 @@ public:
             std::vector<DecodedMessage> msgs;
             if (!ReadMessages(payload, msgs)) return true;
             for (const auto& m : msgs)
-                HandleAppMessage(m, appOut);
+                HandleAppMessage(m, appOut, sendOut);
             return true;
         }
         return true;
-    }
-
-    // Queue a command to the server (ReliableOrdered). Returns the datagram, if ready.
-    std::optional<std::vector<uint8_t>> SendCommand(std::span<const uint8_t> body)
-    {
-        return SendTyped(MsgType::Command, body);
     }
 
     // Queue an RTS fleet intent (§23.4; M3 area B). Same reliable path, distinct
@@ -200,11 +199,34 @@ public:
         }
     }
 
+    // Dev-stub login (M1-M4): a bare username, no password. Selects the legacy
+    // LoginRequest path the server's dev-auth stub answers at cookie time.
     void SetLoginName(std::string name) { m_loginName = std::move(name); }
+
+    // M5 real auth (§14): bind to an account with a password over the secure channel.
+    // The client tries to LOGIN first; if the account does not exist yet it auto-
+    // REGISTERS and logs in (friendly first-run provisioning). A login/registration UI
+    // can replace this with an explicit register-vs-login choice by setting m_authOpcode
+    // before connect. Call before Connect().
+    void SetCredentials(std::string username, std::string password)
+    {
+        m_loginName   = std::move(username);
+        m_password    = std::move(password);
+        m_realAuth    = true;
+        m_authOpcode  = AUTH_OPCODE_LOGIN; // first attempt: login; fall back to register
+        m_triedRegister = false;
+    }
+
+    // Result of the last completed auth exchange (AUTH_RESULT* wire codes); 0xFF until
+    // the server replies. A login screen reads this to show "wrong password", etc.
+    [[nodiscard]] uint8_t LastAuthResult() const noexcept { return m_lastAuthResult; }
 
 private:
     void SendLogin(std::vector<std::vector<uint8_t>>& sendOut)
     {
+        if (m_realAuth) { SendAuth(sendOut, m_authOpcode); return; }
+
+        // Dev-stub path: legacy username-only LoginRequest (no real auth on the server).
         LoginRequestBody req;
         req.username = m_loginName.empty() ? "bot" : m_loginName;
         std::vector<uint8_t> body;
@@ -215,8 +237,66 @@ private:
         if (SealEncrypted(payload, dg)) sendOut.push_back(std::move(dg));
     }
 
-    void HandleAppMessage(const DecodedMessage& m, std::vector<AppMessage>& appOut)
+    // Send a register/login credential frame: a reliable Command whose body is
+    // [opcode u8][u16 userLen LE][user][u16 passLen LE][pass] (matches ServerHost's
+    // DecodeAuthRequest). Re-sealed each time so a retransmit gets a fresh AEAD number.
+    void SendAuth(std::vector<std::vector<uint8_t>>& sendOut, uint8_t opcode)
     {
+        std::vector<uint8_t> body;
+        body.reserve(1 + 2 + m_loginName.size() + 2 + m_password.size());
+        body.push_back(opcode);
+        auto putStr = [&body](const std::string& s) {
+            const uint16_t n = static_cast<uint16_t>(s.size());
+            body.push_back(static_cast<uint8_t>(n & 0xFF));
+            body.push_back(static_cast<uint8_t>((n >> 8) & 0xFF));
+            body.insert(body.end(), s.begin(), s.end());
+        };
+        putStr(m_loginName);
+        putStr(m_password);
+        std::vector<uint8_t> payload;
+        WriteMessage(payload, Channel::ReliableOrdered, MsgType::Command, body);
+        std::vector<uint8_t> dg;
+        if (SealEncrypted(payload, dg)) sendOut.push_back(std::move(dg));
+    }
+
+    void HandleAppMessage(const DecodedMessage& m, std::vector<AppMessage>& appOut,
+                          std::vector<std::vector<uint8_t>>& sendOut)
+    {
+        // M5 real-auth result: a Command frame opening with AUTH_OPCODE_RESULT, shape
+        // [opcode][AuthResult u8][netId u32 LE][tokenLo u64 LE] (ServerHost::SendAuthResult).
+        if (m.type == MsgType::Command && !m.body.empty() && m.body[0] == AUTH_OPCODE_RESULT) {
+            if (m.body.size() < 1 + 1 + 4 + 8) return; // malformed — ignore
+            // Auth (re)sends fire each tick until we connect, so several credential frames
+            // can be in flight and the server answers each one. Only act while the auth is
+            // still unresolved; once we've connected (Ok) or failed, ignore the stragglers.
+            if (m_state != ConnState::Authenticating) return;
+            const uint8_t res = m.body[1];
+            m_lastAuthResult = res;
+            if (res == AUTH_RESULT_OK) {
+                uint32_t netId = 0;
+                for (int i = 0; i < 4; ++i) netId |= static_cast<uint32_t>(m.body[2 + i]) << (i * 8);
+                uint64_t tokenLo = 0;
+                for (int i = 0; i < 8; ++i) tokenLo |= static_cast<uint64_t>(m.body[6 + i]) << (i * 8);
+                m_playerNetId  = netId;
+                m_sessionToken = tokenLo;
+                m_state        = ConnState::Connected;
+            } else if (res == AUTH_RESULT_INVALID_CREDENTIALS && !m_triedRegister
+                       && m_authOpcode == AUTH_OPCODE_LOGIN) {
+                // Account doesn't exist yet → auto-provision: register, which auto-logs in.
+                m_triedRegister = true;
+                m_authOpcode    = AUTH_OPCODE_REGISTER;
+                SendAuth(sendOut, m_authOpcode);
+            } else if (res == AUTH_RESULT_INVALID_CREDENTIALS && m_authOpcode == AUTH_OPCODE_REGISTER) {
+                // A duplicate login frame's "no such account" arriving after we already
+                // switched to register — stale, ignore (the register result is authoritative).
+            } else {
+                // Wrong password on an existing account (login failed, register → taken),
+                // or locked / rate-limited / banned / bad input → give up. The owner reads
+                // LastAuthResult() to surface the reason on a login screen.
+                m_state = ConnState::Disconnected;
+            }
+            return;
+        }
         if (m.type == MsgType::LoginResponse) {
             LoginResponseBody resp;
             if (LoginResponseBody::Decode(m.body, resp) && resp.success) {
@@ -250,6 +330,14 @@ private:
     uint64_t  m_sessionToken{ 0 };
     uint32_t  m_playerNetId{ 0 };
     std::string m_loginName;
+    // M5 real-auth state (§14). m_realAuth selects the account/password path over the
+    // legacy dev-stub LoginRequest; m_authOpcode is the credential frame in flight
+    // (login first, register on auto-provision); m_lastAuthResult is the server's verdict.
+    std::string m_password;
+    bool        m_realAuth{ false };
+    bool        m_triedRegister{ false };
+    uint8_t     m_authOpcode{ AUTH_OPCODE_LOGIN };
+    uint8_t     m_lastAuthResult{ 0xFF };
     std::vector<uint8_t> m_lastHandshakeDatagram;
 };
 // (login retransmission re-seals via SendLogin to get a fresh AEAD packet number)
@@ -272,6 +360,17 @@ public:
     [[nodiscard]] uint32_t  PlayerNetId() const noexcept { return m_playerNetId; }
     void SetPlayerNetId(uint32_t id) noexcept { m_playerNetId = id; }
     [[nodiscard]] const std::string& LoginName() const noexcept { return m_loginName; }
+
+    // M5 area C (§14): under real auth the account login runs in the host
+    // (ServerHost::OnAuthMessage) rather than the connection's app-message handler,
+    // so the host flips the connection to Connected once auth succeeds — mirroring
+    // what the dev-stub LoginRequest path does inline. No-op unless the secure
+    // channel is up (state Authenticating); the snapshot broadcaster only sends to
+    // Connected peers, so without this a logged-in client never receives entities.
+    void MarkConnected() noexcept
+    {
+        if (m_state == ConnState::Authenticating) m_state = ConnState::Connected;
+    }
 
     // M4 area H (§7.2/§8.5): the host pushes the server's current time-dilation
     // factor each loop so the clock-sync echo (OnClockSyncRequest) publishes it to

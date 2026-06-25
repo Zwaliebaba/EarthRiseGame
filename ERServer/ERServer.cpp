@@ -49,6 +49,7 @@
 // NeuronCore
 #include "FixedStepAccumulator.h"
 #include "ServerUniverse.h"
+#include "EconomyOutbox.h"
 #include "CngCrypto.h"
 #include "WinsockSocket.h"
 #include "ServerHost.h"
@@ -59,6 +60,10 @@
 // ERServer (Windows/ODBC — M4/M5)
 #include "IocpUdpListener.h"
 #include "ServerConfig.h"
+#ifdef _DEBUG
+#include "ServerStatus.h"    // §21 status record (separate diagnostic port; debug only)
+#include "StatusEndpoint.h"
+#endif
 #include "persist/PersistConfig.h"
 #include "persist/OdbcConnectionPool.h"
 #include "persist/PersistenceThread.h"
@@ -120,11 +125,11 @@ namespace
   // pinned key survives restarts (M1a generated an ephemeral one each boot). Stored as
   // the exportable BCRYPT_ECCPRIVATE_BLOB in a local file beside the daemon; a secret
   // store / DB column is the production upgrade (out of the persist headers' surface).
-  constexpr const char* kStaticKeyFile = "er_server_key.bin";
+  constexpr const char* STATIC_KEY_FILE = "er_server_key.bin";
 
   std::vector<uint8_t> ReadStaticKeyBlob()
   {
-    std::ifstream f(kStaticKeyFile, std::ios::binary);
+    std::ifstream f(STATIC_KEY_FILE, std::ios::binary);
     if (!f) return {};
     return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)),
                                 std::istreambuf_iterator<char>());
@@ -132,7 +137,7 @@ namespace
 
   void WriteStaticKeyBlob(const std::vector<uint8_t>& blob)
   {
-    std::ofstream f(kStaticKeyFile, std::ios::binary | std::ios::trunc);
+    std::ofstream f(STATIC_KEY_FILE, std::ios::binary | std::ios::trunc);
     if (f) f.write(reinterpret_cast<const char*>(blob.data()),
                    static_cast<std::streamsize>(blob.size()));
   }
@@ -292,12 +297,12 @@ int main(int argc, char* argv[])
   {
     WriteStaticKeyBlob(crypto.GetStaticPrivateBlob());
     ConsoleLog("[INFO] Generated + persisted a new static server key to {} ({} bytes).\n",
-               kStaticKeyFile, crypto.GetStaticPrivateBlob().size());
+               STATIC_KEY_FILE, crypto.GetStaticPrivateBlob().size());
   }
   else
   {
     ConsoleLog("[INFO] Loaded persisted static server key from {} ({} bytes).\n",
-               kStaticKeyFile, existingKey.size());
+               STATIC_KEY_FILE, existingKey.size());
   }
 
   // Publish the pinned static public key so dev clients / ERHeadless bots can pin it
@@ -379,7 +384,19 @@ int main(int argc, char* argv[])
                  "+ snapshot cadence {} ms, RPO {} ms; continuing from outbox watermark "
                  "{}).\n", persistCfg.snapshotMs, persistCfg.writeBehindRpoMs, outboxWatermark);
     else
-      ConsoleLog("[WARN] Persistence thread failed to start - degraded no-persist mode.\n");
+    {
+      // A database.connectionString IS configured, so the operator intends persistence —
+      // failing to connect is a hard error, NOT a silent degrade. Refuse to boot rather
+      // than run a server that looks healthy but persists nothing (data loss on restart).
+      ConsoleLog("[ERROR] database.connectionString is set but the DB connection FAILED - "
+                 "refusing to start (would otherwise run with NO persistence). Check that "
+                 "SQL Server is reachable at the configured Server=, the database/login "
+                 "exist, and the ODBC Driver 18 is installed. Connection string: \"{}\". "
+                 "To run sim-only on purpose, clear database.connectionString in the config.\n",
+                 persistCfg.connString);
+      Neuron::Net::WinsockSocket::GlobalCleanup();
+      return 1;
+    }
   }
   else
   {
@@ -431,6 +448,25 @@ int main(int argc, char* argv[])
   ConsoleLog("[INFO] Listening on UDP 0.0.0.0:{} via IOCP ({} lanes). Waiting for clients "
              "(Ctrl+C to stop)...\n", port, listener.LaneCount());
 
+#ifdef _DEBUG
+  // --- Optional out-of-band diagnostic status port (§21; debug builds only) ----------
+  // A SEPARATE UDP socket (distinct from the IOCP game listener) that answers the fixed
+  // status query token with a read-only JSON snapshot of the live server status, for the
+  // debug client's server-status overlay. Off by default (statusPort 0); never on the
+  // 30 Hz hot loop. Compiled out entirely in retail builds.
+  const int64_t startUnix = NowUnix(); // boot time, for the uptime gauge
+  Neuron::Server::StatusEndpoint statusEndpoint;
+  if (cfg.statusPort != 0)
+  {
+    if (statusEndpoint.Start(cfg.statusPort))
+      ConsoleLog("[INFO] Debug status endpoint listening on UDP 0.0.0.0:{} (separate "
+                 "read-only diagnostic port; debug build only).\n", cfg.statusPort);
+    else
+      ConsoleLog("[WARN] Could not open the debug status port {} (in use?) - the server "
+                 "status overlay will be unavailable.\n", cfg.statusPort);
+  }
+#endif
+
   // OS thread-pool width for the M4 area-F snapshot encode (read-only, frozen post-tick
   // state). EncodeClientsPooled partitions clients across this many workers; the gathered
   // output is partition-count-independent (byte-identical to the serial reference).
@@ -450,7 +486,7 @@ int main(int argc, char* argv[])
 
   // Reap peers silent for longer than this (clients send a keepalive every 1 s;
   // a graceful Disconnect frees the slot immediately).
-  constexpr uint64_t kIdleTimeoutMs = 8000;
+  constexpr uint64_t IDLE_TIMEOUT_MS = 8000;
 
   std::vector<InboundDatagram> drained; // reused per loop (drains 'inbound' under lock)
 
@@ -487,7 +523,7 @@ int main(int argc, char* argv[])
     while (acc.ConsumeStep())
     {
       const auto t0 = std::chrono::steady_clock::now();
-      universe.Step(static_cast<float>(Neuron::Sim::kSimDeltaSeconds));
+      universe.Step(static_cast<float>(Neuron::Sim::SIM_DELTA_SECONDS));
       const double costSec =
           std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       acc.ReportTickCost(costSec);
@@ -528,6 +564,50 @@ int main(int argc, char* argv[])
       universe.DrainBuildCompleted(); // keep the in-memory hook drained even with no DB
     }
 
+    // 2d) Route combat economy events (loot drops/claims, killmails, cargo loss) the sim
+    //     produced this loop to the same write-through outbox (M6 area G → M5 area D, §15)
+    //     — the bridge that brings combat under the "zero economy loss" guarantee. Each
+    //     sim event maps to a portable Neuron::Sim::OutboxRecord (NeuronCore/EconomyOutbox.h,
+    //     unit-tested on the testrunner) whose idemKey is stable + unique, so a crash/replay
+    //     can't double-credit a bounty or drop a loot record. Killmails + low-hull alerts are
+    //     also drained so their queues don't grow unbounded (the KillmailLog/§24-notify and
+    //     client-SFX sinks land with M7 / area H; the economic record already rides EconEvents).
+    static_assert(static_cast<uint8_t>(Neuron::Sim::OutboxKind::LootClaim)
+                      == static_cast<uint8_t>(Neuron::Persist::EconomyEventKind::LootClaim) &&
+                  static_cast<uint8_t>(Neuron::Sim::OutboxKind::Killmail)
+                      == static_cast<uint8_t>(Neuron::Persist::EconomyEventKind::Killmail) &&
+                  static_cast<uint8_t>(Neuron::Sim::OutboxKind::CargoLost)
+                      == static_cast<uint8_t>(Neuron::Persist::EconomyEventKind::CargoLost) &&
+                  static_cast<uint8_t>(Neuron::Sim::OutboxKind::LootDrop)
+                      == static_cast<uint8_t>(Neuron::Persist::EconomyEventKind::LootDrop),
+                  "OutboxKind and Persist::EconomyEventKind codes must stay in lockstep");
+    if (dbAvailable)
+    {
+      for (const auto& e : universe.DrainEconEvents())
+      {
+        const Neuron::Sim::OutboxRecord rec = Neuron::Sim::MapEconEvent(
+            static_cast<uint8_t>(e.type), e.aNetId, e.bNetId, e.value, e.tick);
+        Neuron::Persist::EconomyMutation m;
+        m.idemKey   = rec.idemKey;
+        m.accountId = 0; // resolved to the owner account by the store from refType/refId
+        m.amount    = rec.amount;
+        m.kind      = static_cast<Neuron::Persist::EconomyEventKind>(rec.kind);
+        m.reason    = rec.reason;
+        m.refType   = rec.refType;
+        m.refId     = rec.refId;
+        const size_t depth = persist.EnqueueEconomy(m);
+        pTel.RecordOutboxDepth(static_cast<uint64_t>(depth));
+      }
+      universe.DrainKillmails();     // KillmailLog row + §24 notify sink lands with M7
+      universe.DrainLowHullAlerts(); // client retreat-alert SFX/UI sink lands with area H
+    }
+    else
+    {
+      universe.DrainEconEvents();
+      universe.DrainKillmails();
+      universe.DrainLowHullAlerts();
+    }
+
     // 3) Emit snapshots at the 20 Hz cadence (every ~1.5 sim ticks). The per-client
     //    delta encode runs over the M4 area-F job pool (read-only, frozen post-tick
     //    state) by passing encodeWorkers > 1; telemetry records encode ms + the App. B
@@ -553,7 +633,7 @@ int main(int argc, char* argv[])
     }
 
     // 4b) Reap gone clients (graceful Disconnect or idle timeout); despawn bases.
-    for (const auto& c : host.PruneStale(kIdleTimeoutMs))
+    for (const auto& c : host.PruneStale(IDLE_TIMEOUT_MS))
       ConsoleLog("[INFO] Connection closed: {} (netId {}) - {}.\n", c.endpoint, c.netId,
                  c.timedOut ? "idle timeout" : "graceful disconnect");
 
@@ -567,6 +647,33 @@ int main(int argc, char* argv[])
       const Neuron::Persist::AccountStore::AuthCounters ac = accounts.Counters();
       (void)ac; // exported via pTel at the login sites (ServerHost); mirrored here for logs
     }
+
+#ifdef _DEBUG
+    // 4d) Answer any pending diagnostic status queries (debug builds only). The status
+    //     record is built lazily (only when a query arrives) from the same §21 telemetry
+    //     the heartbeat logs, plus the live connection/object counts and static config.
+    statusEndpoint.Poll([&]() {
+      Neuron::Net::ServerStatus s;
+      s.uptimeSeconds      = static_cast<uint64_t>(NowUnix() - startUnix);
+      s.simTick            = simTick;
+      s.connectionsPending = static_cast<uint32_t>(host.ConnectionCount());
+      s.connectionsActive  = static_cast<uint32_t>(host.ConnectedCount());
+      s.objectsSpawned     = universe.World().EntityCount();
+      s.projectiles        = static_cast<uint64_t>(universe.ProjectileCount());
+      s.simP99Ms           = tel.SimP99();
+      s.encodeP99Ms        = tel.EncodeP99();
+      s.dilation           = tel.Dilation();
+      s.downstreamBytes    = tel.Net().downstreamBytes;
+      s.upstreamBytes      = tel.Net().upstreamBytes;
+      s.datagramsIn        = tel.Net().datagramsIn;
+      s.datagramsOut       = tel.Net().datagramsOut;
+      s.baselineBytes      = tel.BaselineBytes();
+      s.listenPort         = port;
+      s.devAuthStub        = devAuthStub;
+      s.persistenceEnabled = dbAvailable;
+      return s;
+    });
+#endif
 
     // 5) Log connection-state transitions immediately (the interesting events).
     const int connections = static_cast<int>(host.ConnectionCount());
@@ -596,10 +703,6 @@ int main(int argc, char* argv[])
                    pTel.OutboxDepth(), pTel.RpoWatermarkMs(), ac.loginSuccess,
                    ac.loginFailures, ac.lockouts, ac.rateLimited);
       }
-      if (rxDatagrams == 0)
-        ConsoleLog("[WARN] No datagrams received yet. If a client is running, check: UWP "
-                   "loopback exemption, Windows Firewall, and that the client targets UDP {}.\n",
-                   port);
       lastLogTick = simTick;
     }
 
@@ -610,6 +713,9 @@ int main(int argc, char* argv[])
 
   // --- Shutdown: stop receive, flush persistence, clean up --------------------------
   ConsoleLog("[INFO] Shutting down - stopping listener + persistence...\n");
+#ifdef _DEBUG
+  statusEndpoint.Stop();
+#endif
   listener.Stop();
   if (dbAvailable)
   {

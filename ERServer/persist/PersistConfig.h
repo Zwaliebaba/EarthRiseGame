@@ -34,23 +34,23 @@ enum class DbAuthMode : uint8_t
 };
 
 // PBKDF2 cost (§14). High + tunable; the SCHEMA-ASSUMPTION note below applies.
-inline constexpr uint32_t kDefaultPbkdf2Iterations = 210000; // OWASP-tier first pass for SHA-512
-inline constexpr uint32_t kMinPbkdf2Iterations     = 100000; // refuse to go below this
+inline constexpr uint32_t DEFAULT_PBKDF2_ITERATIONS = 210000; // OWASP-tier first pass for SHA-512
+inline constexpr uint32_t MIN_PBKDF2_ITERATIONS     = 100000; // refuse to go below this
 
 // Session token lifetime (§14, expiring session token). 24 h default; refreshed on use.
-inline constexpr uint64_t kDefaultSessionTtlSeconds = 24ull * 60ull * 60ull;
+inline constexpr uint64_t DEFAULT_SESSION_TTL_SECONDS = 24ull * 60ull * 60ull;
 
 // Abuse controls (§14 / R6): per-account + per-IP rate-limit and lockout.
-inline constexpr uint32_t kDefaultMaxLoginFailures = 5;     // failures before lockout
-inline constexpr uint64_t kDefaultLockoutSeconds   = 15 * 60; // 15 min account lockout
+inline constexpr uint32_t DEFAULT_MAX_LOGIN_FAILURES = 5;     // failures before lockout
+inline constexpr uint64_t DEFAULT_LOCKOUT_SECONDS   = 15 * 60; // 15 min account lockout
 
 // Durability cadences (§15, §19 open questions — structure here, tuning is a config flip).
-inline constexpr uint64_t kDefaultWriteBehindRpoMs = 2000;  // ≤ a few seconds of movement loss
-inline constexpr uint64_t kDefaultSnapshotMs       = 60000; // warm-restart blob cadence
+inline constexpr uint64_t DEFAULT_WRITE_BEHIND_RPO_MS = 2000;  // ≤ a few seconds of movement loss
+inline constexpr uint64_t DEFAULT_SNAPSHOT_MS       = 60000; // warm-restart blob cadence
 
 // Connection-pool sizing for the persistence thread (area A).
-inline constexpr int kDefaultPoolMin = 1;
-inline constexpr int kDefaultPoolMax = 4;
+inline constexpr int DEFAULT_POOL_MIN = 1;
+inline constexpr int DEFAULT_POOL_MAX = 4;
 
 struct PersistConfig
 {
@@ -65,18 +65,18 @@ struct PersistConfig
 
     // -- auth (§14) -------------------------------------------------------------
     std::string pepper;           // auth.serverPepper — applied in-process, NEVER stored in SQL
-    uint32_t    pbkdf2Iterations{ kDefaultPbkdf2Iterations };
-    uint32_t    maxLoginFailures{ kDefaultMaxLoginFailures };
-    uint64_t    lockoutSeconds{ kDefaultLockoutSeconds };
-    uint64_t    sessionTtlSeconds{ kDefaultSessionTtlSeconds };
+    uint32_t    pbkdf2Iterations{ DEFAULT_PBKDF2_ITERATIONS };
+    uint32_t    maxLoginFailures{ DEFAULT_MAX_LOGIN_FAILURES };
+    uint64_t    lockoutSeconds{ DEFAULT_LOCKOUT_SECONDS };
+    uint64_t    sessionTtlSeconds{ DEFAULT_SESSION_TTL_SECONDS };
 
     // -- durability cadences (§15) ---------------------------------------------
-    uint64_t    writeBehindRpoMs{ kDefaultWriteBehindRpoMs };
-    uint64_t    snapshotMs{ kDefaultSnapshotMs };
+    uint64_t    writeBehindRpoMs{ DEFAULT_WRITE_BEHIND_RPO_MS };
+    uint64_t    snapshotMs{ DEFAULT_SNAPSHOT_MS };
 
     // -- pool ------------------------------------------------------------------
-    int         poolMin{ kDefaultPoolMin };
-    int         poolMax{ kDefaultPoolMax };
+    int         poolMin{ DEFAULT_POOL_MIN };
+    int         poolMax{ DEFAULT_POOL_MAX };
 
     [[nodiscard]] bool HasConnString() const noexcept { return !connString.empty(); }
     [[nodiscard]] bool HasPepper()     const noexcept { return !pepper.empty(); }

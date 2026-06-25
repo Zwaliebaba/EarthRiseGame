@@ -21,7 +21,7 @@ using Neuron::Sim::InterestGrid;
 using Neuron::Sim::ReplicationStamps;
 using Neuron::Sim::SectorRadiusForRange;
 using Neuron::Sim::ServerUniverse;
-using Neuron::Universe::kSectorSize;
+using Neuron::Universe::SECTOR_SIZE;
 using Neuron::Universe::SectorId;
 using Neuron::Universe::UniversePos;
 using Neuron::Universe::UniverseToSector;
@@ -89,9 +89,9 @@ ER_TEST(Interest, NeighbourhoodSubscriptionMatchesRange)
 ER_TEST(Interest, SectorRadiusForRangeCeils)
 {
     ER_CHECK_EQ(SectorRadiusForRange(0.0f), 0);
-    ER_CHECK_EQ(SectorRadiusForRange(static_cast<float>(kSectorSize) * 0.5f), 1);
-    ER_CHECK_EQ(SectorRadiusForRange(static_cast<float>(kSectorSize)), 1);
-    ER_CHECK_EQ(SectorRadiusForRange(static_cast<float>(kSectorSize) * 2.1f), 3);
+    ER_CHECK_EQ(SectorRadiusForRange(static_cast<float>(SECTOR_SIZE) * 0.5f), 1);
+    ER_CHECK_EQ(SectorRadiusForRange(static_cast<float>(SECTOR_SIZE)), 1);
+    ER_CHECK_EQ(SectorRadiusForRange(static_cast<float>(SECTOR_SIZE) * 2.1f), 3);
 }
 
 ER_TEST(Interest, SetSubscriptionDiffsEnterAndLeave)
@@ -163,7 +163,7 @@ ER_TEST(Interest, WarpPrefetchSubscribesDestinationBeforeArrival)
 {
     ServerUniverse su(false);
     const uint32_t base = su.SpawnBase({ 0, 0, 0 }, { 0, 0, 0 });
-    const UniversePos dest{ int64_t(40) * kSectorSize, 0, 0 }; // far across sectors
+    const UniversePos dest{ int64_t(40) * SECTOR_SIZE, 0, 0 }; // far across sectors
     const SectorId destSec = UniverseToSector(dest);
 
     ER_CHECK(su.BeginWarpTo(base, dest));            // R21 prefetch fires here
@@ -190,7 +190,12 @@ ER_TEST(Replication, VersionBumpsOnlyWhenAReplicatedFieldChanges)
     su.Step(0.1f);
     ER_CHECK_EQ(su.ReplVersion(base), v1); // version held across idle ticks
 
-    su.SetBaseVelocity(base, { 50, 0, 0 }); // now it moves
+    // The base relocates by a Move order now (the legacy SetBaseVelocity path is retired).
+    Neuron::Sim::FleetCommand mv;
+    mv.intent      = Neuron::Sim::IntentType::Move;
+    mv.units       = { base };
+    mv.targetPoint = { 1'000'000, 0, 0 }; // far point → the base keeps steering toward it
+    su.ApplyFleetCommand(base, mv);       // player ≈ base net id, so it owns itself
     su.Step(0.1f);
     ER_CHECK(su.ReplVersion(base) > v1); // position changed → version advanced
 }

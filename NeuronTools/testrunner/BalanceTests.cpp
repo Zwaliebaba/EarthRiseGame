@@ -148,8 +148,8 @@ ER_TEST(Balance, MisTunedResistRemovesDamageTypeEdge)
     const CombatCatalog real = DefaultCombatCatalog();
     CombatCatalog flat = real;
     for (auto& h : flat.hulls)
-        for (int l = 0; l < kDefenseLayerCount; ++l)
-            for (int t = 0; t < kDamageTypeCount; ++t)
+        for (int l = 0; l < DEFENSE_LAYER_COUNT; ++l)
+            for (int t = 0; t < DAMAGE_TYPE_COUNT; ++t)
                 h.resists.resist[l][t] = 0.0f; // no counters anywhere
 
     const int emReal  = TicksToKillShieldTank("fighter-em",  real);

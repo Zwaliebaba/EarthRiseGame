@@ -67,7 +67,7 @@ inline void WritePacketHeader(std::vector<uint8_t>& out, const PacketHeader& h)
 // Returns false if there are not enough bytes for a full header.
 [[nodiscard]] inline bool ReadPacketHeader(std::span<const uint8_t> in, PacketHeader& h, size_t& off)
 {
-    if (in.size() < PacketHeader::kWireSize) return false;
+    if (in.size() < PacketHeader::WIRE_SIZE) return false;
     off = 0;
     h.protocolId      = GetU32(in, off);
     h.connectionToken = GetU64(in, off);

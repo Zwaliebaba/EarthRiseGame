@@ -10,7 +10,7 @@
 //    uintptr_t (which is exactly what the Win32 SOCKET typedef is — UINT_PTR), so
 //    callers that only need ISocket don't transitively include <winsock2.h>.
 //    The .cpp casts the member back to SOCKET. INVALID_SOCKET == (SOCKET)(~0),
-//    which as uintptr_t is the all-ones sentinel kInvalidSocket below.
+//    which as uintptr_t is the all-ones sentinel INVALID_SOCKET_SENTINEL below.
 //  * Non-blocking mode is enabled via ioctlsocket(FIONBIO) in Open().
 //  * Links ws2_32.lib (see .cpp).
 //
@@ -52,11 +52,11 @@ public:
 
 private:
     // Mirrors Win32 SOCKET (UINT_PTR). All-ones is INVALID_SOCKET.
-    static constexpr uintptr_t kInvalidSocket = static_cast<uintptr_t>(~uintptr_t{ 0 });
+    static constexpr uintptr_t INVALID_SOCKET_SENTINEL = static_cast<uintptr_t>(~uintptr_t{ 0 });
 
-    uintptr_t sock_{ kInvalidSocket };
-    uint16_t  localPort_{ 0 };
-    bool      isV6_{ false }; // true if the bound socket is AF_INET6 (dual-stack)
+    uintptr_t m_sock{ INVALID_SOCKET_SENTINEL };
+    uint16_t  m_localPort{ 0 };
+    bool      m_isV6{ false }; // true if the bound socket is AF_INET6 (dual-stack)
 };
 
 } // namespace Neuron::Net

@@ -40,7 +40,7 @@ struct SnapshotEntity
     Neuron::Universe::UniversePos pos{};
     DirectX::XMFLOAT3       localOffset{ 0, 0, 0 };
     int32_t                 hp{ 0 };
-    uint16_t                shapeId{ 0xFFFF }; // index into ShapeCatalog (kInvalidShapeId)
+    uint16_t                shapeId{ 0xFFFF }; // index into ShapeCatalog (INVALID_SHAPE_ID)
     uint32_t                ownerPlayer{ 0 };  // owning player net id (0 = NPC/unowned); IFF
 };
 
@@ -132,15 +132,15 @@ enum DeltaFlag : uint8_t
     DeltaTomb   = 1 << 7, // tombstone (left interest / destroyed) — emitted at area D
 };
 
-// Quantization: the sector-local span (kSectorSize m) maps to 2^bits steps per
+// Quantization: the sector-local span (SECTOR_SIZE m) maps to 2^bits steps per
 // axis. 20 bits → step ≈ 16384 / 2^20 ≈ 0.0156 m (~1.6 cm), far under the visible
 // jitter at the ~100 ms interpolation delay (§8.4) while keeping a moving entity's
 // record near the App. B ~16 B/delta target. A tunable (the §19 open question;
 // area J's load test sweeps it), not a literal.
-inline constexpr int kPosQuantBitsPerAxis = 20;
+inline constexpr int POS_QUANT_BITS_PER_AXIS = 20;
 
 // Header bits of an encoded delta snapshot (Serde version u32 · tick u32 · count u16).
-inline constexpr int kDeltaHeaderBits = 32 + 32 + 16;
+inline constexpr int DELTA_HEADER_BITS = 32 + 32 + 16;
 
 // ZigZag map a signed sector coordinate to an unsigned wire value (small magnitudes
 // stay small). Sector coords fit int32 within the §6.3 region bounds and ride the
@@ -154,11 +154,11 @@ inline constexpr int kDeltaHeaderBits = 32 + 32 + 16;
     return static_cast<int32_t>((v >> 1) ^ (~(v & 1u) + 1u));
 }
 
-// Quantize a sector-local metre offset in [0, kSectorSize) to a bits-per-axis index.
+// Quantize a sector-local metre offset in [0, SECTOR_SIZE) to a bits-per-axis index.
 [[nodiscard]] inline uint32_t QuantizeSectorLocal(double localMetres) noexcept
 {
-    constexpr double   span = static_cast<double>(Neuron::Universe::kSectorSize);
-    constexpr uint64_t steps = uint64_t(1) << kPosQuantBitsPerAxis;
+    constexpr double   span = static_cast<double>(Neuron::Universe::SECTOR_SIZE);
+    constexpr uint64_t steps = uint64_t(1) << POS_QUANT_BITS_PER_AXIS;
     constexpr uint32_t maxq = static_cast<uint32_t>(steps - 1);
     double clamped = localMetres < 0.0 ? 0.0 : (localMetres >= span ? span : localMetres);
     double q = std::round(clamped / span * static_cast<double>(steps));
@@ -168,12 +168,12 @@ inline constexpr int kDeltaHeaderBits = 32 + 32 + 16;
 }
 [[nodiscard]] inline double DequantizeSectorLocal(uint32_t q) noexcept
 {
-    constexpr double   span = static_cast<double>(Neuron::Universe::kSectorSize);
-    constexpr uint64_t steps = uint64_t(1) << kPosQuantBitsPerAxis;
+    constexpr double   span = static_cast<double>(Neuron::Universe::SECTOR_SIZE);
+    constexpr uint64_t steps = uint64_t(1) << POS_QUANT_BITS_PER_AXIS;
     return (static_cast<double>(q) / static_cast<double>(steps)) * span;
 }
 
-// Full sector-local position (metres incl. fraction, each axis in [0, kSectorSize))
+// Full sector-local position (metres incl. fraction, each axis in [0, SECTOR_SIZE))
 // of an absolute position + its sector-local float offset.
 inline void SectorLocalMetres(const Neuron::Universe::UniversePos& pos,
                               const DirectX::XMFLOAT3& localOffset,
@@ -245,7 +245,7 @@ struct DeltaSnapshot
     int bits = 32 + 8; // netId + flags
     if (r.mask & DeltaTomb) return bits;
     if (r.mask & DeltaSector) bits += 3 * 32;
-    if (r.mask & DeltaPos)    bits += 3 * kPosQuantBitsPerAxis;
+    if (r.mask & DeltaPos)    bits += 3 * POS_QUANT_BITS_PER_AXIS;
     if (r.mask & DeltaHp)     bits += 32;
     if (r.mask & DeltaShape)  bits += 16;
     if (r.mask & DeltaOwner)  bits += 32;
@@ -264,9 +264,9 @@ inline void WriteDeltaRecord(Neuron::Serde::WriteBuffer& wb, const DeltaRecord& 
         wb.WriteUint32(ZigZag32(static_cast<int32_t>(r.sector.z)));
     }
     if (r.mask & DeltaPos) {
-        wb.WriteBits(r.qpos[0], kPosQuantBitsPerAxis);
-        wb.WriteBits(r.qpos[1], kPosQuantBitsPerAxis);
-        wb.WriteBits(r.qpos[2], kPosQuantBitsPerAxis);
+        wb.WriteBits(r.qpos[0], POS_QUANT_BITS_PER_AXIS);
+        wb.WriteBits(r.qpos[1], POS_QUANT_BITS_PER_AXIS);
+        wb.WriteBits(r.qpos[2], POS_QUANT_BITS_PER_AXIS);
     }
     if (r.mask & DeltaHp)    wb.WriteUint32(static_cast<uint32_t>(r.hp));
     if (r.mask & DeltaShape) wb.WriteUint16(r.shapeId);
@@ -287,9 +287,9 @@ inline void WriteDeltaRecord(Neuron::Serde::WriteBuffer& wb, const DeltaRecord& 
         r.sector.z = UnZigZag32(rb.ReadUint32());
     }
     if (r.mask & DeltaPos) {
-        r.qpos[0] = static_cast<uint32_t>(rb.ReadBits(kPosQuantBitsPerAxis));
-        r.qpos[1] = static_cast<uint32_t>(rb.ReadBits(kPosQuantBitsPerAxis));
-        r.qpos[2] = static_cast<uint32_t>(rb.ReadBits(kPosQuantBitsPerAxis));
+        r.qpos[0] = static_cast<uint32_t>(rb.ReadBits(POS_QUANT_BITS_PER_AXIS));
+        r.qpos[1] = static_cast<uint32_t>(rb.ReadBits(POS_QUANT_BITS_PER_AXIS));
+        r.qpos[2] = static_cast<uint32_t>(rb.ReadBits(POS_QUANT_BITS_PER_AXIS));
     }
     if (r.mask & DeltaHp)    r.hp          = static_cast<int32_t>(rb.ReadUint32());
     if (r.mask & DeltaShape) r.shapeId     = rb.ReadUint16();
@@ -336,7 +336,7 @@ inline std::vector<uint8_t> EncodeDeltaSnapshot(const DeltaSnapshot& snap)
     DeltaSnapshot snap;
     snap.tick = tick;
     overflow.clear();
-    long long bits = kDeltaHeaderBits;
+    long long bits = DELTA_HEADER_BITS;
     for (size_t i = 0; i < ordered.size(); ++i) {
         const DeltaRecord& r = ordered[i];
         if (r.mask == 0) continue; // nothing to send
@@ -365,9 +365,13 @@ public:
     {
         DeltaSnapshot snap;
         if (!DecodeDeltaSnapshot(body, snap)) return false;
+        if (snap.tick > m_latestTick) m_latestTick = snap.tick;
         for (const DeltaRecord& r : snap.records) ApplyRecord(snap.tick, r);
         return true;
     }
+
+    // Highest tick applied so far (the accumulated state's logical time).
+    [[nodiscard]] uint32_t LatestTick() const noexcept { return m_latestTick; }
 
     [[nodiscard]] const SnapshotEntity* Find(uint32_t netId) const
     {
@@ -410,6 +414,7 @@ private:
 
     std::unordered_map<uint32_t, SnapshotEntity> m_entities;
     std::unordered_map<uint32_t, uint32_t>       m_lastTick; // netId → last applied tick (LWW)
+    uint32_t                                     m_latestTick{ 0 };
 };
 
 } // namespace Neuron::Sim

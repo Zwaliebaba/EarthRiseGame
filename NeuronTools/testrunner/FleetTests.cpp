@@ -22,7 +22,7 @@ namespace
 {
     // Big sensors + fast economy so detection/build aren't in the way of the
     // command/combat behaviour under test.
-    const char* kSrc =
+    const char* SRC =
         "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
         "economy { fleet_cap = 8  cargo_capacity = 500  storage_capacity = 2000  harvest_rate = 100\n"
         "          sensor_range_ship = 8000  sensor_range_base = 20000  build_ore = 100  build_ice = 0\n"
@@ -32,7 +32,7 @@ namespace
     {
         UniverseDataset ds;
         std::vector<std::string> errs;
-        const bool ok = Neuron::Tools::ParseUniverseSource(kSrc, ds, errs);
+        const bool ok = Neuron::Tools::ParseUniverseSource(SRC, ds, errs);
         ER_CHECK(ok && errs.empty());
         su.LoadUniverse(ds);
     }

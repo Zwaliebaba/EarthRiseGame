@@ -9,10 +9,11 @@
 
 > **Status:** pre-release / in active development. Milestones **M0–M2 complete**. The
 > platform-independent simulation, networking, persistence and **combat** logic through
-> **M6** is implemented and green on the Linux `testrunner` (**269 cases, 0 failed**); what
-> remains across **M3–M6** is the **Windows / real-infrastructure integration & verification**
-> — the DX12/UWP client glue, IOCP, the `ERServer` + ODBC/SQL Server persistence layer, and
-> the M6 deployment track (Azure SQL, Kubernetes, Store pass). See
+> **M6** is implemented and green on the Linux `testrunner` (**299 cases, 0 failed**), and the
+> Windows / real-infrastructure integration (DX12/UWP client, IOCP, `ERServer` + ODBC/SQL Server)
+> has been verified on the Windows build agent. What remains is the **M6 deployment track**
+> (Azure SQL migration, Kubernetes, Store pass, combat VFX/SFX, optional prediction) and all of
+> **M7** (sandbox: conquest / economy / PvE / onboarding). See
 > [`docs/masterplan.md`](docs/masterplan.md) §17 for the roadmap and
 > [`docs/implementation/`](docs/implementation/) for the per-milestone status.
 
@@ -208,13 +209,26 @@ exercise:
 | Arrow keys | Pan the camera (releases base-follow) |
 | `F` / `Space` | Toggle base-follow / recenter on your base |
 | Left-click / left-drag | Select nearest unit / box-select |
+| **Right-click a unit/object** | Open a **context menu** of actions for the selection (attack / orbit / keep-range / harvest / claim / guard); a right-*drag* still orbits |
 | Click the radar (lower-left) | Issue a smart command (move/attack/warp) to the selection |
 | `A` / `B` / `S` | Select all own ships / build a ship at base / stop selection |
 | `Ctrl+#` then `#` | Set / recall a control group |
+| `F3` | Toggle the **server-status overlay** (debug builds only) |
 
 > An amber **objective banner** (top-left) walks a new player through select → engage →
 > clear the guardian site. Selected units show a green bracket; combat units show an
 > IFF-coloured health bar.
+
+> **Server-status overlay (debug only).** A debug client build (`_DEBUG`) can press
+> **`F3`** to toggle a top-right panel that reads live status from the server over a
+> **separate, read-only diagnostic UDP port** (number of connections, objects spawned,
+> sim/encode p99, time-dilation, cumulative network bytes, plus the server's listen
+> port / auth mode / persistence). Enable it server-side by setting `server.statusPort`
+> in the ERServer config (0 = disabled) and point the client at the same port. The
+> whole feature — the `ERServer` endpoint and the client overlay — is compiled out of
+> **retail** builds via `#ifdef _DEBUG`; the port is for a trusted operator network
+> only. The platform-independent core (wire format + poller) is covered by
+> `ServerStatusTests` on the Linux `testrunner`.
 
 > **UWP loopback:** for local client↔server testing on one machine, UWP is sandboxed off
 > loopback by default. Visual Studio adds a loopback exemption in Debug; test the

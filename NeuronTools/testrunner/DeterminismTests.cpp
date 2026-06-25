@@ -21,11 +21,11 @@ using Neuron::Universe::UniversePos;
 
 namespace
 {
-    constexpr int kOre = static_cast<int>(ResourceType::Ore);
+    constexpr int ORE = static_cast<int>(ResourceType::Ore);
 
     // A connected graph + fast economy so a scripted bot can run the full loop in a
     // bounded number of ticks.
-    const char* kSrc =
+    const char* SRC =
         "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
         "beacon HUB { region = R pos = 0 0 0       links = RIM kind = public }\n"
         "beacon RIM { region = R pos = 200000 0 0  links = HUB kind = public }\n"
@@ -40,7 +40,7 @@ namespace
     {
         UniverseDataset ds;
         std::vector<std::string> errs;
-        const bool ok = Neuron::Tools::ParseUniverseSource(kSrc, ds, errs);
+        const bool ok = Neuron::Tools::ParseUniverseSource(SRC, ds, errs);
         ER_CHECK(ok && errs.empty());
         return ds;
     }
@@ -132,7 +132,7 @@ ER_TEST(Determinism, ScriptedFullLoopHarvestBuildJump)
     bool enqueued = false;
     for (uint32_t t = 0; t < 200; ++t) {
         for (const auto* s : ctrl.StepsForTick(t)) su.ApplyFleetCommand(s->player, s->cmd);
-        if (!enqueued && su.StorageOf(base)->amount[kOre] >= 300.0f) {
+        if (!enqueued && su.StorageOf(base)->amount[ORE] >= 300.0f) {
             ER_CHECK(su.EnqueueBuild(base));
             enqueued = true;
         }

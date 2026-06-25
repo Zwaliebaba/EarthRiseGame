@@ -91,21 +91,21 @@ public:
     static uint16_t BaseShapeId()
     {
         const uint16_t id = ShapeIdByName("Outpost01");
-        return id != kInvalidShapeId ? id : 0; // 0 is always a valid catalog entry
+        return id != INVALID_SHAPE_ID ? id : 0; // 0 is always a valid catalog entry
     }
 
     // Shape used for a jump beacon (a jumpgate mesh).
     static uint16_t BeaconShapeId()
     {
         const uint16_t id = ShapeIdByName("Jumpgate01");
-        return id != kInvalidShapeId ? id : 0;
+        return id != INVALID_SHAPE_ID ? id : 0;
     }
 
     // Placeholder hull for a freshly built ship (M3; fitting/roles are M6).
     static uint16_t ShipShapeId()
     {
         const uint16_t id = ShapeIdByName("HullShuttle");
-        return id != kInvalidShapeId ? id : 0;
+        return id != INVALID_SHAPE_ID ? id : 0;
     }
 
     // Spawn a mobile base for a player. Returns the assigned network id. Bases
@@ -117,7 +117,7 @@ public:
         auto& t = m_world.AddComponent<Transform>(e);
         t.pos = start;
         auto& v = m_world.AddComponent<Velocity>(e);
-        v.metresPerSecond = ClampSpeed(vel, kMaxBaseSpeed);
+        v.metresPerSecond = ClampSpeed(vel, MAX_BASE_SPEED);
         m_world.AddComponent<NetId>(e).value = netId;
         m_world.AddComponent<BaseTag>(e);
         m_world.AddComponent<ShapeId>(e) = { BaseShapeId(), EntityKind::Base };
@@ -127,6 +127,7 @@ public:
         m_world.AddComponent<Storage>(e).capacity = m_economy.storageCapacity;
         m_world.AddComponent<BuildQueue>(e);
         m_world.AddComponent<Sensor>(e).range     = m_economy.sensorRangeBase;
+        m_world.AddComponent<FleetOrder>(e);                  // the base relocates via Move/Retreat orders (§23.4)
         m_world.AddComponent<BaseCombat>(e);                  // disable-not-destroy state (§13.1)
         // The capital fit = fire-support + light defensive weapons (§13.1 first pass);
         // installs layered HP + resists + the fitting grid + the synced Health mirror.
@@ -161,20 +162,13 @@ public:
         auto e = m_world.CreateEntity();
         m_world.AddComponent<Transform>(e).pos = pos;
         m_world.AddComponent<NetId>(e).value = netId;
-        const uint16_t sid = (shape != kInvalidShapeId) ? shape : uint16_t{ 0 };
+        const uint16_t sid = (shape != INVALID_SHAPE_ID) ? shape : uint16_t{ 0 };
         m_world.AddComponent<ShapeId>(e) = { sid, EntityKind::ResourceNode };
         auto& rn = m_world.AddComponent<ResourceNodeTag>(e);
         rn.type      = static_cast<uint8_t>(type);
         rn.remaining = yield;
         m_netIdToEntity[netId] = e;
         return netId;
-    }
-
-    // Apply a validated move intent to a player's base (server-authoritative).
-    void SetBaseVelocity(uint32_t netId, DirectX::XMFLOAT3 vel)
-    {
-        if (auto* v = m_world.GetComponent<Velocity>(EntityOf(netId)))
-            v->metresPerSecond = ClampSpeed(vel, kMaxBaseSpeed);
     }
 
     // --- navigation: warp + jump-beacon network (§13.12) ---------------------
@@ -309,7 +303,7 @@ public:
     // new net id, or 0 if the player is already at cap.
     uint32_t SpawnFleetShip(uint32_t player, uint16_t shapeId, Neuron::Universe::UniversePos pos)
     {
-        return SpawnFleetShipFit(player, shapeId, pos, kDefaultShipFit);
+        return SpawnFleetShipFit(player, shapeId, pos, DEFAULT_SHIP_FIT);
     }
 
     // Spawn a ship owned by 'player' with a NAMED catalog fit (area A/B/F). The fit
@@ -335,7 +329,7 @@ public:
         m_world.AddComponent<Sensor>(e).range     = m_economy.sensorRangeShip;
         m_world.AddComponent<FleetMember>(e);
         m_world.AddComponent<FleetOrder>(e);
-        if (!InstallFit(e, fitName)) InstallFit(e, kDefaultShipFit); // resilient to a bad name
+        if (!InstallFit(e, fitName)) InstallFit(e, DEFAULT_SHIP_FIT); // resilient to a bad name
         m_netIdToEntity[netId] = e;
         return netId;
     }
@@ -445,8 +439,8 @@ public:
         Cargo*         cg = m_world.GetComponent<Cargo>(EntityOf(claimerNetId));
         if (!lc || !cg) return false;
         int32_t value = 0;
-        for (int i = 0; i < kResourceSlots; ++i) {
-            float used = 0.0f; for (int j = 0; j < kResourceSlots; ++j) used += cg->amount[j];
+        for (int i = 0; i < RESOURCE_SLOTS; ++i) {
+            float used = 0.0f; for (int j = 0; j < RESOURCE_SLOTS; ++j) used += cg->amount[j];
             const float space = cg->capacity - used;
             const float take  = std::min(lc->items[i], std::max(0.0f, space));
             cg->amount[i] += take;
@@ -477,7 +471,7 @@ public:
     // site is "cleared" once every guardian is destroyed (DrainClearedSites). NPCs
     // are server ECS entities (OwnerId.player == 0), distinct from ERHeadless bots.
     uint16_t SpawnNpcSite(Neuron::Universe::UniversePos center, int count, float radius = 1200.0f,
-                          std::string_view fitName = kNpcFit)
+                          std::string_view fitName = NPC_FIT)
     {
         const uint16_t siteId = m_nextSiteId++;
         int& alive = m_siteAlive[siteId];
@@ -546,7 +540,7 @@ public:
     // Progress a timed scan of 'targetNetId' by 'player'; once dwell ≥ scanSeconds
     // the target is permanently revealed to that player (feeds warp/jump target +
     // the site, §13.7). Returns true when the scan completes this call.
-    bool OrderScan(uint32_t player, uint32_t targetNetId, float dt, float scanSeconds = kScanSeconds)
+    bool OrderScan(uint32_t player, uint32_t targetNetId, float dt, float scanSeconds = SCAN_SECONDS)
     {
         if (!m_world.IsAlive(EntityOf(targetNetId))) return false;
         if (m_revealed[player].count(targetNetId)) return true; // already known
@@ -962,7 +956,7 @@ public:
                     b.hullHp = h->hp; b.shieldHp = h->maxHp; b.armorHp = h->maxHp;
                 }
                 if (const Storage* st = GetC<Storage>(id.value))
-                    for (int i = 0; i < kResourceSlots; ++i) b.storage[i] = st->amount[i];
+                    for (int i = 0; i < RESOURCE_SLOTS; ++i) b.storage[i] = st->amount[i];
                 if (const Fuel* f = GetC<Fuel>(id.value)) b.fuel = f->current;
                 if (const NavState* n = GetC<NavState>(id.value)) b.navPhase = static_cast<uint8_t>(n->phase);
                 // Disable-not-destroy state (§13.1, area G) — persisted so a restart keeps
@@ -984,7 +978,7 @@ public:
                 if (const OwnerId* o = GetC<OwnerId>(id.value)) sh.ownerAccount = o->player;
                 if (const Health* h = GetC<Health>(id.value)) sh.hp = h->hp;
                 if (const Cargo* c = GetC<Cargo>(id.value))
-                    for (int i = 0; i < kResourceSlots; ++i) sh.cargo[i] = c->amount[i];
+                    for (int i = 0; i < RESOURCE_SLOTS; ++i) sh.cargo[i] = c->amount[i];
                 s.ships.push_back(sh);
             });
 
@@ -1055,7 +1049,7 @@ public:
             m_world.AddComponent<OwnerId>(e).player = static_cast<uint32_t>(b.ownerAccount);
             auto& st = m_world.AddComponent<Storage>(e);
             st.capacity = m_economy.storageCapacity;
-            for (int i = 0; i < kResourceSlots; ++i) st.amount[i] = b.storage[i];
+            for (int i = 0; i < RESOURCE_SLOTS; ++i) st.amount[i] = b.storage[i];
             auto& q = m_world.AddComponent<BuildQueue>(e);
             m_world.AddComponent<Sensor>(e).range = m_economy.sensorRangeBase;
             // Re-apply this owner's active build (matched below from state.builds).
@@ -1087,13 +1081,13 @@ public:
             m_world.AddComponent<OwnerId>(e).player = static_cast<uint32_t>(sh.ownerAccount);
             auto& c = m_world.AddComponent<Cargo>(e);
             c.capacity = m_economy.cargoCapacity;
-            for (int i = 0; i < kResourceSlots; ++i) c.amount[i] = sh.cargo[i];
+            for (int i = 0; i < RESOURCE_SLOTS; ++i) c.amount[i] = sh.cargo[i];
             m_world.AddComponent<Fuel>(e) = { m_nav.shipFuelMax, m_nav.shipFuelMax };
             m_world.AddComponent<NavState>(e);
             m_world.AddComponent<Sensor>(e).range = m_economy.sensorRangeShip;
             m_world.AddComponent<FleetMember>(e);
             m_world.AddComponent<FleetOrder>(e);
-            InstallFit(e, kDefaultShipFit); // layered HP + resists + fitting + Health mirror
+            InstallFit(e, DEFAULT_SHIP_FIT); // layered HP + resists + fitting + Health mirror
             if (Health* h = m_world.GetComponent<Health>(e)) h->hp = sh.hp; // restore mirror cur
             m_netIdToEntity[sh.netId] = e;
             maxNetId = std::max(maxNetId, sh.netId);
@@ -1110,13 +1104,13 @@ public:
             m_world.AddComponent<ShapeId>(e) = { ShipShapeId(), EntityKind::NpcUnit };
             m_world.AddComponent<OwnerId>(e).player = 0;
             m_world.AddComponent<FleetOrder>(e);
-            InstallFit(e, kNpcFit);
+            InstallFit(e, NPC_FIT);
             if (Health* h = m_world.GetComponent<Health>(e)) h->hp = n.hp; // restore mirror cur
             auto& ai = m_world.AddComponent<NpcAi>(e);
             ai.state      = static_cast<AiState>(n.aiState);
             ai.home       = { n.x, n.y, n.z };
-            ai.aggroRange = kNpcAggroRange;
-            ai.fleeHpFrac = kNpcFleeHpFrac;
+            ai.aggroRange = NPC_AGGRO_RANGE;
+            ai.fleeHpFrac = NPC_FLEE_HP_FRAC;
             ai.siteId     = n.siteId;
             m_netIdToEntity[n.netId] = e;
             ++m_siteAlive[n.siteId];
@@ -1126,17 +1120,17 @@ public:
         m_nextNetId = maxNetId + 1; // future spawns never collide with restored ids
     }
 
-    static constexpr float kMaxBaseSpeed = 50.0f; // m/s cap (server validates intents)
+    static constexpr float MAX_BASE_SPEED = 50.0f; // m/s cap (server validates intents)
 
     // Movement / AI constants. The combat BALANCE is now game data (CombatData.h, §15);
     // these are sim-shape constants (fallback speed, NPC sensing), not balance literals.
-    static constexpr float   kFleetMoveSpeed  = 2000.0f; // fallback m/s if a unit has no HullInfo
-    static constexpr float   kNpcAggroRange   = 6000.0f;
-    static constexpr float   kNpcFleeHpFrac   = 0.15f;
-    static constexpr float   kScanSeconds     = 3.0f; // dwell to reveal a contact (area E)
+    static constexpr float   FLEET_MOVE_SPEED  = 2000.0f; // fallback m/s if a unit has no HullInfo
+    static constexpr float   NPC_AGGRO_RANGE   = 6000.0f;
+    static constexpr float   NPC_FLEE_HP_FRAC   = 0.15f;
+    static constexpr float   SCAN_SECONDS     = 3.0f; // dwell to reveal a contact (area E)
     // Default catalog fits (combat-balance.md §6) referenced by spawns / bots by name.
-    static constexpr std::string_view kDefaultShipFit = "fighter-kin";
-    static constexpr std::string_view kNpcFit         = "fighter-kin";
+    static constexpr std::string_view DEFAULT_SHIP_FIT = "fighter-kin";
+    static constexpr std::string_view NPC_FIT         = "fighter-kin";
 
 private:
     [[nodiscard]] Neuron::ECS::EntityHandle EntityOf(uint32_t netId) const
@@ -1218,6 +1212,8 @@ private:
             return BeginJumpTo(unitNet, cmd.beacon) == JumpReject::Accepted;
         case IntentType::Build:
             return EnqueueBuild(unitNet); // 'unit' is the player's base
+        case IntentType::ClaimLoot:
+            return ClaimLoot(unitNet, cmd.targetNetId); // 'unit' is the owned claimer ship
 
         case IntentType::Move:
             return PushOrder(unitNet, { OrderType::Move, 0, cmd.targetPoint, 0.0f }, cmd.queue);
@@ -1232,6 +1228,10 @@ private:
         case IntentType::Guard:
         case IntentType::Orbit:
         case IntentType::KeepRange: {
+            // The base auto-defends (§13.1) and isn't commandable to a combat stance; it
+            // relocates by Move/Retreat only. Reject combat orders for it — preserving the
+            // pre-cleanup behaviour now that the base carries a FleetOrder for movement.
+            if (m_world.HasComponent<BaseTag>(EntityOf(unitNet))) return false;
             if (!m_world.IsAlive(EntityOf(cmd.targetNetId))) return false; // need a live target
             const OrderType ot = (cmd.intent == IntentType::Attack)    ? OrderType::Attack
                                : (cmd.intent == IntentType::Guard)     ? OrderType::Guard
@@ -1244,7 +1244,8 @@ private:
     }
 
     // Set or queue (shift-chain) a unit's fleet order. Units without a FleetOrder
-    // (e.g. the base) can't take steering orders → rejected.
+    // (e.g. static props) can't take steering orders → rejected. (The base carries one
+    // for Move/Retreat relocation; ApplyIntentToUnit still rejects combat stances for it.)
     bool PushOrder(uint32_t unitNet, const FleetOrderEntry& entry, bool queue)
     {
         FleetOrder* fo = m_world.GetComponent<FleetOrder>(EntityOf(unitNet));
@@ -1291,7 +1292,7 @@ private:
             // fleet speed if the unit has no HullInfo (e.g. a legacy spawn).
             const HullInfo*   hi  = m_world.GetComponent<HullInfo>(EntityOf(selfId.value));
             const EwarStatus* es  = m_world.GetComponent<EwarStatus>(EntityOf(selfId.value));
-            const float       spd = (hi && hi->maxSpeed > 0.0f ? hi->maxSpeed : kFleetMoveSpeed)
+            const float       spd = (hi && hi->maxSpeed > 0.0f ? hi->maxSpeed : FLEET_MOVE_SPEED)
                                     * (es ? es->webFactor : 1.0f);
             const double maxStep = static_cast<double>(spd) * static_cast<double>(dt);
             switch (o.type) {
@@ -1497,12 +1498,14 @@ private:
                     }
                     if (m.kind == ModuleKind::Jammer || m.kind == ModuleKind::Web ||
                         m.kind == ModuleKind::WarpDisruptor || m.kind == ModuleKind::SensorDamp) {
-                        // Offensive EWAR follows the unit's Attack target; only a base
-                        // (no FleetOrder) auto-projects it onto the nearest hostile —
-                        // so a commandable ship EWARs what it is told to, not everything.
+                        // Offensive EWAR follows the unit's Attack target; the base
+                        // auto-projects it onto the nearest hostile (it auto-defends,
+                        // §13.1) — so a commandable ship EWARs what it is told to, not
+                        // everything. (Keyed on BaseTag: the base now also carries a
+                        // FleetOrder for movement, so "no FleetOrder" no longer means base.)
                         uint32_t tgt = 0;
                         if (attackTarget && Hostile(owner.player, OwnerOf(attackTarget))) tgt = attackTarget;
-                        else if (!m_world.HasComponent<FleetOrder>(EntityOf(selfId.value)))
+                        else if (m_world.HasComponent<BaseTag>(EntityOf(selfId.value)))
                             tgt = NearestHostileInRange(selfId.value, tr.pos, owner.player, static_cast<double>(m.range));
                         if (!tgt) continue;
                         Transform* tt = m_world.GetComponent<Transform>(EntityOf(tgt));
@@ -1617,13 +1620,16 @@ private:
         m_world.ForEach<FleetOrder, Fitting, Transform, NetId>(
             [&](FleetOrder& fo, Fitting&, Transform& tr, NetId& id) {
                 const auto e = EntityOf(id.value);
+                // The base carries a FleetOrder for movement but is not order-driven in
+                // combat — it auto-defends via the dedicated loop below, so skip it here.
+                if (m_world.HasComponent<BaseTag>(e)) return;
                 if (fo.current.type != OrderType::Attack || fo.current.targetNetId == 0) { TickWeaponCooldowns(e, dt); return; }
                 const OwnerId* o = m_world.GetComponent<OwnerId>(e);
                 FireWeapons(e, id.value, tr.pos, o ? o->player : 0, fo.current.targetNetId, dt, projs, kills);
             });
 
-        // Bases have no FleetOrder; while Active they fire defensively at the nearest
-        // hostile in range (§13.1 fire-support + light defensive weapons).
+        // Bases auto-defend: while Active they fire at the nearest hostile in range
+        // (§13.1 fire-support + light defensive weapons), independent of fleet orders.
         m_world.ForEach<BaseTag, BaseCombat, Transform, NetId, Weapon>(
             [&](BaseTag&, BaseCombat& bc, Transform& tr, NetId& id, Weapon& w) {
                 const auto e = EntityOf(id.value);
@@ -1713,7 +1719,7 @@ private:
                     d.hull.cur      = std::max(d.hull.cur, d.hull.max / 4); // survives the jump
                     if (!bc.cargoLost) {
                         int32_t lost = 0;
-                        for (int i = 0; i < kResourceSlots; ++i) { lost += static_cast<int32_t>(st.amount[i]); st.amount[i] = 0.0f; }
+                        for (int i = 0; i < RESOURCE_SLOTS; ++i) { lost += static_cast<int32_t>(st.amount[i]); st.amount[i] = 0.0f; }
                         bc.cargoLost = true;
                         m_econEvents.push_back({ EconEventType::CargoLost, id.value, 0, lost, m_tick });
                     }
@@ -1751,7 +1757,7 @@ private:
         LootContainer lc;
         float value = 0.0f;
         if (const Cargo* c = m_world.GetComponent<Cargo>(e))
-            for (int i = 0; i < kResourceSlots; ++i) { lc.items[i] = c->amount[i] * m_lootFraction; value += lc.items[i]; }
+            for (int i = 0; i < RESOURCE_SLOTS; ++i) { lc.items[i] = c->amount[i] * m_lootFraction; value += lc.items[i]; }
         lc.expiresAt = static_cast<float>(m_simTime) + m_lootExpireSeconds;
         const uint32_t lootId = m_nextNetId++;
         auto le = m_world.CreateEntity();
@@ -1799,7 +1805,7 @@ private:
     static uint16_t LootShapeId()
     {
         const uint16_t id = ShapeIdByName("Crate01");
-        return id != kInvalidShapeId ? id : 0;
+        return id != INVALID_SHAPE_ID ? id : 0;
     }
     static uint16_t ProjShapeId() { return 0; }
 
@@ -1816,7 +1822,7 @@ private:
     // --- NPC AI (area F) -----------------------------------------------------
 
     uint32_t SpawnNpcGuardian(Neuron::Universe::UniversePos pos, uint16_t siteId,
-                              std::string_view fitName = kNpcFit)
+                              std::string_view fitName = NPC_FIT)
     {
         const uint32_t netId = m_nextNetId++;
         auto e = m_world.CreateEntity();
@@ -1828,12 +1834,12 @@ private:
         m_world.AddComponent<OwnerId>(e).player = 0; // unowned = NPC
         m_world.AddComponent<FleetOrder>(e);
         // NPCs fight with REAL fits (area F): difficulty scales by which fit is spawned.
-        if (!InstallFit(e, fitName)) InstallFit(e, kNpcFit);
+        if (!InstallFit(e, fitName)) InstallFit(e, NPC_FIT);
         auto& ai = m_world.AddComponent<NpcAi>(e);
         ai.state      = AiState::Defend;
         ai.home       = pos;
-        ai.aggroRange = kNpcAggroRange;
-        ai.fleeHpFrac = kNpcFleeHpFrac;
+        ai.aggroRange = NPC_AGGRO_RANGE;
+        ai.fleeHpFrac = NPC_FLEE_HP_FRAC;
         ai.siteId     = siteId;
         m_netIdToEntity[netId] = e;
         return netId;
@@ -2032,7 +2038,7 @@ private:
     // are visible in the client before the cooked universe + command UI (B/C/G) land.
     void SpawnDemoSeed()
     {
-        const int64_t bx = Neuron::Universe::kSectorSize - 200; // matches ServerHost's first spawn
+        const int64_t bx = Neuron::Universe::SECTOR_SIZE - 200; // matches ServerHost's first spawn
 
         // Two linked public beacons flanking the cluster — real jumps work on them.
         UniverseDataset demo;
@@ -2071,9 +2077,9 @@ private:
     // jumpgate, a few stations, asteroids, debris and a sampling of ship hulls).
     void SpawnScenery()
     {
-        const int64_t bx = Neuron::Universe::kSectorSize - 200;
+        const int64_t bx = Neuron::Universe::SECTOR_SIZE - 200;
         struct Placement { const char* name; int64_t dx, dy, dz; };
-        static constexpr Placement kProps[] = {
+        static constexpr Placement PROPS[] = {
             { "Jumpgate01",            0,   0,  380 }, // big landmark dead ahead
             { "Science01",          -260,   0,  120 },
             { "Mining01",            260,   0,  120 },
@@ -2087,9 +2093,9 @@ private:
             { "HullShuttle",        -220,   0,  150 },
             { "HullAurora",           60,  40,  220 },
         };
-        for (const auto& p : kProps) {
+        for (const auto& p : PROPS) {
             const uint16_t id = ShapeIdByName(p.name);
-            if (id != kInvalidShapeId)
+            if (id != INVALID_SHAPE_ID)
                 SpawnProp(id, { bx + p.dx, p.dy, p.dz });
         }
     }

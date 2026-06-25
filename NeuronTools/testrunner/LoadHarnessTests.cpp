@@ -17,12 +17,12 @@
 
 using namespace ertest;
 using namespace Neuron::Sim;
-using Neuron::Universe::kSectorSize;
+using Neuron::Universe::SECTOR_SIZE;
 using Neuron::Universe::UniversePos;
 
 namespace
 {
-    constexpr size_t kSafeMtu = 1100; // safe per-snapshot byte budget (§8.2)
+    constexpr size_t SAFE_MTU = 1100; // safe per-snapshot byte budget (§8.2)
 
     struct ScaleResult
     {
@@ -61,9 +61,9 @@ namespace
             uint64_t tickDownstream = 0; // bytes from record-bearing snapshots only
             for (size_t i = 0; i < clients.size(); ++i) {
                 size_t capped = 0;
-                const DeltaSnapshot snap = su.BuildClientSnapshot(clients[i], kSafeMtu, &capped);
+                const DeltaSnapshot snap = su.BuildClientSnapshot(clients[i], SAFE_MTU, &capped);
                 const auto bytes = EncodeDeltaSnapshot(snap);
-                ER_CHECK(bytes.size() <= kSafeMtu); // the budget invariant, every client every tick
+                ER_CHECK(bytes.size() <= SAFE_MTU); // the budget invariant, every client every tick
                 tel.RecordCapBind(capped);
                 if (!snap.records.empty()) { // a real server skips empty snapshots
                     if (bytes.size() > r.peakClientDownstream) r.peakClientDownstream = bytes.size();
@@ -103,7 +103,7 @@ namespace
     {
         std::vector<uint32_t> c;
         for (int i = 0; i < n; ++i)
-            c.push_back(su.SpawnBase({ static_cast<int64_t>(i) * kSectorSize * 6, 0, 0 }, { 0, 0, 0 }));
+            c.push_back(su.SpawnBase({ static_cast<int64_t>(i) * SECTOR_SIZE * 6, 0, 0 }, { 0, 0, 0 }));
         return c;
     }
 }
@@ -119,7 +119,7 @@ ER_TEST(LoadHarness, ContestedSectorHoldsBandwidthAndConverges)
 
     ER_CHECK_EQ(r.clients, size_t{ 120 });
     ER_CHECK(r.ticksToConverge > 0);                 // converged within the window
-    ER_CHECK(r.peakClientDownstream <= kSafeMtu);    // never over the MTU budget
+    ER_CHECK(r.peakClientDownstream <= SAFE_MTU);    // never over the MTU budget
     ER_CHECK_EQ(r.steadyStateDownstream, uint64_t{ 0 }); // idle costs nothing (stationary)
 }
 

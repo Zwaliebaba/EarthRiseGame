@@ -20,7 +20,7 @@ using Neuron::Universe::UniversePos;
 namespace
 {
     // Small connected graph + fast tuning for the integration tests.
-    const char* kSrc =
+    const char* SRC =
         "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
         "beacon HUB { region = R pos = 0 0 0        links = RIM     kind = public }\n"
         "beacon RIM { region = R pos = 100000 0 0   links = HUB FAR kind = public }\n"
@@ -32,7 +32,7 @@ namespace
     {
         UniverseDataset ds;
         std::vector<std::string> errs;
-        const bool ok = Neuron::Tools::ParseUniverseSource(kSrc, ds, errs);
+        const bool ok = Neuron::Tools::ParseUniverseSource(SRC, ds, errs);
         ER_CHECK(ok && errs.empty());
         su.LoadUniverse(ds);
         return ds;

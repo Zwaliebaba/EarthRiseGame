@@ -18,6 +18,9 @@ const char* EconomyStore::EventTypeName(EconomyEventKind k) noexcept
     case EconomyEventKind::BuildComplete:  return "build_complete";
     case EconomyEventKind::InventoryDelta: return "inventory_delta";
     case EconomyEventKind::LootClaim:      return "loot_claimed";
+    case EconomyEventKind::Killmail:       return "killmail";
+    case EconomyEventKind::CargoLost:      return "cargo_lost";
+    case EconomyEventKind::LootDrop:       return "loot_drop";
     }
     return "wallet_delta";
 }

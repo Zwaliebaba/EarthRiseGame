@@ -46,11 +46,11 @@ namespace Neuron::Net { class CngCrypto; }
 namespace Neuron::Persist
 {
 
-inline constexpr size_t kSessionTokenBytes = 32; // Sessions.Token BINARY(32)
-inline constexpr size_t kPwHashBytes       = 64; // Accounts.PasswordHash VARBINARY(64)
-inline constexpr size_t kPwSaltBytes       = 32; // Accounts.PasswordSalt VARBINARY(32)
+inline constexpr size_t SESSION_TOKEN_BYTES = 32; // Sessions.Token BINARY(32)
+inline constexpr size_t PW_HASH_BYTES       = 64; // Accounts.PasswordHash VARBINARY(64)
+inline constexpr size_t PW_SALT_BYTES       = 32; // Accounts.PasswordSalt VARBINARY(32)
 
-using SessionToken = std::array<uint8_t, kSessionTokenBytes>;
+using SessionToken = std::array<uint8_t, SESSION_TOKEN_BYTES>;
 
 // Outcome of a register/login attempt — distinct codes so the server can map each to
 // the right wire response + the §21 auth counters (area H).
@@ -125,8 +125,8 @@ public:
 
 private:
     // Hash a password with the per-user salt + the in-process pepper, 'iterations'
-    // rounds, into a kPwHashBytes buffer via CngCrypto::Pbkdf2HmacSha512.
-    std::array<uint8_t, kPwHashBytes> HashPassword(std::string_view password,
+    // rounds, into a PW_HASH_BYTES buffer via CngCrypto::Pbkdf2HmacSha512.
+    std::array<uint8_t, PW_HASH_BYTES> HashPassword(std::string_view password,
                                                    std::span<const uint8_t> salt,
                                                    uint32_t iterations) const;
 
@@ -145,8 +145,8 @@ private:
 
     struct IpWindow { int64_t windowStartUnix{ 0 }; uint32_t count{ 0 }; };
     std::unordered_map<std::string, IpWindow> m_ipWindows;
-    static constexpr int64_t  kIpWindowSeconds = 60;
-    static constexpr uint32_t kIpWindowMaxAttempts = 20; // per-IP login attempts / minute
+    static constexpr int64_t  IP_WINDOW_SECONDS = 60;
+    static constexpr uint32_t IP_WINDOW_MAX_ATTEMPTS = 20; // per-IP login attempts / minute
 };
 
 } // namespace Neuron::Persist

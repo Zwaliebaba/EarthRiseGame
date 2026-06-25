@@ -27,8 +27,8 @@ namespace
             if (x.pgMax != y.pgMax || x.cpuMax != y.cpuMax) return false;
             if (x.shieldHp != y.shieldHp || x.armorHp != y.armorHp || x.hullHp != y.hullHp) return false;
             if (x.signature != y.signature || x.maxSpeed != y.maxSpeed) return false;
-            for (int l = 0; l < kDefenseLayerCount; ++l)
-                for (int t = 0; t < kDamageTypeCount; ++t)
+            for (int l = 0; l < DEFENSE_LAYER_COUNT; ++l)
+                for (int t = 0; t < DAMAGE_TYPE_COUNT; ++t)
                     if (x.resists.resist[l][t] != y.resists.resist[l][t]) return false;
         }
         for (size_t i = 0; i < a.modules.size(); ++i) {

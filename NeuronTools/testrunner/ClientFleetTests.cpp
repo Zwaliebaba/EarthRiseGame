@@ -29,6 +29,7 @@ ER_TEST(ClientFleet, SmartActionResolvesByTargetType)
     ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::NpcUnit, 0, 100))      == IntentType::Attack);
     ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::Ship, 999, 100))       == IntentType::Attack); // enemy ship
     ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::Ship, 100, 100))       == IntentType::Guard);  // own ship
+    ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::LootContainer, 0, 100)) == IntentType::ClaimLoot); // kill loot
     ER_CHECK(ResolveSmartAction(ClassifyTarget(EntityKind::Decoration, 0, 100))   == IntentType::Move);   // empty/scenery
 }
 
@@ -44,6 +45,45 @@ ER_TEST(ClientFleet, MakeSmartCommandFillsTargetByType)
     ER_CHECK(mv.intent == IntentType::Move);
     ER_CHECK(mv.targetNetId == 0);
     ER_CHECK(mv.targetPoint == Neuron::Universe::UniversePos({ 10, 20, 30 }));
+
+    // Loot is an entity target → fills targetNetId (the container), like Attack.
+    auto loot = MakeSmartCommand(SmartTarget::Loot, sel, 77, { 0, 0, 0 });
+    ER_CHECK(loot.intent == IntentType::ClaimLoot);
+    ER_CHECK(loot.targetNetId == 77);
+}
+
+// --- right-click context menu ----------------------------------------------
+
+ER_TEST(ClientFleet, ContextMenuListsActionsByTargetType)
+{
+    using I = IntentType;
+    // No selection → no menu (nothing to command).
+    ER_CHECK(BuildContextMenu(SmartTarget::Enemy, false).empty());
+
+    auto enemy = BuildContextMenu(SmartTarget::Enemy, true);
+    ER_CHECK_EQ(enemy.size(), size_t{ 3 });
+    ER_CHECK(enemy[0].intent == I::Attack);     // primary
+    ER_CHECK(enemy[1].intent == I::Orbit);
+    ER_CHECK(enemy[2].intent == I::KeepRange);
+
+    ER_CHECK(BuildContextMenu(SmartTarget::ResourceNode, true).front().intent == I::Harvest);
+    ER_CHECK(BuildContextMenu(SmartTarget::Loot, true).front().intent        == I::ClaimLoot);
+    ER_CHECK(BuildContextMenu(SmartTarget::Ally, true).front().intent        == I::Guard);
+    ER_CHECK(BuildContextMenu(SmartTarget::Beacon, true).front().intent      == I::Jump);
+    ER_CHECK(BuildContextMenu(SmartTarget::EmptySpace, true).front().intent  == I::Move);
+}
+
+ER_TEST(ClientFleet, ContextMenuPrimaryMatchesSmartActionAndFlagsDeferred)
+{
+    for (auto t : { SmartTarget::Enemy, SmartTarget::ResourceNode, SmartTarget::Loot,
+                    SmartTarget::Ally, SmartTarget::Beacon, SmartTarget::EmptySpace }) {
+        const auto m = BuildContextMenu(t, true);
+        ER_CHECK(!m.empty());
+        ER_CHECK(m.front().intent == ResolveSmartAction(t)); // primary == smart action
+    }
+    // The two intents that need extra data are flagged so the UI can defer them.
+    ER_CHECK(BuildContextMenu(SmartTarget::EmptySpace, true).front().needsPoint);  // Move
+    ER_CHECK(BuildContextMenu(SmartTarget::Beacon, true).front().needsBeacon);     // Jump
 }
 
 // --- control groups ---------------------------------------------------------
@@ -102,7 +142,7 @@ ER_TEST(ClientFleet, OverviewSortsByDistanceAndClassifiesIff)
 namespace
 {
     // HUB ↔ A ↔ B ↔ C  plus a HUB ↔ C shortcut → two routes of different length.
-    const char* kGraph =
+    const char* GRAPH =
         "region R { security = high bounds = -64 64 -64 64 -64 64 yield_mult = 1 }\n"
         "beacon HUB { region = R pos = 0 0 0      links = A C   kind = public }\n"
         "beacon A   { region = R pos = 100 0 0    links = HUB B kind = public }\n"
@@ -114,7 +154,7 @@ namespace
     {
         Neuron::Sim::UniverseDataset ds;
         std::vector<std::string> errs;
-        const bool ok = Neuron::Tools::ParseUniverseSource(kGraph, ds, errs);
+        const bool ok = Neuron::Tools::ParseUniverseSource(GRAPH, ds, errs);
         ER_CHECK(ok && errs.empty());
         return ds;
     }

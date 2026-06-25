@@ -29,7 +29,7 @@
 //
 // M4/M5: Windows integration — unverified on Linux; validate on the build agent.
 // The auth credential exchange rides reliable MsgType::Command frames with a 1-byte
-// ServerHost auth opcode (kAuthOpcode*) because the §8.5 wire types (Protocol.h) and
+// ServerHost auth opcode (AUTH_OPCODE*) because the §8.5 wire types (Protocol.h) and
 // the M1 LoginRequest body (HandshakeMessages.h) are frozen here and cannot carry a
 // password or a 32-byte token; this seam keeps the real-auth flow inside ServerHost
 // without touching the connection/protocol layer. See OnAuthMessage.
@@ -237,7 +237,7 @@ public:
         // client order; ERServer injects real threads via workerCount.
         size_t totalCapped = 0;
         std::vector<Neuron::Sim::EncodeResult> encoded =
-            EncodeClientsPooledCounting(*m_universe, clients, kSnapshotByteBudget,
+            EncodeClientsPooledCounting(*m_universe, clients, SNAPSHOT_BYTE_BUDGET,
                                         workerCount, totalCapped);
         if (tel) tel->RecordCapBind(totalCapped);
 
@@ -425,22 +425,13 @@ private:
         // everything — never client-authoritative, §8.4).
         for (const auto& m : appOut) {
             if (m.type == MsgType::Command) {
-                // M5 area C: the auth credential exchange rides reliable Command frames
-                // with a 1-byte ServerHost auth opcode (the §8.5 wire types are frozen
-                // here — see the header note). A real-auth connection that is not yet
-                // authenticated routes EVERY Command through the auth handler; a stray
-                // gameplay Command before login is dropped (server-authoritative).
-                if (!m.body.empty() && IsAuthOpcode(m.body[0])) {
+                // Command frames are auth-only now (M5 area C): the credential exchange
+                // rides reliable Command frames with a 1-byte ServerHost auth opcode (the
+                // §8.5 wire types are frozen here — see the header note). All gameplay
+                // intents — including base relocation — go on MsgType::FleetCommand; the
+                // legacy M1a base-velocity MoveCommand has been retired.
+                if (!m.body.empty() && IsAuthOpcode(m.body[0]))
                     OnAuthMessage(entry, from, m.body, out);
-                    continue;
-                }
-                if (!entry.authed) continue; // gate gameplay until logged in (real auth)
-
-                // Legacy M1a base-velocity move intent.
-                Neuron::Sim::MoveCommand cmd;
-                if (Neuron::Sim::DecodeMoveCommand(m.body, cmd))
-                    m_universe->SetBaseVelocity(entry.playerNetId,
-                                             { cmd.velX, cmd.velY, cmd.velZ });
             } else if (m.type == MsgType::FleetCommand) {
                 if (!entry.authed) continue; // gate gameplay until logged in (real auth)
                 // M3 RTS fleet intent (§23.4) — ownership/target validated inside.
@@ -459,14 +450,13 @@ private:
     // see the header note on why this isn't a new MsgType). Request bodies carry
     // [opcode u8][u16 userLen][user][u16 passLen][pass]; the token reply rides an
     // existing LoginResponse-shaped Command frame echoing a session-token digest.
-    enum : uint8_t {
-        kAuthOpcodeRegister = 0xA0, // register a new account, then auto-login
-        kAuthOpcodeLogin    = 0xA1, // login to an existing account
-        kAuthOpcodeResult   = 0xA2, // server → client: [opcode][AuthResult u8][netId u32][tokenLo u64]
-    };
+    // Opcodes live in Protocol.h (Neuron::Net::AuthOpcode) so the client matches them.
+    static constexpr uint8_t AUTH_OPCODE_REGISTER = Neuron::Net::AUTH_OPCODE_REGISTER;
+    static constexpr uint8_t AUTH_OPCODE_LOGIN    = Neuron::Net::AUTH_OPCODE_LOGIN;
+    static constexpr uint8_t AUTH_OPCODE_RESULT   = Neuron::Net::AUTH_OPCODE_RESULT;
     [[nodiscard]] static bool IsAuthOpcode(uint8_t b) noexcept
     {
-        return b == kAuthOpcodeRegister || b == kAuthOpcodeLogin;
+        return b == AUTH_OPCODE_REGISTER || b == AUTH_OPCODE_LOGIN;
     }
 
     // Handle a register/login frame on an established secure channel. Validates input,
@@ -496,12 +486,12 @@ private:
 
         Neuron::Persist::SessionInfo session;
         Neuron::Persist::AuthResult res = Neuron::Persist::AuthResult::InvalidCredentials;
-        if (opcode == kAuthOpcodeRegister) {
+        if (opcode == AUTH_OPCODE_REGISTER) {
             // Register, then immediately log in to mint the session token (§14).
             res = m_accounts->Register(user, pass, m_nowUnix, session);
             if (res == Neuron::Persist::AuthResult::Ok)
                 res = m_accounts->Login(user, pass, entry.endpoint.ip, m_nowUnix, session);
-        } else { // kAuthOpcodeLogin
+        } else { // AUTH_OPCODE_LOGIN
             res = m_accounts->Login(user, pass, entry.endpoint.ip, m_nowUnix, session);
         }
 
@@ -525,6 +515,7 @@ private:
         // bound to the AccountId (§14 "login binds the session to the Base/entity").
         const uint32_t netId = BindAccountBase(session);
         entry.conn->SetPlayerNetId(netId);
+        entry.conn->MarkConnected(); // auth done → flip to Connected so snapshots flow (§14)
         entry.playerNetId  = netId;
         entry.authed       = true;
         entry.accountId    = session.accountId;
@@ -551,7 +542,7 @@ private:
     // pileup of fresh logins doesn't co-locate. Returns the base net id.
     uint32_t SpawnPlayerWorld(int64_t slot)
     {
-        const int64_t startX = Neuron::Universe::kSectorSize - 200;
+        const int64_t startX = Neuron::Universe::SECTOR_SIZE - 200;
         const int64_t startY = slot * 2000;
         const uint32_t netId = m_universe->SpawnBase({ startX, startY, 0 }, { 0.0f, 0.0f, 0.0f });
         m_universe->SpawnFleetShip(netId, Neuron::Sim::ServerUniverse::ShipShapeId(),
@@ -598,7 +589,7 @@ private:
             Neuron::Persist::EconomyMutation seed;
             seed.idemKey   = 0x5EED0000ull ^ static_cast<uint64_t>(session.accountId);
             seed.accountId = session.accountId;
-            seed.amount    = kStartingCredits;
+            seed.amount    = STARTING_CREDITS;
             seed.kind      = Neuron::Persist::EconomyEventKind::WalletDelta;
             seed.reason    = "starting_credits";
             seed.refType   = "Account";
@@ -645,7 +636,7 @@ private:
         return readStr(user) && readStr(pass);
     }
 
-    // Reply [kAuthOpcodeResult][AuthResult u8][netId u32][tokenLo u64] on the reliable
+    // Reply [AUTH_OPCODE_RESULT][AuthResult u8][netId u32][tokenLo u64] on the reliable
     // channel. tokenLo is the low 8 bytes of the 32-byte session token — a digest the
     // client echoes on reconnect; the full token never leaves the server in clear-shape
     // (the §8.5 channel is already encrypted, this is just the wire-frozen reply shape).
@@ -654,7 +645,7 @@ private:
     {
         std::vector<uint8_t> b;
         b.reserve(1 + 1 + 4 + 8);
-        b.push_back(kAuthOpcodeResult);
+        b.push_back(AUTH_OPCODE_RESULT);
         b.push_back(static_cast<uint8_t>(res));
         const uint32_t netId = entry.playerNetId;
         for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(netId >> (i * 8)));
@@ -677,12 +668,12 @@ private:
 
     // Per-client snapshot byte budget — the safe-MTU payload less AEAD/header
     // overhead (App. B). BuildBudgetedSnapshot keeps the priority prefix that fits.
-    static constexpr size_t kSnapshotByteBudget =
-        kMaxPayloadBytes - PacketHeader::kWireSize - kAeadTagBytes;
+    static constexpr size_t SNAPSHOT_BYTE_BUDGET =
+        MAX_PAYLOAD_BYTES - PacketHeader::WIRE_SIZE - AEAD_TAG_BYTES;
 
     // First-login wallet seed (M5 area D). A named code constant; the real onboarding
     // grant is data-driven at M7. Routed through the zero-loss outbox, idempotent.
-    static constexpr int64_t kStartingCredits = 1000;
+    static constexpr int64_t STARTING_CREDITS = 1000;
 
     ICrypto*                  m_crypto{ nullptr };
     std::vector<uint8_t>      m_staticPriv;

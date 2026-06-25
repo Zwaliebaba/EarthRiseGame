@@ -132,6 +132,33 @@ ER_TEST(CombatScenario, ClaimingLootTransfersCargoAndEmitsOneEvent)
     ER_CHECK_EQ(claims, 1);                            // exactly one claim event (zero-loss)
 }
 
+// The loot loop end-to-end through the COMMAND layer: a ClaimLoot intent routed via
+// ApplyFleetCommand recovers the container, and the §8.4 ownership check rejects a
+// claimer that isn't the commanding player's unit.
+ER_TEST(CombatScenario, ClaimLootIntentRecoversContainerAndChecksOwnership)
+{
+    ServerUniverse su(false);
+    const uint32_t mine = su.SpawnFleetShipFit(1, Ship(), { 0, 0, 0 }, "fighter-kin");
+    const uint32_t foe  = su.SpawnFleetShipFit(2, Ship(), { 800, 0, 0 }, "fighter-kin");
+    if (auto* d = su.DefenseOf(foe)) { d->shield.cur = 1; d->armor.cur = 0; d->hull.cur = 1; }
+    if (auto* c = su.CargoOf(foe))   c->amount[0] = 100.0f;
+    for (int i = 0; i < 90 && su.LootContainerIds().empty(); ++i) { Attack(su, 1, mine, foe); su.Step(1.0f / 30.0f); }
+    ER_CHECK_EQ(su.LootContainerIds().size(), size_t{ 1 });
+    const uint32_t container = su.LootContainerIds().front();
+
+    // Player 2 cannot claim with player 1's ship — the unit isn't theirs (§8.4).
+    FleetCommand bad; bad.intent = IntentType::ClaimLoot; bad.units = { mine }; bad.targetNetId = container;
+    ER_CHECK_EQ(su.ApplyFleetCommand(2, bad), 0u);
+    ER_CHECK_EQ(su.LootContainerIds().size(), size_t{ 1 }); // untouched
+
+    // The owner's ClaimLoot intent recovers it.
+    const float before = su.CargoOf(mine)->amount[0];
+    FleetCommand ok; ok.intent = IntentType::ClaimLoot; ok.units = { mine }; ok.targetNetId = container;
+    ER_CHECK_EQ(su.ApplyFleetCommand(1, ok), 1u);
+    ER_CHECK(su.CargoOf(mine)->amount[0] > before); // items moved into the looter's cargo
+    ER_CHECK(su.LootContainerIds().empty());        // container consumed
+}
+
 // --- area G: base disable-not-destroy (§13.1) -------------------------------
 
 ER_TEST(CombatScenario, BaseRetreatsAtLowHullAndIsNeverDestroyed)

@@ -38,8 +38,8 @@ inline BCRYPT_ALG_HANDLE AsAlg(void* p) { return reinterpret_cast<BCRYPT_ALG_HAN
 
 // HKDF info labels per direction (§8.3 key derivation). Distinct labels ensure
 // the two directional keys never coincide even from the same shared secret.
-constexpr unsigned char kInfoC2S[] = "er-c2s";
-constexpr unsigned char kInfoS2C[] = "er-s2c";
+constexpr unsigned char INFO_C2_S[] = "er-c2s";
+constexpr unsigned char INFO_S2_C[] = "er-s2c";
 
 // ECC blob magics for P-256 (defined in bcrypt.h as BCRYPT_ECDH_PUBLIC_P256_MAGIC
 // etc.). We re-use them via the header constants; declared here for clarity.
@@ -48,20 +48,20 @@ constexpr unsigned char kInfoS2C[] = "er-s2c";
 // 'magic' selects ECDH vs ECDSA P-256.
 std::vector<uint8_t> MakeEccPublicBlob(const EcPubKey& pub, ULONG magic)
 {
-    std::vector<uint8_t> blob(sizeof(BCRYPT_ECCKEY_BLOB) + kEcPubKeyBytes);
+    std::vector<uint8_t> blob(sizeof(BCRYPT_ECCKEY_BLOB) + EC_PUB_KEY_BYTES);
     auto* hdr = reinterpret_cast<BCRYPT_ECCKEY_BLOB*>(blob.data());
     hdr->dwMagic = magic;
     hdr->cbKey   = 32; // P-256 field element size
-    std::memcpy(blob.data() + sizeof(BCRYPT_ECCKEY_BLOB), pub.data(), kEcPubKeyBytes);
+    std::memcpy(blob.data() + sizeof(BCRYPT_ECCKEY_BLOB), pub.data(), EC_PUB_KEY_BYTES);
     return blob;
 }
 
 // Extract X||Y (64 bytes) from an exported BCRYPT_ECCPUBLIC_BLOB.
 bool ExtractPubFromBlob(const std::vector<uint8_t>& blob, EcPubKey& out)
 {
-    if (blob.size() < sizeof(BCRYPT_ECCKEY_BLOB) + kEcPubKeyBytes)
+    if (blob.size() < sizeof(BCRYPT_ECCKEY_BLOB) + EC_PUB_KEY_BYTES)
         return false;
-    std::memcpy(out.data(), blob.data() + sizeof(BCRYPT_ECCKEY_BLOB), kEcPubKeyBytes);
+    std::memcpy(out.data(), blob.data() + sizeof(BCRYPT_ECCKEY_BLOB), EC_PUB_KEY_BYTES);
     return true;
 }
 
@@ -281,7 +281,7 @@ bool CngCrypto::DeriveSharedSecret(const EcdhKeyPair& ours,
         if (!NT_SUCCESS(BCryptDeriveKey(secret, BCRYPT_KDF_RAW_SECRET, nullptr,
                                         nullptr, 0, &cb, 0)))
             goto cleanup;
-        if (cb != kSharedSecretBytes)
+        if (cb != SHARED_SECRET_BYTES)
             goto cleanup; // P-256 raw secret must be 32 bytes
         if (!NT_SUCCESS(BCryptDeriveKey(secret, BCRYPT_KDF_RAW_SECRET, nullptr,
                                         out.data(), static_cast<ULONG>(out.size()), &cb, 0)))
@@ -319,10 +319,10 @@ bool CngCrypto::Sign(std::span<const uint8_t> staticPrivBlob,
 
     bool ok = false;
     ULONG cb = 0;
-    // ECDSA P-256 signature is r||s, 64 bytes — exactly kEcSigBytes.
+    // ECDSA P-256 signature is r||s, 64 bytes — exactly EC_SIG_BYTES.
     if (NT_SUCCESS(BCryptSignHash(key, nullptr, digest, sizeof(digest),
                                   out.data(), static_cast<ULONG>(out.size()), &cb, 0))) {
-        ok = (cb == kEcSigBytes);
+        ok = (cb == EC_SIG_BYTES);
     }
     BCryptDestroyKey(key);
     return ok;
@@ -422,8 +422,8 @@ bool CngCrypto::DeriveAeadKeys(const SharedSecret& secret,
     };
 
     // -1 on the length to drop the terminating NUL from the string literal.
-    return deriveOne(kInfoC2S, sizeof(kInfoC2S) - 1, clientToServer)
-        && deriveOne(kInfoS2C, sizeof(kInfoS2C) - 1, serverToClient);
+    return deriveOne(INFO_C2_S, sizeof(INFO_C2_S) - 1, clientToServer)
+        && deriveOne(INFO_S2_C, sizeof(INFO_S2_C) - 1, serverToClient);
 }
 
 // -----------------------------------------------------------------------------
@@ -431,10 +431,10 @@ bool CngCrypto::DeriveAeadKeys(const SharedSecret& secret,
 // -----------------------------------------------------------------------------
 
 void CngCrypto::BuildNonce(Direction dir, uint64_t packetNumber,
-                           uint8_t (&nonce)[kNonceBytes])
+                           uint8_t (&nonce)[NONCE_BYTES])
 {
     // Layout: [dir:1][packetNumber big-endian:8][zero:3] = 12 bytes.
-    std::memset(nonce, 0, kNonceBytes);
+    std::memset(nonce, 0, NONCE_BYTES);
     nonce[0] = static_cast<uint8_t>(dir);
     for (int i = 0; i < 8; ++i)
         nonce[1 + i] = static_cast<uint8_t>((packetNumber >> (8 * (7 - i))) & 0xFF);
@@ -455,22 +455,22 @@ bool CngCrypto::Encrypt(const AeadKey& key, Direction dir, uint64_t packetNumber
                                                static_cast<ULONG>(key.size()), 0)))
         return false;
 
-    uint8_t nonce[kNonceBytes];
+    uint8_t nonce[NONCE_BYTES];
     BuildNonce(dir, packetNumber, nonce);
 
-    uint8_t tag[kTagBytes] = {};
+    uint8_t tag[TAG_BYTES] = {};
     BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO info;
     BCRYPT_INIT_AUTH_MODE_INFO(info);
     info.pbNonce      = nonce;
-    info.cbNonce      = kNonceBytes;
+    info.cbNonce      = NONCE_BYTES;
     info.pbAuthData   = aad.empty() ? nullptr : const_cast<PUCHAR>(aad.data());
     info.cbAuthData   = static_cast<ULONG>(aad.size());
     info.pbTag        = tag;
-    info.cbTag        = kTagBytes;
+    info.cbTag        = TAG_BYTES;
     // No chaining across calls (single-shot), so MacContext / chaining fields stay null.
 
     bool ok = false;
-    ciphertextWithTag.assign(plaintext.size() + kTagBytes, 0);
+    ciphertextWithTag.assign(plaintext.size() + TAG_BYTES, 0);
 
     ULONG cbResult = 0;
     NTSTATUS st = BCryptEncrypt(hKey,
@@ -482,7 +482,7 @@ bool CngCrypto::Encrypt(const AeadKey& key, Direction dir, uint64_t packetNumber
                                 &cbResult, 0);
     if (NT_SUCCESS(st)) {
         // Append the authentication tag after the ciphertext.
-        std::memcpy(ciphertextWithTag.data() + plaintext.size(), tag, kTagBytes);
+        std::memcpy(ciphertextWithTag.data() + plaintext.size(), tag, TAG_BYTES);
         ok = true;
     } else {
         ciphertextWithTag.clear();
@@ -497,10 +497,10 @@ bool CngCrypto::Decrypt(const AeadKey& key, Direction dir, uint64_t packetNumber
                         std::span<const uint8_t> ciphertextWithTag,
                         std::vector<uint8_t>& plaintext)
 {
-    if (!m_initialized || ciphertextWithTag.size() < kTagBytes)
+    if (!m_initialized || ciphertextWithTag.size() < TAG_BYTES)
         return false;
 
-    const size_t ctLen = ciphertextWithTag.size() - kTagBytes;
+    const size_t ctLen = ciphertextWithTag.size() - TAG_BYTES;
     const uint8_t* ct  = ciphertextWithTag.data();
     const uint8_t* tag = ciphertextWithTag.data() + ctLen;
 
@@ -510,17 +510,17 @@ bool CngCrypto::Decrypt(const AeadKey& key, Direction dir, uint64_t packetNumber
                                                static_cast<ULONG>(key.size()), 0)))
         return false;
 
-    uint8_t nonce[kNonceBytes];
+    uint8_t nonce[NONCE_BYTES];
     BuildNonce(dir, packetNumber, nonce);
 
     BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO info;
     BCRYPT_INIT_AUTH_MODE_INFO(info);
     info.pbNonce      = nonce;
-    info.cbNonce      = kNonceBytes;
+    info.cbNonce      = NONCE_BYTES;
     info.pbAuthData   = aad.empty() ? nullptr : const_cast<PUCHAR>(aad.data());
     info.cbAuthData   = static_cast<ULONG>(aad.size());
     info.pbTag        = const_cast<PUCHAR>(tag);
-    info.cbTag        = kTagBytes;
+    info.cbTag        = TAG_BYTES;
 
     plaintext.assign(ctLen, 0);
     ULONG cbResult = 0;
@@ -580,7 +580,7 @@ bool CngCrypto::VerifyCookie(std::span<const uint8_t> serverSecret,
     Cookie expected = MakeCookie(serverSecret, clientAddr);
     // Constant-time comparison to avoid leaking via timing.
     unsigned diff = 0;
-    for (size_t i = 0; i < kCookieBytes; ++i)
+    for (size_t i = 0; i < COOKIE_BYTES; ++i)
         diff |= static_cast<unsigned>(expected[i] ^ cookie[i]);
     return diff == 0;
 }
