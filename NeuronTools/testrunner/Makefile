@@ -32,13 +32,18 @@ all: run
 
 build: $(BIN)
 
-# The parser headers under test live in their owning libraries (NeuronAudio /
-# NeuronRender), not in NeuronTools — nothing depends on NeuronTools.
-PARSER_HEADERS := ../../NeuronAudio/WavParse.h ../../NeuronRender/DdsParse.h \
-                  ../../NeuronRender/CmoParse.h ../../NeuronRender/FontAtlasLayout.h \
-                  ../datacook/UniverseSource.h ../../NeuronCore/UniverseData.h
+# Header prerequisites: rebuild when ANY header the tests pull in changes. Make can't
+# see through #include, and this is a single-shot compile of all TUs (no .o/-MMD dep
+# files), so list every directory on the include path plus the owning-library headers
+# under test (NeuronAudio / NeuronRender / datacook). Without this, editing e.g.
+# NeuronCore/ServerUniverse.h would NOT trigger a rebuild and `make` would silently run
+# a stale binary. Wildcards so new headers are picked up automatically.
+HEADERS := $(wildcard *.h) $(wildcard dxmath_shim/*.h) \
+           $(wildcard ../../NeuronCore/*.h) $(wildcard ../../NeuronClient/*.h) \
+           $(wildcard ../../NeuronAudio/*.h) $(wildcard ../../NeuronRender/*.h) \
+           $(wildcard ../datacook/*.h)
 
-$(BIN): $(SRCS) $(wildcard *.h) $(PARSER_HEADERS)
+$(BIN): $(SRCS) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(SRCS) -o $(BIN)
 
 run: $(BIN)
