@@ -1,0 +1,34 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "x64-windows",
+      "displayName": "x64 Windows (MSVC, Ninja Multi-Config)",
+      "description": "Default build. Uses the vcpkg toolchain via VCPKG_ROOT; default vcpkg manifest installs nothing (PIX is an opt-in feature).",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+    {
+      "name": "x64-windows-pix",
+      "displayName": "x64 Windows + PIX",
+      "description": "As x64-windows but pulls WinPixEventRuntime via vcpkg and defines NEURON_USE_PIX.",
+      "inherits": "x64-windows",
+      "binaryDir": "${sourceDir}/build-pix",
+      "cacheVariables": {
+        "EARTHRISE_USE_PIX": "ON",
+        "VCPKG_MANIFEST_FEATURES": "pix"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug",   "configurePreset": "x64-windows", "configuration": "Debug" },
+    { "name": "release", "configurePreset": "x64-windows", "configuration": "Release" },
+    { "name": "pix-debug", "configurePreset": "x64-windows-pix", "configuration": "Debug" }
+  ]
+}

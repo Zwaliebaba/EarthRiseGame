@@ -14,7 +14,8 @@
 #include "SceneRenderer.h"    // Neuron::Render::SceneEntity
 #include "Replica.h"          // Neuron::Client::ReplicaSet
 #include "Session.h"          // Neuron::Client::SessionState
-#include "FleetControl.h"     // BuildOverview / ClassifyTarget / ShowsHealthBar / HealthFraction / SmartTarget
+#include "FleetControl.h"     // BuildOverview / ClassifyTarget / SmartTarget
+#include "HudOverlay.h"       // ShowsHealthBar / HealthFraction
 #include "StringTable.h"      // er::ui::str
 
 #include <DirectXMath.h>

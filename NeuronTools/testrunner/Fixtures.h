@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace ertest
@@ -31,7 +32,7 @@ namespace ertest
     {
       uint32_t bits;
       static_assert(sizeof(bits) == sizeof(f));
-      __builtin_memcpy(&bits, &f, sizeof(bits));
+      std::memcpy(&bits, &f, sizeof(bits));
       u32(bits);
     }
     void tag(char a, char b, char c, char d)

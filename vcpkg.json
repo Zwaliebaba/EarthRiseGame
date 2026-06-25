@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "earthrise",
+  "version-string": "0.1.0",
+  "description": "EarthRise game — CMake build (Windows/MSVC).",
+  "dependencies": [],
+  "features": {
+    "pix": {
+      "description": "GPU profiling markers via WinPixEventRuntime (NeuronRender PixMarkers.h). Enable with -DEARTHRISE_USE_PIX=ON.",
+      "dependencies": [ "winpixeventruntime" ]
+    }
+  }
+}
