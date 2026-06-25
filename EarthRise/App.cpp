@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <winrt/Windows.ApplicationModel.h> // Package (install location)
@@ -27,6 +28,7 @@
 #include <winrt/Windows.Storage.h>          // StorageFolder::Path
 #include <winrt/Windows.UI.Core.h>          // CoreWindow, PointerEventArgs
 #include <winrt/Windows.UI.Input.h>         // PointerPoint / button state
+#include <winrt/Windows.UI.Popups.h>        // MessageDialog (server-unreachable notice)
 #include <winrt/Windows.Foundation.Collections.h> // LocalSettings IPropertySet
 
 // NeuronRender
@@ -72,6 +74,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 static constexpr uint16_t kServerPort = 7777;
 static constexpr float kInterpAlpha = 0.0f; // M1b: snap-on-ack (alpha unused)
+
+// How long to wait for the very first connection before telling the player the server
+// can't be reached (§8.5 handshake is sub-second on a live server; this is the "server
+// is down / wrong address / loopback not exempt" budget). After this the client keeps
+// retrying in the background — the notice is informational, not a hard stop.
+static constexpr long long kConnectTimeoutMs = 8000;
 
 #ifdef _DEBUG
 // The server's SEPARATE diagnostic status port (must match server.statusPort in the
@@ -211,6 +219,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   float m_dpiScale{1.0f};
   std::chrono::steady_clock::time_point m_connectStart{};
   bool m_connectedLogged{false};
+  // Server-unreachable notice (graceful MessageDialog instead of a silent hang/crash
+  // when ERServer is down or the address is wrong). Latched so it shows once per
+  // attempt; m_dialogOpen guards against stacking dialogs while one is on screen.
+  bool m_serverUnreachableNotified{false};
+  bool m_dialogOpen{false};
   // Per-shape bounding radius (indexed by ShapeCatalog id; 0 = not loaded / cube
   // fallback) used to normalize each mesh to a per-kind on-screen size.
   std::array<float, Neuron::Sim::kShapeCount> m_shapeRadius{};
@@ -1430,14 +1443,75 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     OutputDebugStringA(buf);
   }
 
+  // Graceful "can't reach the server" notice. A CoreWindow (no-XAML) app uses
+  // Windows.UI.Popups.MessageDialog, not a XAML ContentDialog. ShowAsync must be awaited
+  // on the UI/ASTA thread — which is where Tick() (the caller) runs — so this is a
+  // fire_and_forget coroutine. Retry restarts the handshake; Exit closes the app.
+  winrt::fire_and_forget ShowServerUnreachable()
+  {
+    if (m_dialogOpen)
+      co_return;
+    m_dialogOpen = true;
+    auto lifetime = get_strong(); // keep this App alive across the co_await
+
+    Windows::UI::Popups::MessageDialog dlg{
+        L"EarthRise can't reach the game server.\n\n"
+        L"Make sure ERServer is running and reachable, then choose Retry. "
+        L"The client keeps trying to connect in the background.",
+        L"Server unavailable" };
+    dlg.Commands().Append(Windows::UI::Popups::UICommand{ L"Retry" });
+    dlg.Commands().Append(Windows::UI::Popups::UICommand{ L"Exit" });
+    dlg.DefaultCommandIndex(0); // Retry on Enter
+    dlg.CancelCommandIndex(1);  // Exit on Esc
+
+    Windows::UI::Popups::IUICommand chosen{ nullptr };
+    try
+    {
+      chosen = co_await dlg.ShowAsync();
+    }
+    catch (...)
+    {
+      // Couldn't show (e.g. a dialog is already up) — keep retrying silently.
+      m_dialogOpen = false;
+      co_return;
+    }
+    m_dialogOpen = false;
+
+    if (chosen && std::wstring_view{ chosen.Label() } == L"Exit")
+    {
+      m_running = false;
+      Windows::ApplicationModel::Core::CoreApplication::Exit();
+      co_return;
+    }
+
+    // Retry: re-arm the notice and restart the handshake — but only if we still aren't
+    // connected (the server may have come up while the dialog sat open, and the session
+    // reconnects on its own; don't tear down a live link).
+    m_serverUnreachableNotified = false;
+    if (m_session && m_session->GetState() != Neuron::Client::SessionState::Connected)
+    {
+      m_connectStart = std::chrono::steady_clock::now();
+      try { m_session->Connect("127.0.0.1", kServerPort); } catch (...) {}
+    }
+  }
+
   // ── Game tick ────────────────────────────────────────────────────────────
   void Tick()
   {
     // Push current settings selections to the live engine knobs.
     ApplySettings();
 
-    // 1. Network I/O.
-    m_session->Tick();
+    // 1. Network I/O. Defensive: a transport-layer fault (e.g. an unreachable host or a
+    //    WinRT socket error surfacing here) must degrade to "not connected", never crash
+    //    the client — the unreachable notice below tells the player gracefully.
+    try
+    {
+      m_session->Tick();
+    }
+    catch (...)
+    {
+      OutputDebugStringA("[EarthRise] session tick threw; treating as disconnected\n");
+    }
 
 #ifdef _DEBUG
     // 1b. Server-status overlay (F3): poll replies every frame, and re-query the
@@ -1454,7 +1528,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 #endif
 
     // One-shot: how long from Connect() to fully connected (handshake cost).
-    if (!m_connectedLogged && m_session->GetState() == Neuron::Client::SessionState::Connected)
+    const bool connected = m_session->GetState() == Neuron::Client::SessionState::Connected;
+    if (!m_connectedLogged && connected)
     {
       m_connectedLogged = true;
       const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1463,6 +1538,21 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       char buf[80];
       std::snprintf(buf, sizeof(buf), "[EarthRise] connected in %lld ms\n", ms);
       OutputDebugStringA(buf);
+    }
+
+    // Server-unreachable notice: if the first connection hasn't established within the
+    // budget, tell the player gracefully (once) instead of hanging silently. The session
+    // keeps retrying with backoff in the background (M5 area G), so this is informational.
+    if (!connected && !m_connectedLogged && !m_serverUnreachableNotified && !m_dialogOpen)
+    {
+      const long long waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::steady_clock::now() - m_connectStart)
+                                     .count();
+      if (waitedMs >= kConnectTimeoutMs)
+      {
+        m_serverUnreachableNotified = true;
+        ShowServerUnreachable();
+      }
     }
 
     // 2. Consume any new snapshots.
