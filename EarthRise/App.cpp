@@ -156,6 +156,18 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   static constexpr float kCamPitchPerPx = 0.005f;
   static constexpr float kCamPanFrac    = 0.02f; // pan step as a fraction of zoom distance
 
+  // Right-click context menu (§23.4 command model). RMB is also camera-orbit, so a
+  // *stationary* right-click (press→release with < kCtxClickPx of travel) opens the
+  // menu while a right-drag still orbits. The menu lists BuildContextMenu actions for
+  // the right-clicked target and issues the chosen intent to the current selection.
+  bool     m_rmbReleased{false};               // one-frame RMB-up edge
+  float    m_rmbDownX0{0.f}, m_rmbDownY0{0.f};  // RMB press anchor (click-vs-drag)
+  bool     m_ctxOpen{false};
+  float    m_ctxX{0.f}, m_ctxY{0.f};            // menu top-left (physical px)
+  uint32_t m_ctxTarget{0};                      // right-clicked entity net id
+  std::vector<Neuron::Client::MenuAction> m_ctxActions;
+  static constexpr float kCtxClickPx = 6.0f;    // RMB travel under this = a click, not an orbit
+
   // ---- windowed UI (docs/design/darwinia-menu-ui.md) ----
   enum Win { Win_MainMenu, Win_Options, Win_Screen, Win_Graphics, Win_Other, Win_Count };
   bool  m_winOpen[Win_Count]{ false, false, false, false, false };
@@ -368,8 +380,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const auto props = e.CurrentPoint().Properties();
     m_ptrDown = props.IsLeftButtonPressed();
     m_rmbDown = props.IsRightButtonPressed();
-    // Anchor the orbit so the first frame of a right-drag has a zero delta.
-    if (m_rmbDown) { m_prevPtrX = m_ptrX; m_prevPtrY = m_ptrY; }
+    // Anchor the orbit so the first frame of a right-drag has a zero delta, and record
+    // the RMB press point so release can tell a click from an orbit-drag.
+    if (m_rmbDown) { m_prevPtrX = m_ptrX; m_prevPtrY = m_ptrY; m_rmbDownX0 = m_ptrX; m_rmbDownY0 = m_ptrY; }
     m_ptrPressed = true;
   }
   // Mouse wheel → camera zoom (accumulated; consumed in UpdateCameraInput).
@@ -385,9 +398,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_ptrX = p.X * m_dpiScale;
     m_ptrY = p.Y * m_dpiScale;
     const auto props = e.CurrentPoint().Properties();
+    const bool wasRmb = m_rmbDown;
     m_ptrDown = props.IsLeftButtonPressed();
     m_rmbDown = props.IsRightButtonPressed();
     m_ptrReleased = true;
+    if (wasRmb && !m_rmbDown) m_rmbReleased = true; // RMB-up edge (consumed in HandleContextMenu)
   }
 
   // Apply camera input each frame: right-drag orbit, wheel zoom, arrow-key pan.
@@ -1196,6 +1211,128 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     SendFleet(MakeSmartCommand(tt, m_selection, bestId, {}, /*queue*/false));
   }
 
+  // --- right-click context menu (§23.4) -------------------------------------
+  // NOTE: Windows/UWP presentation, written to the established input/HUD patterns but
+  // not compiled/run in the Linux environment (the platform-independent menu MODEL,
+  // FleetControl.h BuildContextMenu, IS testrunner-covered). Verify on the Windows build.
+
+  // Pick the nearest replicated entity to the cursor in SCREEN space (any owner/kind),
+  // within a small radius. Mirrors HandleViewportSelection's projection convention.
+  uint32_t PickAnyEntity(UINT screenW, UINT screenH, const DirectX::XMFLOAT4X4& vpf,
+                         Neuron::Sim::EntityKind& outKind, uint32_t& outOwner) const
+  {
+    using namespace DirectX;
+    const float s = MenuScale(screenH);
+    const XMMATRIX vp = XMLoadFloat4x4(&vpf);
+    const auto& rs = m_interp.curr;
+    uint32_t best = 0;
+    float bestD2 = (28.f * s) * (28.f * s); // pick radius²
+    for (uint32_t i = 0; i < rs.count; ++i) {
+      const auto& e = rs.entities[i];
+      if (!e.valid) continue;
+      const XMVECTOR clip = XMVector3Transform(XMVectorSet(e.x, e.y, e.z, 1.f), vp);
+      const float wclip = XMVectorGetW(clip);
+      if (wclip <= 1e-4f) continue;
+      const float ndcx = XMVectorGetX(clip) / wclip, ndcy = XMVectorGetY(clip) / wclip;
+      if (ndcx < -1.f || ndcx > 1.f || ndcy < -1.f || ndcy > 1.f) continue;
+      const float sx = (ndcx * 0.5f + 0.5f) * static_cast<float>(screenW);
+      const float sy = (1.f - (ndcy * 0.5f + 0.5f)) * static_cast<float>(screenH);
+      const float dx = sx - m_ptrX, dy = sy - m_ptrY, d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) {
+        bestD2 = d2; best = e.networkId;
+        outKind = static_cast<Neuron::Sim::EntityKind>(e.entityType); outOwner = e.ownerPlayer;
+      }
+    }
+    return best;
+  }
+
+  // Issue the chosen menu action to the current selection against the menu's target.
+  void IssueMenuAction(const Neuron::Client::MenuAction& a)
+  {
+    // Move (needs a world point via screen→universe unproject) and Jump (needs the
+    // beacon name from the starmap) aren't wired off an in-world pick yet — same caveat
+    // as the radar handler — so those rows are inert for now.
+    if (a.needsPoint || a.needsBeacon || m_selection.empty()) return;
+    Neuron::Sim::FleetCommand c;
+    c.intent      = a.intent;
+    c.units       = m_selection;
+    c.targetNetId = m_ctxTarget;
+    if (a.intent == Neuron::Sim::IntentType::Orbit || a.intent == Neuron::Sim::IntentType::KeepRange)
+      c.range = 500.f; // default stand-off (m); a fitted-range default is a balance follow-up
+    m_targetNetId = m_ctxTarget;
+    SendFleet(c);
+  }
+
+  // Context-menu geometry (shared by hit-test + draw). Row i spans [y0+i*rowH, +rowH].
+  void CtxMetrics(float s, float& rowH, float& w) const { rowH = 20.f * s; w = 150.f * s; }
+  // The menu row under (px,py), or -1 if outside. (Deferred rows are still hittable;
+  // IssueMenuAction no-ops them so a click just closes the menu.)
+  int CtxRowAt(float px, float py, float s) const
+  {
+    float rowH, w; CtxMetrics(s, rowH, w);
+    const int n = static_cast<int>(m_ctxActions.size());
+    if (px < m_ctxX || px > m_ctxX + w || py < m_ctxY || py > m_ctxY + rowH * n) return -1;
+    return static_cast<int>((py - m_ctxY) / rowH);
+  }
+
+  // Drive the context menu. Returns true if it consumed this frame's left-click (so the
+  // caller skips radar/selection). RMB-click opens it on the picked entity; a left-click
+  // on an open menu issues the chosen row (or dismisses).
+  bool HandleContextMenu(UINT screenW, UINT screenH, const DirectX::XMFLOAT4X4& vpf)
+  {
+    const float s = MenuScale(screenH);
+
+    // An open menu: a left press resolves it (pick a row, else dismiss) and is consumed.
+    if (m_ctxOpen && m_ptrPressed) {
+      const int row = CtxRowAt(m_ptrX, m_ptrY, s);
+      if (row >= 0 && row < static_cast<int>(m_ctxActions.size())) IssueMenuAction(m_ctxActions[row]);
+      m_ctxOpen = false;
+      m_ptrPressed = m_ptrReleased = false; // eat the click so it doesn't also select
+      return true;
+    }
+
+    // A stationary right-click (not an orbit-drag) opens the menu on the picked entity.
+    if (m_rmbReleased) {
+      m_rmbReleased = false;
+      const float dx = m_ptrX - m_rmbDownX0, dy = m_ptrY - m_rmbDownY0;
+      if (dx * dx + dy * dy <= kCtxClickPx * kCtxClickPx && !PointerOverOpenWindow(s)) {
+        Neuron::Sim::EntityKind kind = Neuron::Sim::EntityKind::Unknown; uint32_t owner = 0;
+        const uint32_t hit = PickAnyEntity(screenW, screenH, vpf, kind, owner);
+        if (hit) {
+          const uint32_t self = m_session ? m_session->PlayerNetId() : 0;
+          const Neuron::Client::SmartTarget tt = Neuron::Client::ClassifyTarget(kind, owner, self);
+          auto actions = Neuron::Client::BuildContextMenu(tt, !m_selection.empty());
+          if (!actions.empty()) {
+            m_ctxActions = std::move(actions);
+            m_ctxTarget = hit; m_ctxX = m_ptrX; m_ctxY = m_ptrY; m_ctxOpen = true;
+          }
+        } else {
+          m_ctxOpen = false; // right-click on empty space closes any open menu
+        }
+      }
+    }
+    return false;
+  }
+
+  // Draw the open context menu (called in the 2D HUD pass).
+  void DrawContextMenu(UINT, UINT screenH)
+  {
+    if (!m_ctxOpen || m_ctxActions.empty()) return;
+    const float s = MenuScale(screenH);
+    float rowH, w; CtxMetrics(s, rowH, w);
+    const int n = static_cast<int>(m_ctxActions.size());
+    m_canvas.DrawRect(m_ctxX, m_ctxY, w, rowH * n, 0.06f, 0.07f, 0.09f, 0.96f); // backdrop
+    for (int i = 0; i < n; ++i) {
+      const float ry = m_ctxY + i * rowH;
+      const auto& a = m_ctxActions[i];
+      const bool dim   = a.needsPoint || a.needsBeacon; // not yet wired off a pick
+      const bool hover = m_ptrX >= m_ctxX && m_ptrX <= m_ctxX + w && m_ptrY >= ry && m_ptrY <= ry + rowH;
+      if (hover && !dim) m_canvas.DrawRect(m_ctxX, ry, w, rowH, 0.20f, 0.24f, 0.30f, 1.f);
+      const float g = dim ? 0.45f : 0.92f;
+      m_canvas.DrawText(m_ctxX + 8.f * s, ry + 4.f * s, a.label, g, g, g, s * 0.8f);
+    }
+  }
+
   // Left-click / drag-box selection in the 3D viewport (playable slice). Projects
   // owned units to screen with the same view-proj the scene drew, then resolves a
   // click (nearest unit) or a drag (box) via the platform-independent Picking helper.
@@ -1681,8 +1818,12 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // Fleet command: a radar click issues a smart action against the nearest
     // contact (must run before UpdateUi consumes the pointer-press, §23.1/area G).
     m_focus[0] = cx; m_focus[1] = cy; m_focus[2] = cz;
-    HandleRadarCommand(h, cx, cz);
-    HandleViewportSelection(w, h, vpf); // 3D-viewport click / box selection
+    // Right-click context menu first: it can open on RMB or consume a left-click on an
+    // open menu, in which case the radar/selection handlers are skipped this frame.
+    if (!HandleContextMenu(w, h, vpf)) {
+      HandleRadarCommand(h, cx, cz);
+      HandleViewportSelection(w, h, vpf); // 3D-viewport click / box selection
+    }
 
     // HUD + windowed UI. Interaction (hover/press/drag/dropdowns) runs first.
     UpdateUi(w, h);
@@ -1723,6 +1864,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     // Darwinia windowed UI (Main Menu / Options / settings panels + dropdowns).
     DrawUi(w, h);
+
+    // Right-click command menu — topmost so it sits over the HUD and windows.
+    DrawContextMenu(w, h);
 
 #ifdef _DEBUG
     // Server-status overlay (F3, debug builds only) — on top of everything else.

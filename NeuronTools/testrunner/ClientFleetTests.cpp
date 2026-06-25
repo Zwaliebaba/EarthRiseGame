@@ -52,6 +52,40 @@ ER_TEST(ClientFleet, MakeSmartCommandFillsTargetByType)
     ER_CHECK(loot.targetNetId == 77);
 }
 
+// --- right-click context menu ----------------------------------------------
+
+ER_TEST(ClientFleet, ContextMenuListsActionsByTargetType)
+{
+    using I = IntentType;
+    // No selection → no menu (nothing to command).
+    ER_CHECK(BuildContextMenu(SmartTarget::Enemy, false).empty());
+
+    auto enemy = BuildContextMenu(SmartTarget::Enemy, true);
+    ER_CHECK_EQ(enemy.size(), size_t{ 3 });
+    ER_CHECK(enemy[0].intent == I::Attack);     // primary
+    ER_CHECK(enemy[1].intent == I::Orbit);
+    ER_CHECK(enemy[2].intent == I::KeepRange);
+
+    ER_CHECK(BuildContextMenu(SmartTarget::ResourceNode, true).front().intent == I::Harvest);
+    ER_CHECK(BuildContextMenu(SmartTarget::Loot, true).front().intent        == I::ClaimLoot);
+    ER_CHECK(BuildContextMenu(SmartTarget::Ally, true).front().intent        == I::Guard);
+    ER_CHECK(BuildContextMenu(SmartTarget::Beacon, true).front().intent      == I::Jump);
+    ER_CHECK(BuildContextMenu(SmartTarget::EmptySpace, true).front().intent  == I::Move);
+}
+
+ER_TEST(ClientFleet, ContextMenuPrimaryMatchesSmartActionAndFlagsDeferred)
+{
+    for (auto t : { SmartTarget::Enemy, SmartTarget::ResourceNode, SmartTarget::Loot,
+                    SmartTarget::Ally, SmartTarget::Beacon, SmartTarget::EmptySpace }) {
+        const auto m = BuildContextMenu(t, true);
+        ER_CHECK(!m.empty());
+        ER_CHECK(m.front().intent == ResolveSmartAction(t)); // primary == smart action
+    }
+    // The two intents that need extra data are flagged so the UI can defer them.
+    ER_CHECK(BuildContextMenu(SmartTarget::EmptySpace, true).front().needsPoint);  // Move
+    ER_CHECK(BuildContextMenu(SmartTarget::Beacon, true).front().needsBeacon);     // Jump
+}
+
 // --- control groups ---------------------------------------------------------
 
 ER_TEST(ClientFleet, ControlGroupSetRecall)

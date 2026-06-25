@@ -79,6 +79,47 @@ MakeSmartCommand(SmartTarget t, const std::vector<uint32_t>& units,
     return c;
 }
 
+// --- right-click context menu (§23.4 command model) -------------------------
+
+// One entry in the right-click context menu: a label + the intent it issues against
+// the right-clicked target. 'needsPoint'/'needsBeacon' flag the two intents that need
+// data the in-world pick doesn't carry yet — a Move world-point (screen→universe
+// unproject) and a Jump beacon name (from the starmap) — so the presentation layer can
+// defer/route those until that data is wired (matches the radar handler's caveats).
+struct MenuAction
+{
+    const char*             label{ "" };
+    Neuron::Sim::IntentType intent{ Neuron::Sim::IntentType::Move };
+    bool                    needsPoint{ false };
+    bool                    needsBeacon{ false };
+};
+
+// The actions offered when right-clicking a target classified as 't'. The FIRST entry
+// is always the primary action (== ResolveSmartAction(t)), so a left-click default and
+// the menu stay consistent. Returns empty when there is no selection to command
+// (combat/movement orders need owned units). Pure UI logic — the server still validates
+// whatever the player picks (§8.4); these helpers never mutate sim state.
+[[nodiscard]] inline std::vector<MenuAction> BuildContextMenu(SmartTarget t, bool hasSelection)
+{
+    using I = Neuron::Sim::IntentType;
+    if (!hasSelection) return {};
+    switch (t) {
+    case SmartTarget::Enemy:
+        return { { "Attack", I::Attack }, { "Orbit", I::Orbit }, { "Keep at Range", I::KeepRange } };
+    case SmartTarget::ResourceNode:
+        return { { "Harvest", I::Harvest }, { "Move Here", I::Move, true, false } };
+    case SmartTarget::Loot:
+        return { { "Claim", I::ClaimLoot }, { "Move Here", I::Move, true, false } };
+    case SmartTarget::Ally:
+        return { { "Guard", I::Guard }, { "Move Here", I::Move, true, false } };
+    case SmartTarget::Beacon:
+        return { { "Jump", I::Jump, false, true }, { "Move Here", I::Move, true, false } };
+    case SmartTarget::EmptySpace:
+        return { { "Move Here", I::Move, true, false } };
+    }
+    return {};
+}
+
 // --- control groups (§23.2 Ctrl+# set / # recall) ---------------------------
 
 // Ten client-side selection sets. Pure UI state — the server stores no grouping;

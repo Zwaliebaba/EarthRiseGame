@@ -208,6 +208,7 @@ exercise:
 | Arrow keys | Pan the camera (releases base-follow) |
 | `F` / `Space` | Toggle base-follow / recenter on your base |
 | Left-click / left-drag | Select nearest unit / box-select |
+| **Right-click a unit/object** | Open a **context menu** of actions for the selection (attack / orbit / keep-range / harvest / claim / guard); a right-*drag* still orbits |
 | Click the radar (lower-left) | Issue a smart command (move/attack/warp) to the selection |
 | `A` / `B` / `S` | Select all own ships / build a ship at base / stop selection |
 | `Ctrl+#` then `#` | Set / recall a control group |
