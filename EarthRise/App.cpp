@@ -161,6 +161,10 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   bool  m_rmbDown{false};
   float m_prevPtrX{0.f}, m_prevPtrY{0.f};
   int   m_wheelAccum{0};
+  // Right-click context menu: a stationary right-click (vs orbit-drag) opens it. App
+  // detects the RMB-click edge; the menu state/logic lives in m_fleet, the draw in m_hud.
+  bool  m_rmbReleased{false};               // one-frame RMB-up edge
+  float m_rmbDownX0{0.f}, m_rmbDownY0{0.f};  // RMB press anchor (click vs orbit-drag)
   static constexpr float kCamYawPerPx   = 0.005f;
   static constexpr float kCamPitchPerPx = 0.005f;
   static constexpr float kCamPanFrac    = 0.02f; // pan step as a fraction of zoom distance
@@ -369,8 +373,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     const auto props = e.CurrentPoint().Properties();
     m_ptrDown = props.IsLeftButtonPressed();
     m_rmbDown = props.IsRightButtonPressed();
-    // Anchor the orbit so the first frame of a right-drag has a zero delta.
-    if (m_rmbDown) { m_prevPtrX = m_ptrX; m_prevPtrY = m_ptrY; }
+    // Anchor the orbit so the first frame of a right-drag has a zero delta, and record the
+    // RMB press point so release can tell a click from an orbit-drag.
+    if (m_rmbDown) { m_prevPtrX = m_ptrX; m_prevPtrY = m_ptrY; m_rmbDownX0 = m_ptrX; m_rmbDownY0 = m_ptrY; }
     m_ptrPressed = true;
   }
   // Mouse wheel → camera zoom (accumulated; consumed in UpdateCameraInput).
@@ -386,9 +391,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_ptrX = p.X * m_dpiScale;
     m_ptrY = p.Y * m_dpiScale;
     const auto props = e.CurrentPoint().Properties();
+    const bool wasRmb = m_rmbDown;
     m_ptrDown = props.IsLeftButtonPressed();
     m_rmbDown = props.IsRightButtonPressed();
     m_ptrReleased = true;
+    if (wasRmb && !m_rmbDown) m_rmbReleased = true; // RMB-up edge (consumed each frame)
   }
 
   // Apply camera input each frame: right-drag orbit, wheel zoom, arrow-key pan.
@@ -962,8 +969,15 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     fin.ptrPressed = m_ptrPressed; fin.ptrReleased = m_ptrReleased;
     fin.menuScale = MenuScale(h);
     fin.overMenuWindow = m_menu.PointerOverWindow(m_ptrX, m_ptrY, h);
-    m_fleet.HandleRadarClick(fin, cx, cz);
-    m_fleet.HandleViewportSelection(fin, vpf); // 3D-viewport click / box selection
+    fin.rmbReleased = m_rmbReleased; fin.rmbDownX0 = m_rmbDownX0; fin.rmbDownY0 = m_rmbDownY0;
+    // Right-click context menu first: a left-click it consumes pre-empts radar/selection.
+    if (m_fleet.HandleContextMenu(fin, vpf)) {
+      m_ptrPressed = m_ptrReleased = false; // eat the click so it doesn't also select
+    } else {
+      m_fleet.HandleRadarClick(fin, cx, cz);
+      m_fleet.HandleViewportSelection(fin, vpf); // 3D-viewport click / box selection
+    }
+    m_rmbReleased = false; // consume the RMB edge after the menu had its chance
 
     // HUD + windowed UI. Interaction (hover/press/drag/dropdowns) runs first; the menu
     // consumes the pointer edges, App clears them, and a Quit selection ends the loop.
@@ -1014,6 +1028,8 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     hud.sessionState = m_session ? m_session->GetState()
                                  : Neuron::Client::SessionState::Connected;
     hud.serverUnreachable = m_serverUnreachableNotified;
+    hud.menuOpen = m_fleet.MenuOpen(); hud.menuX = m_fleet.MenuX(); hud.menuY = m_fleet.MenuY();
+    hud.menuActions = &m_fleet.MenuActions();
 
     m_hud.DrawRadar(hud, entities, entCount, cx, cy, cz); // 2D radar disc (under the windowed UI)
     m_hud.DrawWorldOverlays(hud);                         // selection brackets + health bars
@@ -1024,6 +1040,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     // Non-modal connection-status banner (hidden once connected) — on top of the HUD.
     m_hud.DrawConnectionBanner(hud);
+
+    // Right-click command menu — topmost so it sits over the HUD and windowed UI.
+    m_hud.DrawContextMenu(hud);
 
 #ifdef _DEBUG
     // Server-status overlay (F3, debug builds only) — on top of everything else.

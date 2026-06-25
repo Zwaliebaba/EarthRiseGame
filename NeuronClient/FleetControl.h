@@ -23,7 +23,7 @@ namespace Neuron::Client
 
 // IFF / target classification for the smart action (§23.4). Derived from a
 // contact's EntityKind + ownership relative to the local player.
-enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Beacon };
+enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Beacon, Loot };
 
 // Classify a replicated contact for the smart action. NPCs (owner 0) and other
 // players' combat units read as Enemy; your own units read as Ally.
@@ -32,8 +32,9 @@ enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Be
 {
     using K = Neuron::Sim::EntityKind;
     switch (kind) {
-    case K::ResourceNode: return SmartTarget::ResourceNode;
-    case K::Structure:    return SmartTarget::Beacon;          // jump beacon / gate
+    case K::ResourceNode:  return SmartTarget::ResourceNode;
+    case K::LootContainer: return SmartTarget::Loot;           // recoverable kill loot
+    case K::Structure:     return SmartTarget::Beacon;         // jump beacon / gate
     case K::Base:
     case K::Ship:         return (ownerPlayer == selfPlayer && selfPlayer != 0)
                                  ? SmartTarget::Ally : SmartTarget::Enemy;
@@ -43,7 +44,7 @@ enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Be
 }
 
 // The smart single action (§23.1): empty space = move, enemy = attack, node =
-// harvest, beacon = warp/jump, ally = guard/assist.
+// harvest, beacon = warp/jump, ally = guard/assist, loot = claim.
 [[nodiscard]] inline Neuron::Sim::IntentType ResolveSmartAction(SmartTarget t) noexcept
 {
     using I = Neuron::Sim::IntentType;
@@ -52,6 +53,7 @@ enum class SmartTarget : uint8_t { EmptySpace = 0, Ally, Enemy, ResourceNode, Be
     case SmartTarget::ResourceNode: return I::Harvest;
     case SmartTarget::Beacon:       return I::Jump;
     case SmartTarget::Ally:         return I::Guard;
+    case SmartTarget::Loot:         return I::ClaimLoot;
     case SmartTarget::EmptySpace:   return I::Move;
     }
     return I::Move;
@@ -76,6 +78,52 @@ MakeSmartCommand(SmartTarget t, const std::vector<uint32_t>& units,
     else                                c.targetNetId = targetNetId;
     return c;
 }
+
+// --- right-click context menu (§23.4 command model) -------------------------
+
+// One entry in the right-click context menu: a label + the intent it issues against
+// the right-clicked target. 'needsPoint'/'needsBeacon' flag the two intents that need
+// data the in-world pick doesn't carry yet — a Move world-point (screen→universe
+// unproject) and a Jump beacon name (from the starmap) — so the presentation layer can
+// defer/route those until that data is wired (matches the radar handler's caveats).
+struct MenuAction
+{
+    const char*             label{ "" };
+    Neuron::Sim::IntentType intent{ Neuron::Sim::IntentType::Move };
+    bool                    needsPoint{ false };
+    bool                    needsBeacon{ false };
+};
+
+// The actions offered when right-clicking a target classified as 't'. The FIRST entry
+// is always the primary action (== ResolveSmartAction(t)), so a left-click default and
+// the menu stay consistent. Returns empty when there is no selection to command
+// (combat/movement orders need owned units). Pure UI logic — the server still validates
+// whatever the player picks (§8.4); these helpers never mutate sim state.
+[[nodiscard]] inline std::vector<MenuAction> BuildContextMenu(SmartTarget t, bool hasSelection)
+{
+    using I = Neuron::Sim::IntentType;
+    if (!hasSelection) return {};
+    switch (t) {
+    case SmartTarget::Enemy:
+        return { { "Attack", I::Attack }, { "Orbit", I::Orbit }, { "Keep at Range", I::KeepRange } };
+    case SmartTarget::ResourceNode:
+        return { { "Harvest", I::Harvest }, { "Move Here", I::Move, true, false } };
+    case SmartTarget::Loot:
+        return { { "Claim", I::ClaimLoot }, { "Move Here", I::Move, true, false } };
+    case SmartTarget::Ally:
+        return { { "Guard", I::Guard }, { "Move Here", I::Move, true, false } };
+    case SmartTarget::Beacon:
+        return { { "Jump", I::Jump, false, true }, { "Move Here", I::Move, true, false } };
+    case SmartTarget::EmptySpace:
+        return { { "Move Here", I::Move, true, false } };
+    }
+    return {};
+}
+
+// Context-menu geometry (rows stacked from the menu's top-left), shared by the
+// controller's hit-test and the HUD's draw so they can never drift. 's' = UI scale.
+struct MenuMetrics { float rowH; float width; };
+[[nodiscard]] inline MenuMetrics ContextMenuMetrics(float s) noexcept { return { 20.0f * s, 150.0f * s }; }
 
 // --- control groups (§23.2 Ctrl+# set / # recall) ---------------------------
 

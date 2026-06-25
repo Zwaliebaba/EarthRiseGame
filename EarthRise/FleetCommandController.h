@@ -34,6 +34,10 @@ struct FleetInput
     bool  ptrPressed{ false }, ptrReleased{ false };
     float menuScale{ 1.f };       // App's MenuScale(screenH)
     bool  overMenuWindow{ false }; // m_menu.PointerOverWindow(ptrX, ptrY, screenH)
+    // Right-click context menu: RMB is also camera-orbit, so a stationary right-click
+    // (release with < kCtxClickPx travel from the press anchor) opens the menu.
+    bool  rmbReleased{ false };               // one-frame RMB-up edge
+    float rmbDownX0{ 0.f }, rmbDownY0{ 0.f };  // RMB press anchor (click vs orbit-drag)
 };
 
 class FleetCommandController
@@ -191,6 +195,51 @@ public:
         }
     }
 
+    // ── Right-click context menu (§23.4) ──────────────────────────────────────
+    // Read-only state for the HUD to draw the open menu.
+    [[nodiscard]] bool  MenuOpen() const noexcept { return m_ctxOpen; }
+    [[nodiscard]] float MenuX() const noexcept { return m_ctxX; }
+    [[nodiscard]] float MenuY() const noexcept { return m_ctxY; }
+    [[nodiscard]] const std::vector<Neuron::Client::MenuAction>& MenuActions() const noexcept { return m_ctxActions; }
+
+    // Drive the context menu. Returns true if it consumed this frame's left-click (so
+    // App skips the radar/selection handlers and clears the pointer edges). A stationary
+    // right-click opens the menu on the entity under the cursor; a left-click on an open
+    // menu issues the chosen row's intent to the selection (or dismisses it).
+    bool HandleContextMenu(const FleetInput& in, const DirectX::XMFLOAT4X4& vpf)
+    {
+        const float s = in.menuScale;
+
+        // An open menu: a left press resolves it (pick a row, else dismiss) and is consumed.
+        if (m_ctxOpen && in.ptrPressed) {
+            const int row = CtxRowAt(in.ptrX, in.ptrY, s);
+            if (row >= 0 && row < static_cast<int>(m_ctxActions.size())) IssueMenuAction(in.session, m_ctxActions[row]);
+            m_ctxOpen = false;
+            return true;
+        }
+
+        // A stationary right-click (not an orbit-drag) opens the menu on the picked entity.
+        if (in.rmbReleased) {
+            const float dx = in.ptrX - in.rmbDownX0, dy = in.ptrY - in.rmbDownY0;
+            if (dx * dx + dy * dy <= kCtxClickPx * kCtxClickPx && !in.overMenuWindow) {
+                Neuron::Sim::EntityKind kind = Neuron::Sim::EntityKind::Unknown; uint32_t owner = 0;
+                const uint32_t hit = PickAnyEntity(in, vpf, kind, owner);
+                if (hit) {
+                    const uint32_t self = in.session ? in.session->PlayerNetId() : 0;
+                    const Neuron::Client::SmartTarget tt = Neuron::Client::ClassifyTarget(kind, owner, self);
+                    auto actions = Neuron::Client::BuildContextMenu(tt, !m_selection.empty());
+                    if (!actions.empty()) {
+                        m_ctxActions = std::move(actions);
+                        m_ctxTarget = hit; m_ctxX = in.ptrX; m_ctxY = in.ptrY; m_ctxOpen = true;
+                    }
+                } else {
+                    m_ctxOpen = false; // right-click on empty space closes any open menu
+                }
+            }
+        }
+        return false;
+    }
+
 private:
     // Encode + send a validated FleetCommand to the server (the server re-checks
     // ownership/target; this is purely the client request path, §8.4).
@@ -200,11 +249,76 @@ private:
         session->SendFleetCommand(Neuron::Sim::EncodeFleetCommand(cmd));
     }
 
+    // Pick the nearest replicated entity to the cursor in SCREEN space (any owner/kind),
+    // within a small radius. Mirrors HandleViewportSelection's projection convention.
+    uint32_t PickAnyEntity(const FleetInput& in, const DirectX::XMFLOAT4X4& vpf,
+                           Neuron::Sim::EntityKind& outKind, uint32_t& outOwner) const
+    {
+        using namespace DirectX;
+        const float s = in.menuScale;
+        const XMMATRIX vp = XMLoadFloat4x4(&vpf);
+        const Neuron::Client::ReplicaSet& rs = *in.replica;
+        uint32_t best = 0;
+        float bestD2 = (28.f * s) * (28.f * s); // pick radius²
+        for (uint32_t i = 0; i < rs.count; ++i) {
+            const auto& e = rs.entities[i];
+            if (!e.valid) continue;
+            const XMVECTOR clip = XMVector3Transform(XMVectorSet(e.x, e.y, e.z, 1.f), vp);
+            const float wclip = XMVectorGetW(clip);
+            if (wclip <= 1e-4f) continue;
+            const float ndcx = XMVectorGetX(clip) / wclip, ndcy = XMVectorGetY(clip) / wclip;
+            if (ndcx < -1.f || ndcx > 1.f || ndcy < -1.f || ndcy > 1.f) continue;
+            const float sx = (ndcx * 0.5f + 0.5f) * static_cast<float>(in.screenW);
+            const float sy = (1.f - (ndcy * 0.5f + 0.5f)) * static_cast<float>(in.screenH);
+            const float dx = sx - in.ptrX, dy = sy - in.ptrY, d2 = dx * dx + dy * dy;
+            if (d2 < bestD2) {
+                bestD2 = d2; best = e.networkId;
+                outKind = static_cast<Neuron::Sim::EntityKind>(e.entityType); outOwner = e.ownerPlayer;
+            }
+        }
+        return best;
+    }
+
+    // Issue the chosen menu action to the current selection against the menu's target.
+    void IssueMenuAction(Neuron::Client::SessionImpl* session, const Neuron::Client::MenuAction& a)
+    {
+        // Move (needs a world point via screen→universe unproject) and Jump (needs the
+        // beacon name from the starmap) aren't wired off an in-world pick yet — same caveat
+        // as the radar handler — so those rows are inert for now.
+        if (a.needsPoint || a.needsBeacon || m_selection.empty()) return;
+        Neuron::Sim::FleetCommand c;
+        c.intent      = a.intent;
+        c.units       = m_selection;
+        c.targetNetId = m_ctxTarget;
+        if (a.intent == Neuron::Sim::IntentType::Orbit || a.intent == Neuron::Sim::IntentType::KeepRange)
+            c.range = 500.f; // default stand-off (m); a fitted-range default is a balance follow-up
+        m_targetNetId = m_ctxTarget;
+        SendFleet(session, c);
+    }
+
+    // The menu row under (px,py), or -1 if outside. (Deferred rows stay hittable;
+    // IssueMenuAction no-ops them, so a click there just closes the menu.)
+    int CtxRowAt(float px, float py, float s) const
+    {
+        const auto m = Neuron::Client::ContextMenuMetrics(s);
+        const int n = static_cast<int>(m_ctxActions.size());
+        if (px < m_ctxX || px > m_ctxX + m.width || py < m_ctxY || py > m_ctxY + m.rowH * n) return -1;
+        return static_cast<int>((py - m_ctxY) / m.rowH);
+    }
+
+    static constexpr float kCtxClickPx = 6.0f; // RMB travel under this = a click, not an orbit
+
     Neuron::Client::ControlGroups m_controlGroups;
     std::vector<uint32_t>         m_selection;     // locally-selected owned net ids
     uint32_t                      m_targetNetId{ 0 }; // last picked target (overview/radar)
     bool                          m_selDragging{ false };
     float                         m_selX0{ 0.f }, m_selY0{ 0.f };
+
+    // Right-click context menu state (presentation reads it via the accessors above).
+    bool                                    m_ctxOpen{ false };
+    float                                   m_ctxX{ 0.f }, m_ctxY{ 0.f };
+    uint32_t                                m_ctxTarget{ 0 };
+    std::vector<Neuron::Client::MenuAction> m_ctxActions;
 };
 
 } // namespace er

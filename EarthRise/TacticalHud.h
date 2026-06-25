@@ -50,6 +50,11 @@ struct TacticalHudFrame
     // Connection-status banner.
     Neuron::Client::SessionState sessionState{ Neuron::Client::SessionState::Disconnected };
     bool serverUnreachable{ false };
+
+    // Right-click context menu (read from FleetCommandController; drawn topmost).
+    bool  menuOpen{ false };
+    float menuX{ 0.f }, menuY{ 0.f };
+    const std::vector<Neuron::Client::MenuAction>* menuActions{ nullptr };
 };
 
 class TacticalHud
@@ -222,6 +227,28 @@ public:
         const float pad = 10.f * hudS;
         m_canvas.DrawRect(x - pad, y - pad * 0.5f, tw + pad * 2.f, th + pad, 0.f, 0.f, 0.f, 0.55f);
         m_canvas.DrawText(x, y, msg, r, g, b, scale);
+    }
+
+    // Right-click command menu (§23.4) — a small list of actions at the click point.
+    // Geometry comes from FleetControl.h ContextMenuMetrics so it matches the
+    // controller's hit-test exactly. Deferred rows (Move/Jump, not yet wired off a pick)
+    // are dimmed. Drawn last so it sits over the HUD + windowed UI.
+    void DrawContextMenu(const TacticalHudFrame& f)
+    {
+        if (!f.menuOpen || !f.menuActions || f.menuActions->empty()) return;
+        const float s = f.hudScale;
+        const auto m = Neuron::Client::ContextMenuMetrics(s);
+        const int n = static_cast<int>(f.menuActions->size());
+        m_canvas.DrawRect(f.menuX, f.menuY, m.width, m.rowH * n, 0.06f, 0.07f, 0.09f, 0.96f); // backdrop
+        for (int i = 0; i < n; ++i) {
+            const float ry = f.menuY + i * m.rowH;
+            const auto& a = (*f.menuActions)[i];
+            const bool dim   = a.needsPoint || a.needsBeacon; // not yet wired off a pick
+            const bool hover = f.ptrX >= f.menuX && f.ptrX <= f.menuX + m.width && f.ptrY >= ry && f.ptrY <= ry + m.rowH;
+            if (hover && !dim) m_canvas.DrawRect(f.menuX, ry, m.width, m.rowH, 0.20f, 0.24f, 0.30f, 1.f);
+            const float g = dim ? 0.45f : 0.92f;
+            m_canvas.DrawText(f.menuX + 8.f * s, ry + 4.f * s, a.label, g, g, g, s * 0.8f);
+        }
     }
 
 private:

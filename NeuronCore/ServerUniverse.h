@@ -1212,6 +1212,8 @@ private:
             return BeginJumpTo(unitNet, cmd.beacon) == JumpReject::Accepted;
         case IntentType::Build:
             return EnqueueBuild(unitNet); // 'unit' is the player's base
+        case IntentType::ClaimLoot:
+            return ClaimLoot(unitNet, cmd.targetNetId); // 'unit' is the owned claimer ship
 
         case IntentType::Move:
             return PushOrder(unitNet, { OrderType::Move, 0, cmd.targetPoint, 0.0f }, cmd.queue);
