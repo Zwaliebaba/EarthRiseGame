@@ -134,6 +134,46 @@ resource-field hash only** (`hash(masterSeed ⊕ privateSalt ⊕ fieldId ⊕ epo
 static layout, which must stay client-reproducible. The cost of a private salt is that those
 nodes can no longer be pre-generated client-side and must come over the wire as divergence.
 
+### Respawn policy (resolves "node respawn" open question)
+
+The respawn *mechanism* is the per-field epoch bump above; the *policy*:
+
+- **Time-based, per-field cooldown — not demand-based.** Full depletion starts a respawn timer;
+  on elapse, `++epoch` regenerates the field. EarthRise has no daily downtime to piggyback on
+  (persistent, warm-restart), so an explicit per-field timer is required. Demand-based respawn
+  is rejected for launch (feedback loops, harder to reason about).
+- **Timer in sim-ticks, not wall-clock** — non-negotiable for record/replay determinism
+  (area H). Persist it as *remaining sim-ticks*; resume the countdown on warm restart.
+- **Whole-field respawn on full depletion, not per-node trickle.** Keeps respawn field-granular
+  (one counter, one timer) to match the per-field epoch decision. Per-node trickle-refill is
+  smoother (no gold-rush) but adds per-node timers + persisted state — **deferred endgame upgrade.**
+- **Placement re-rolls each epoch — for free.** `hash(seed ⊕ fieldId ⊕ epoch)` yields different
+  positions/composition (within the authored parameter ranges) every cycle, so coordinate-memorizing
+  mining macros degrade. Embrace it.
+- **Respawn rate is the primary resource faucet → per-region data tunable** (§12.6/§19,
+  bot-validated). Fast/forgiving in high-sec onboarding, slow + rich in null (scarcity drives
+  conflict), riding the security-tier yield gradient already in `sol-frontier.universe`. Never
+  hard-coded.
+
+### Authored-topology / procedural-contents split (resolves "beacon topology" open question)
+
+**The beacon-graph topology is hand-authored; only the contents hung off it are procedural.**
+The beacon graph is the strategic map (chokepoints, frontier gradient, defensible regions) — the
+highest-leverage hand-crafted artifact in a territorial 4X, and epoch-0 static since players
+**claim** beacons (M7) and navigate fixed geography. Procedural graphs trend uniform and would
+undermine both. It is reversible (worldgen §4.2 keeps the cooked format identical), so a
+"generate-then-hand-tune" topology generator can land at M7 scale without a format change — and
+must satisfy the same `datacheck` invariants.
+
+| Aspect | Launch | Source |
+| --- | --- | --- |
+| **Topology** (beacon links) + security tiers | authored | `.universe`, epoch-0 |
+| **Geometry** (beacon coordinates) | authored for the launch cluster; seed-generatable per-region later | epoch-0 |
+| **Contents** (resource fields, NPC sites, scenery per node) | procedural from params | generator |
+
+`datacheck`'s reciprocal-link / public-graph-connectivity / frontier-gradient gates stay a hard
+requirement (and bind any future topology generator).
+
 ---
 
 ## Feature areas
@@ -147,8 +187,10 @@ nodes can no longer be pre-generated client-side and must come over the wire as 
   `ServerConfig` has no universe field. Warm-restart restore (`RestoreFromWarmRestart`) already
   runs before the sim loop when a DB is configured.
 - **Work:**
-  - [ ] Add a `universe { dataset = "Config/universe/sol-frontier.universe"; masterSeed = …;
-        epoch = … }` block to `ServerConfig` (§20; nothing from env).
+  - [ ] Add a `universe { dataset = "Config/universe/sol-frontier.universe"; masterSeed = … }`
+        block to `ServerConfig` (§20; nothing from env). `masterSeed` is an *optional pin* for a
+        **fresh** shard (operator reproducibility); once a `Shard` row exists the DB seed wins and
+        config is ignored. **No `epoch` in config** — epoch is per-field state in the DB.
   - [ ] In `ERServer.cpp` boot, **after** construct and **after** the warm-restart restore
         decision, branch: **restored from DB → do nothing** (state is authoritative);
         **fresh shard → seed.** Keep it on the single-threaded boot path (before the sim loop),
@@ -175,18 +217,23 @@ nodes can no longer be pre-generated client-side and must come over the wire as 
   in `ServerUniverse` (the seeding system).
 - **Current state:** `sol-frontier.universe` currently **hand-authors** explicit fields with
   fixed coordinates/yields; `SpawnFieldNodes` rings nodes from those explicit fields. This area
-  flips that: the file holds **distribution parameters**, the generator produces placements.
+  flips that for **contents** only: the file keeps the **authored beacon topology** but the
+  fields become **distribution parameters** the generator expands (per the topology split above).
 - **Work:**
+  - [ ] **Topology stays authored.** Beacon links + security tiers + (launch-cluster) coordinates
+        remain explicit in `.universe`, epoch-0. The generator does **not** invent topology.
   - [ ] Extend the `.universe` schema (`UniverseData.h` + `datacook`/`datacheck`) with a
-        **parameter** form: per-region field-density and composition weights, yield/amount
-        ranges, beacon-graph shape rules, NPC-site density — alongside (or replacing) explicit
-        fields. Keep the cooked binary format stable for `LoadUniverseFromCooked`.
-  - [ ] Add a deterministic PRNG keyed by `hash(masterSeed ⊕ regionId ⊕ epoch)` (no
-        `Math.random`/wall-clock — must reproduce; mirrors the determinism harness discipline).
+        **parameter** form for *contents*: per-region field-density and composition weights,
+        yield/amount ranges, NPC-site density, and the **per-region respawn cooldown** (the
+        resource-faucet tunable). Keep the cooked binary format stable for `LoadUniverseFromCooked`.
+  - [ ] Add a deterministic PRNG keyed by `hash(masterSeed ⊕ fieldId ⊕ epoch)` for field contents
+        (`⊕ regionId` for region-scoped content); no `Math.random`/wall-clock — must reproduce
+        (mirrors the determinism-harness discipline).
   - [ ] Generator emits the same entity set as today's `SpawnFieldNodes`/`SpawnNpcSite` so the
         downstream sim is unchanged; only *where the placements come from* changes.
-  - [ ] `datacheck` gates the parameter ranges (densities sum sane, weights normalize, graph
-        connectivity) — same spirit as the current beacon-graph checks.
+  - [ ] `datacheck` gates the parameter ranges (densities sum sane, weights normalize) **and keeps**
+        the existing topology invariants (reciprocal links, public-graph connectivity, frontier
+        gradient) as a hard requirement.
 - **Tests (`UniverseDataTests`/new `UniverseGenTests`, testrunner):**
   - [ ] Same seed → identical baseline (placement hash equal); different seed → different.
   - [ ] Generated node counts/composition fall within the authored parameter ranges.
