@@ -54,9 +54,9 @@ private:
     // Mirrors Win32 SOCKET (UINT_PTR). All-ones is INVALID_SOCKET.
     static constexpr uintptr_t INVALID_SOCKET_SENTINEL = static_cast<uintptr_t>(~uintptr_t{ 0 });
 
-    uintptr_t sock_{ INVALID_SOCKET_SENTINEL };
-    uint16_t  localPort_{ 0 };
-    bool      isV6_{ false }; // true if the bound socket is AF_INET6 (dual-stack)
+    uintptr_t m_sock{ INVALID_SOCKET_SENTINEL };
+    uint16_t  m_localPort{ 0 };
+    bool      m_isV6{ false }; // true if the bound socket is AF_INET6 (dual-stack)
 };
 
 } // namespace Neuron::Net

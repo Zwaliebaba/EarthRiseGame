@@ -264,25 +264,25 @@ struct IocpUdpListenerImpl
 namespace Neuron::Server
 {
 
-IocpUdpListener::IocpUdpListener()  : impl_(new IocpUdpListenerImpl) {}
-IocpUdpListener::~IocpUdpListener() { Stop(); delete impl_; impl_ = nullptr; }
+IocpUdpListener::IocpUdpListener()  : m_impl(new IocpUdpListenerImpl) {}
+IocpUdpListener::~IocpUdpListener() { Stop(); delete m_impl; m_impl = nullptr; }
 
 void IocpUdpListener::SetLaneCount(unsigned lanes)
 {
-    if (!impl_ || impl_->running.load())
+    if (!m_impl || m_impl->running.load())
         return;
 
-    impl_->laneCount = lanes;
+    m_impl->laneCount = lanes;
 }
 
 void IocpUdpListener::SetRecvCallback(RecvCallback cb)
 {
-    impl_->callback = std::move(cb);
+    m_impl->callback = std::move(cb);
 }
 
 bool IocpUdpListener::Start(uint16_t port, unsigned numThreads)
 {
-    if (impl_->running.load())
+    if (m_impl->running.load())
         return false; // already started
 
     // WSAStartup — refcounted by Winsock; ERServer may also start it elsewhere.
@@ -291,72 +291,72 @@ bool IocpUdpListener::Start(uint16_t port, unsigned numThreads)
         return false;
 
     // Overlapped UDP socket (dual-stack v6).
-    impl_->sock = ::WSASocketW(AF_INET6, SOCK_DGRAM, IPPROTO_UDP,
+    m_impl->sock = ::WSASocketW(AF_INET6, SOCK_DGRAM, IPPROTO_UDP,
                                nullptr, 0, WSA_FLAG_OVERLAPPED);
-    if (impl_->sock == INVALID_SOCKET) {
+    if (m_impl->sock == INVALID_SOCKET) {
         ::WSACleanup();
         return false;
     }
 
     DWORD v6only = 0;
-    ::setsockopt(impl_->sock, IPPROTO_IPV6, IPV6_V6ONLY,
+    ::setsockopt(m_impl->sock, IPPROTO_IPV6, IPV6_V6ONLY,
                  reinterpret_cast<const char*>(&v6only), sizeof(v6only));
 
     sockaddr_in6 local{};
     local.sin6_family = AF_INET6;
     local.sin6_addr   = in6addr_any;
     local.sin6_port   = htons(port);
-    if (::bind(impl_->sock, reinterpret_cast<sockaddr*>(&local), sizeof(local)) == SOCKET_ERROR) {
-        ::closesocket(impl_->sock); impl_->sock = INVALID_SOCKET;
+    if (::bind(m_impl->sock, reinterpret_cast<sockaddr*>(&local), sizeof(local)) == SOCKET_ERROR) {
+        ::closesocket(m_impl->sock); m_impl->sock = INVALID_SOCKET;
         ::WSACleanup();
         return false;
     }
 
     // Resolve the actual bound port (handles ephemeral port == 0).
     sockaddr_in6 bound{}; int boundLen = sizeof(bound);
-    impl_->port = port;
-    if (::getsockname(impl_->sock, reinterpret_cast<sockaddr*>(&bound), &boundLen) == 0)
-        impl_->port = ntohs(bound.sin6_port);
+    m_impl->port = port;
+    if (::getsockname(m_impl->sock, reinterpret_cast<sockaddr*>(&bound), &boundLen) == 0)
+        m_impl->port = ntohs(bound.sin6_port);
 
     // Create the completion port and associate the socket with it.
-    impl_->iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
-    if (impl_->iocp == nullptr) {
-        ::closesocket(impl_->sock); impl_->sock = INVALID_SOCKET;
+    m_impl->iocp = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
+    if (m_impl->iocp == nullptr) {
+        ::closesocket(m_impl->sock); m_impl->sock = INVALID_SOCKET;
         ::WSACleanup();
         return false;
     }
-    if (::CreateIoCompletionPort(reinterpret_cast<HANDLE>(impl_->sock),
-                                 impl_->iocp, RECV_KEY, 0) == nullptr) {
-        ::CloseHandle(impl_->iocp); impl_->iocp = nullptr;
-        ::closesocket(impl_->sock); impl_->sock = INVALID_SOCKET;
+    if (::CreateIoCompletionPort(reinterpret_cast<HANDLE>(m_impl->sock),
+                                 m_impl->iocp, RECV_KEY, 0) == nullptr) {
+        ::CloseHandle(m_impl->iocp); m_impl->iocp = nullptr;
+        ::closesocket(m_impl->sock); m_impl->sock = INVALID_SOCKET;
         ::WSACleanup();
         return false;
     }
 
-    impl_->running.store(true, std::memory_order_release);
+    m_impl->running.store(true, std::memory_order_release);
 
-    const unsigned resolvedLaneCount = (impl_->laneCount != 0)
-        ? impl_->laneCount
+    const unsigned resolvedLaneCount = (m_impl->laneCount != 0)
+        ? m_impl->laneCount
         : (std::thread::hardware_concurrency() != 0 ? std::thread::hardware_concurrency() : 1u);
 
-    impl_->lanes.clear();
-    impl_->lanes.reserve(resolvedLaneCount);
+    m_impl->lanes.clear();
+    m_impl->lanes.reserve(resolvedLaneCount);
     for (unsigned i = 0; i < resolvedLaneCount; ++i) {
         auto lane = std::make_unique<Lane>();
         lane->running.store(true, std::memory_order_release);
-        lane->thread = std::thread([this, rawLane = lane.get()] { impl_->LaneLoop(rawLane); });
-        impl_->lanes.push_back(std::move(lane));
+        lane->thread = std::thread([this, rawLane = lane.get()] { m_impl->LaneLoop(rawLane); });
+        m_impl->lanes.push_back(std::move(lane));
     }
-    impl_->laneCount = resolvedLaneCount;
+    m_impl->laneCount = resolvedLaneCount;
 
     // Pre-post the receive pool.
-    impl_->recvOps.reserve(RECV_POOL_SIZE);
+    m_impl->recvOps.reserve(RECV_POOL_SIZE);
     for (int i = 0; i < RECV_POOL_SIZE; ++i) {
         auto* op = new RecvOp{};
-        impl_->recvOps.push_back(op);
-        if (!impl_->PostRecv(op)) {
+        m_impl->recvOps.push_back(op);
+        if (!m_impl->PostRecv(op)) {
             // Couldn't prime the pool — tear down.
-            impl_->running.store(false);
+            m_impl->running.store(false);
             Stop();
             return false;
         }
@@ -366,51 +366,51 @@ bool IocpUdpListener::Start(uint16_t port, unsigned numThreads)
     const unsigned n = (numThreads != 0) ? numThreads
                                          : (std::thread::hardware_concurrency()
                                                 ? std::thread::hardware_concurrency() : 2u);
-    impl_->workers.reserve(n);
+    m_impl->workers.reserve(n);
     for (unsigned i = 0; i < n; ++i)
-        impl_->workers.emplace_back([this] { impl_->WorkerLoop(); });
+        m_impl->workers.emplace_back([this] { m_impl->WorkerLoop(); });
 
     return true;
 }
 
 void IocpUdpListener::Stop()
 {
-    if (!impl_ || !impl_->running.exchange(false))
+    if (!m_impl || !m_impl->running.exchange(false))
         return;
 
     // Closing the socket cancels outstanding WSARecvFrom; workers then see the
     // stop sentinel and exit.
-    if (impl_->sock != INVALID_SOCKET) {
-        ::closesocket(impl_->sock);
-        impl_->sock = INVALID_SOCKET;
+    if (m_impl->sock != INVALID_SOCKET) {
+        ::closesocket(m_impl->sock);
+        m_impl->sock = INVALID_SOCKET;
     }
 
-    if (impl_->iocp) {
-        for (size_t i = 0; i < impl_->workers.size(); ++i)
-            ::PostQueuedCompletionStatus(impl_->iocp, 0, STOP_KEY, nullptr);
+    if (m_impl->iocp) {
+        for (size_t i = 0; i < m_impl->workers.size(); ++i)
+            ::PostQueuedCompletionStatus(m_impl->iocp, 0, STOP_KEY, nullptr);
     }
 
-    for (auto& t : impl_->workers)
+    for (auto& t : m_impl->workers)
         if (t.joinable())
             t.join();
-    impl_->workers.clear();
+    m_impl->workers.clear();
 
-    for (auto& lane : impl_->lanes) {
+    for (auto& lane : m_impl->lanes) {
         lane->running.store(false, std::memory_order_release);
         lane->cv.notify_one();
     }
-    for (auto& lane : impl_->lanes)
+    for (auto& lane : m_impl->lanes)
         if (lane->thread.joinable())
             lane->thread.join();
-    impl_->lanes.clear();
+    m_impl->lanes.clear();
 
-    for (auto* op : impl_->recvOps)
+    for (auto* op : m_impl->recvOps)
         delete op;
-    impl_->recvOps.clear();
+    m_impl->recvOps.clear();
 
-    if (impl_->iocp) {
-        ::CloseHandle(impl_->iocp);
-        impl_->iocp = nullptr;
+    if (m_impl->iocp) {
+        ::CloseHandle(m_impl->iocp);
+        m_impl->iocp = nullptr;
     }
 
     ::WSACleanup();
@@ -418,7 +418,7 @@ void IocpUdpListener::Stop()
 
 int IocpUdpListener::SendTo(const Neuron::Net::Endpoint& to, std::span<const uint8_t> data)
 {
-    if (!impl_ || impl_->sock == INVALID_SOCKET)
+    if (!m_impl || m_impl->sock == INVALID_SOCKET)
         return -1;
 
     sockaddr_storage dst{}; int dstLen = 0;
@@ -428,7 +428,7 @@ int IocpUdpListener::SendTo(const Neuron::Net::Endpoint& to, std::span<const uin
     // A blocking-style sendto on an overlapped socket completes inline for UDP;
     // concurrent sends from multiple threads on one UDP socket are safe.
     const int n = ::sendto(
-        impl_->sock,
+        m_impl->sock,
         reinterpret_cast<const char*>(data.data()),
         static_cast<int>(data.size()),
         0,
@@ -446,12 +446,12 @@ int IocpUdpListener::SendTo(const Neuron::Net::Endpoint& to, std::span<const uin
 
 uint16_t IocpUdpListener::LocalPort() const
 {
-    return impl_ ? impl_->port : 0;
+    return m_impl ? m_impl->port : 0;
 }
 
 unsigned IocpUdpListener::LaneCount() const
 {
-    return impl_ ? impl_->laneCount : 0;
+    return m_impl ? m_impl->laneCount : 0;
 }
 
 } // namespace Neuron::Server
