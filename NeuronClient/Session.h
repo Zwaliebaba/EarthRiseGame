@@ -18,14 +18,6 @@ enum class SessionState : uint8_t
     Reconnecting,
 };
 
-// Command sent from controller to server (intents, not state).
-struct Command
-{
-    uint32_t tick{ 0 };   // client tick when command was generated
-    uint8_t  type{ 0 };
-    uint8_t  payload[60]{};
-};
-
 class Session
 {
 public:
@@ -42,9 +34,9 @@ public:
     [[nodiscard]] virtual uint64_t     GetSessionToken() const noexcept = 0;
 
     // -- Send --
-    virtual void SendCommand(const Command& cmd)                    = 0;
     // Variable-length RTS fleet intent (§23.4; M3 area B). 'body' is an encoded
-    // Neuron::Sim::FleetCommand (EncodeFleetCommand); the server validates it.
+    // Neuron::Sim::FleetCommand (EncodeFleetCommand); the server validates it. All
+    // gameplay (incl. base relocation) goes through this — there is no separate command.
     virtual void SendFleetCommand(std::span<const uint8_t> body)    = 0;
 
     // -- Receive (polled by client loop) --

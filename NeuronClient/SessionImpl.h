@@ -170,14 +170,6 @@ public:
     [[nodiscard]] uint64_t     GetSessionToken() const noexcept override
         { return m_conn ? m_conn->SessionToken() : 0; }
 
-    void SendCommand(const Command& cmd) override
-    {
-        if (!m_conn) return;
-        std::span<const uint8_t> body(cmd.payload, sizeof(cmd.payload));
-        if (auto dg = m_conn->SendCommand(body))
-            m_socket->SendTo(m_serverEp, *dg);
-    }
-
     void SendFleetCommand(std::span<const uint8_t> body) override
     {
         if (!m_conn) return;
