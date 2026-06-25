@@ -41,6 +41,7 @@ struct TacticalHudFrame
     uint32_t selfNetId{ 0 };
     uint32_t targetNetId{ 0 };
     const float*               focus{ nullptr };    // render-space camera focus [3]
+    float                      camYaw{ 0.f };       // camera heading (rad) — radar rotates with it
     const DirectX::XMFLOAT4X4* viewProj{ nullptr }; // view-proj the scene drew with
     const char*                objectiveText{ nullptr };
 
@@ -85,15 +86,22 @@ public:
         m_canvas.DrawLine(cxr - R, cyr, cxr + R, cyr, 1.f * s, lr, lg, lb, 0.30f);
         m_canvas.DrawLine(cxr, cyr - R, cxr, cyr + R, 1.f * s, lr, lg, lb, 0.30f);
 
+        // Heading-up radar: rotate the world delta into camera space so "up" on the
+        // disc is always where the camera looks (the player marker points up). Camera
+        // ground-forward is (-sin yaw, -cos yaw) and its screen-right perpendicular is
+        // (-cos yaw, sin yaw) — matching RtsCamera::PanWorld. At the default yaw (π)
+        // this reduces to world +X → right, +Z → up (the previous fixed mapping).
+        const float sy = std::sin(f.camYaw), cy = std::cos(f.camYaw);
         for (UINT i = 0; i < count; ++i)
         {
             const auto& e = ents[i];
             const float dx = e.x - fx, dz = e.z - fz;
             const float dist = std::sqrt(dx * dx + dz * dz);
             if (dist > RANGE) continue;
-            // World +X → radar right, world +Z → radar up.
-            const float bx = cxr + (dx / RANGE) * R;
-            const float by = cyr - (dz / RANGE) * R;
+            const float right =  dx * (-cy) + dz * sy;   // along camera right
+            const float fwd   =  dx * (-sy) + dz * (-cy); // along camera forward (→ up)
+            const float bx = cxr + (right / RANGE) * R;
+            const float by = cyr - (fwd   / RANGE) * R;
             float r, g, b; RadarColor(e.kind, r, g, b);
             const float bs = 3.0f * s;
             m_canvas.DrawRect(bx - bs * 0.5f, by - bs * 0.5f, bs, bs, r, g, b, 1.f);

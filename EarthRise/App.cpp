@@ -1036,6 +1036,7 @@ struct App
     hud.selfNetId = m_session ? m_session->PlayerNetId() : 0;
     hud.targetNetId = m_fleet.TargetNetId();
     hud.focus = m_focus;
+    hud.camYaw = m_camera.Yaw();
     hud.viewProj = &m_viewProj;
     hud.objectiveText = m_onboarding.CurrentText();
     hud.selDragging = m_fleet.DragActive(); hud.ptrDown = m_ptrDown;
