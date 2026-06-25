@@ -425,22 +425,13 @@ private:
         // everything — never client-authoritative, §8.4).
         for (const auto& m : appOut) {
             if (m.type == MsgType::Command) {
-                // M5 area C: the auth credential exchange rides reliable Command frames
-                // with a 1-byte ServerHost auth opcode (the §8.5 wire types are frozen
-                // here — see the header note). A real-auth connection that is not yet
-                // authenticated routes EVERY Command through the auth handler; a stray
-                // gameplay Command before login is dropped (server-authoritative).
-                if (!m.body.empty() && IsAuthOpcode(m.body[0])) {
+                // Command frames are auth-only now (M5 area C): the credential exchange
+                // rides reliable Command frames with a 1-byte ServerHost auth opcode (the
+                // §8.5 wire types are frozen here — see the header note). All gameplay
+                // intents — including base relocation — go on MsgType::FleetCommand; the
+                // legacy M1a base-velocity MoveCommand has been retired.
+                if (!m.body.empty() && IsAuthOpcode(m.body[0]))
                     OnAuthMessage(entry, from, m.body, out);
-                    continue;
-                }
-                if (!entry.authed) continue; // gate gameplay until logged in (real auth)
-
-                // Legacy M1a base-velocity move intent.
-                Neuron::Sim::MoveCommand cmd;
-                if (Neuron::Sim::DecodeMoveCommand(m.body, cmd))
-                    m_universe->SetBaseVelocity(entry.playerNetId,
-                                             { cmd.velX, cmd.velY, cmd.velZ });
             } else if (m.type == MsgType::FleetCommand) {
                 if (!entry.authed) continue; // gate gameplay until logged in (real auth)
                 // M3 RTS fleet intent (§23.4) — ownership/target validated inside.

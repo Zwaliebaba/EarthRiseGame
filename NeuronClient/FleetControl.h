@@ -120,6 +120,11 @@ struct MenuAction
     return {};
 }
 
+// Context-menu geometry (rows stacked from the menu's top-left), shared by the
+// controller's hit-test and the HUD's draw so they can never drift. 's' = UI scale.
+struct MenuMetrics { float rowH; float width; };
+[[nodiscard]] inline MenuMetrics ContextMenuMetrics(float s) noexcept { return { 20.0f * s, 150.0f * s }; }
+
 // --- control groups (§23.2 Ctrl+# set / # recall) ---------------------------
 
 // Ten client-side selection sets. Pure UI state — the server stores no grouping;

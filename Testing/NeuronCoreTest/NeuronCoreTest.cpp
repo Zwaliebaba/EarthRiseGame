@@ -817,7 +817,12 @@ namespace NeuronCoreTest
       su.Step(0.1f);
       su.Step(0.1f);
       Assert::AreEqual(v1, su.ReplVersion(base)); // idle holds its version
-      su.SetBaseVelocity(base, { 50, 0, 0 });
+      // The base relocates by a Move order now (legacy SetBaseVelocity is retired).
+      Neuron::Sim::FleetCommand mv;
+      mv.intent      = Neuron::Sim::IntentType::Move;
+      mv.units       = { base };
+      mv.targetPoint = { 1'000'000, 0, 0 };
+      su.ApplyFleetCommand(base, mv);
       su.Step(0.1f);
       Assert::IsTrue(su.ReplVersion(base) > v1);  // position changed → bump
     }

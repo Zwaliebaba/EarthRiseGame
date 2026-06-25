@@ -49,6 +49,7 @@
 // NeuronCore
 #include "FixedStepAccumulator.h"
 #include "ServerUniverse.h"
+#include "EconomyOutbox.h"
 #include "CngCrypto.h"
 #include "WinsockSocket.h"
 #include "ServerHost.h"
@@ -561,6 +562,50 @@ int main(int argc, char* argv[])
     else
     {
       universe.DrainBuildCompleted(); // keep the in-memory hook drained even with no DB
+    }
+
+    // 2d) Route combat economy events (loot drops/claims, killmails, cargo loss) the sim
+    //     produced this loop to the same write-through outbox (M6 area G → M5 area D, §15)
+    //     — the bridge that brings combat under the "zero economy loss" guarantee. Each
+    //     sim event maps to a portable Neuron::Sim::OutboxRecord (NeuronCore/EconomyOutbox.h,
+    //     unit-tested on the testrunner) whose idemKey is stable + unique, so a crash/replay
+    //     can't double-credit a bounty or drop a loot record. Killmails + low-hull alerts are
+    //     also drained so their queues don't grow unbounded (the KillmailLog/§24-notify and
+    //     client-SFX sinks land with M7 / area H; the economic record already rides EconEvents).
+    static_assert(static_cast<uint8_t>(Neuron::Sim::OutboxKind::LootClaim)
+                      == static_cast<uint8_t>(Neuron::Persist::EconomyEventKind::LootClaim) &&
+                  static_cast<uint8_t>(Neuron::Sim::OutboxKind::Killmail)
+                      == static_cast<uint8_t>(Neuron::Persist::EconomyEventKind::Killmail) &&
+                  static_cast<uint8_t>(Neuron::Sim::OutboxKind::CargoLost)
+                      == static_cast<uint8_t>(Neuron::Persist::EconomyEventKind::CargoLost) &&
+                  static_cast<uint8_t>(Neuron::Sim::OutboxKind::LootDrop)
+                      == static_cast<uint8_t>(Neuron::Persist::EconomyEventKind::LootDrop),
+                  "OutboxKind and Persist::EconomyEventKind codes must stay in lockstep");
+    if (dbAvailable)
+    {
+      for (const auto& e : universe.DrainEconEvents())
+      {
+        const Neuron::Sim::OutboxRecord rec = Neuron::Sim::MapEconEvent(
+            static_cast<uint8_t>(e.type), e.aNetId, e.bNetId, e.value, e.tick);
+        Neuron::Persist::EconomyMutation m;
+        m.idemKey   = rec.idemKey;
+        m.accountId = 0; // resolved to the owner account by the store from refType/refId
+        m.amount    = rec.amount;
+        m.kind      = static_cast<Neuron::Persist::EconomyEventKind>(rec.kind);
+        m.reason    = rec.reason;
+        m.refType   = rec.refType;
+        m.refId     = rec.refId;
+        const size_t depth = persist.EnqueueEconomy(m);
+        pTel.RecordOutboxDepth(static_cast<uint64_t>(depth));
+      }
+      universe.DrainKillmails();     // KillmailLog row + §24 notify sink lands with M7
+      universe.DrainLowHullAlerts(); // client retreat-alert SFX/UI sink lands with area H
+    }
+    else
+    {
+      universe.DrainEconEvents();
+      universe.DrainKillmails();
+      universe.DrainLowHullAlerts();
     }
 
     // 3) Emit snapshots at the 20 Hz cadence (every ~1.5 sim ticks). The per-client

@@ -39,6 +39,11 @@ enum class EconomyEventKind : uint8_t
     BuildComplete  = 1,
     InventoryDelta = 2,
     LootClaim      = 3,
+    // Combat economy events (M6 area G → outbox, §15). Values match
+    // Neuron::Sim::OutboxKind (EconomyOutbox.h); a static_assert in ERServer pins them.
+    Killmail       = 4,
+    CargoLost      = 5,
+    LootDrop       = 6,
 };
 
 // One economy mutation to commit write-through. 'idemKey' is the caller-assigned

@@ -127,6 +127,7 @@ public:
         m_world.AddComponent<Storage>(e).capacity = m_economy.storageCapacity;
         m_world.AddComponent<BuildQueue>(e);
         m_world.AddComponent<Sensor>(e).range     = m_economy.sensorRangeBase;
+        m_world.AddComponent<FleetOrder>(e);                  // the base relocates via Move/Retreat orders (§23.4)
         m_world.AddComponent<BaseCombat>(e);                  // disable-not-destroy state (§13.1)
         // The capital fit = fire-support + light defensive weapons (§13.1 first pass);
         // installs layered HP + resists + the fitting grid + the synced Health mirror.
@@ -168,13 +169,6 @@ public:
         rn.remaining = yield;
         m_netIdToEntity[netId] = e;
         return netId;
-    }
-
-    // Apply a validated move intent to a player's base (server-authoritative).
-    void SetBaseVelocity(uint32_t netId, DirectX::XMFLOAT3 vel)
-    {
-        if (auto* v = m_world.GetComponent<Velocity>(EntityOf(netId)))
-            v->metresPerSecond = ClampSpeed(vel, kMaxBaseSpeed);
     }
 
     // --- navigation: warp + jump-beacon network (§13.12) ---------------------
@@ -1234,6 +1228,10 @@ private:
         case IntentType::Guard:
         case IntentType::Orbit:
         case IntentType::KeepRange: {
+            // The base auto-defends (§13.1) and isn't commandable to a combat stance; it
+            // relocates by Move/Retreat only. Reject combat orders for it — preserving the
+            // pre-cleanup behaviour now that the base carries a FleetOrder for movement.
+            if (m_world.HasComponent<BaseTag>(EntityOf(unitNet))) return false;
             if (!m_world.IsAlive(EntityOf(cmd.targetNetId))) return false; // need a live target
             const OrderType ot = (cmd.intent == IntentType::Attack)    ? OrderType::Attack
                                : (cmd.intent == IntentType::Guard)     ? OrderType::Guard
@@ -1246,7 +1244,8 @@ private:
     }
 
     // Set or queue (shift-chain) a unit's fleet order. Units without a FleetOrder
-    // (e.g. the base) can't take steering orders → rejected.
+    // (e.g. static props) can't take steering orders → rejected. (The base carries one
+    // for Move/Retreat relocation; ApplyIntentToUnit still rejects combat stances for it.)
     bool PushOrder(uint32_t unitNet, const FleetOrderEntry& entry, bool queue)
     {
         FleetOrder* fo = m_world.GetComponent<FleetOrder>(EntityOf(unitNet));
@@ -1499,12 +1498,14 @@ private:
                     }
                     if (m.kind == ModuleKind::Jammer || m.kind == ModuleKind::Web ||
                         m.kind == ModuleKind::WarpDisruptor || m.kind == ModuleKind::SensorDamp) {
-                        // Offensive EWAR follows the unit's Attack target; only a base
-                        // (no FleetOrder) auto-projects it onto the nearest hostile —
-                        // so a commandable ship EWARs what it is told to, not everything.
+                        // Offensive EWAR follows the unit's Attack target; the base
+                        // auto-projects it onto the nearest hostile (it auto-defends,
+                        // §13.1) — so a commandable ship EWARs what it is told to, not
+                        // everything. (Keyed on BaseTag: the base now also carries a
+                        // FleetOrder for movement, so "no FleetOrder" no longer means base.)
                         uint32_t tgt = 0;
                         if (attackTarget && Hostile(owner.player, OwnerOf(attackTarget))) tgt = attackTarget;
-                        else if (!m_world.HasComponent<FleetOrder>(EntityOf(selfId.value)))
+                        else if (m_world.HasComponent<BaseTag>(EntityOf(selfId.value)))
                             tgt = NearestHostileInRange(selfId.value, tr.pos, owner.player, static_cast<double>(m.range));
                         if (!tgt) continue;
                         Transform* tt = m_world.GetComponent<Transform>(EntityOf(tgt));
@@ -1619,13 +1620,16 @@ private:
         m_world.ForEach<FleetOrder, Fitting, Transform, NetId>(
             [&](FleetOrder& fo, Fitting&, Transform& tr, NetId& id) {
                 const auto e = EntityOf(id.value);
+                // The base carries a FleetOrder for movement but is not order-driven in
+                // combat — it auto-defends via the dedicated loop below, so skip it here.
+                if (m_world.HasComponent<BaseTag>(e)) return;
                 if (fo.current.type != OrderType::Attack || fo.current.targetNetId == 0) { TickWeaponCooldowns(e, dt); return; }
                 const OwnerId* o = m_world.GetComponent<OwnerId>(e);
                 FireWeapons(e, id.value, tr.pos, o ? o->player : 0, fo.current.targetNetId, dt, projs, kills);
             });
 
-        // Bases have no FleetOrder; while Active they fire defensively at the nearest
-        // hostile in range (§13.1 fire-support + light defensive weapons).
+        // Bases auto-defend: while Active they fire at the nearest hostile in range
+        // (§13.1 fire-support + light defensive weapons), independent of fleet orders.
         m_world.ForEach<BaseTag, BaseCombat, Transform, NetId, Weapon>(
             [&](BaseTag&, BaseCombat& bc, Transform& tr, NetId& id, Weapon& w) {
                 const auto e = EntityOf(id.value);
