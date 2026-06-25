@@ -26,6 +26,10 @@ namespace er::ui
     { "ui.close",           "Close" },
     { "ui.apply",           "Apply" },
     { "ui.radar",           "RADAR" },
+    // Connection-status banner (non-modal; complements the server-unavailable dialog).
+    // ASCII only — the fixed-grid bitmap font has no ellipsis/em-dash glyphs.
+    { "app.net.connecting", "CONNECTING TO SERVER..." },
+    { "app.net.unavailable","SERVER UNAVAILABLE - RETRYING" },
   };
 
   // Look up display text by id; missing ids return a visible sentinel.

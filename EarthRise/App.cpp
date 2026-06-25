@@ -1814,6 +1814,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // Darwinia windowed UI (Main Menu / Options / settings panels + dropdowns).
     DrawUi(w, h);
 
+    // Non-modal connection-status banner (hidden once connected) — on top of the HUD.
+    DrawConnectionBanner(w, h);
+
 #ifdef _DEBUG
     // Server-status overlay (F3, debug builds only) — on top of everything else.
     DrawServerStatusOverlay(w, h);
@@ -1822,6 +1825,38 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     m_canvas.Render(cl, w, h);
 
     m_dr.EndFrame();
+  }
+
+  // Non-modal connection-status banner: a centered line near the top that reads
+  // "CONNECTING TO SERVER..." while the handshake is in flight and escalates to
+  // "SERVER UNAVAILABLE - RETRYING" (amber → red) once the connect timeout has passed.
+  // Hidden once connected, so it never clutters normal play. Complements — and stays in
+  // sync with — the modal dialog (both keyed off the same m_serverUnreachableNotified).
+  void DrawConnectionBanner(UINT screenW, UINT screenH)
+  {
+    if (!m_session ||
+        m_session->GetState() == Neuron::Client::SessionState::Connected)
+      return;
+
+    const float hudS  = (screenH > 0 ? static_cast<float>(screenH) : 1080.f) / 1080.f;
+    const float scale = 1.1f * hudS;
+
+    const bool  unreachable = m_serverUnreachableNotified;
+    const char* msg = unreachable ? er::ui::str("app.net.unavailable")
+                                  : er::ui::str("app.net.connecting");
+    const float r = unreachable ? 1.00f : 0.95f;
+    const float g = unreachable ? 0.35f : 0.80f;
+    const float b = unreachable ? 0.30f : 0.35f;
+
+    const float tw = m_canvas.TextWidth(msg, scale);
+    const float th = m_canvas.TextHeight(scale);
+    const float x  = (static_cast<float>(screenW) - tw) * 0.5f;
+    const float y  = static_cast<float>(screenH) * 0.12f;
+
+    // Subtle dark backing so the text stays legible over a bright scene.
+    const float pad = 10.f * hudS;
+    m_canvas.DrawRect(x - pad, y - pad * 0.5f, tw + pad * 2.f, th + pad, 0.f, 0.f, 0.f, 0.55f);
+    m_canvas.DrawText(x, y, msg, r, g, b, scale);
   }
 
 #ifdef _DEBUG
