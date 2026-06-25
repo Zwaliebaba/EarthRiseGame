@@ -10,7 +10,7 @@
 namespace Neuron::Render
 {
 
-bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
+bool DeviceResources::Initialize(HWND hwnd, UINT width, UINT height)
 {
     m_width  = width;
     m_height = height;
@@ -95,7 +95,7 @@ bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
     }
 
     // -----------------------------------------------------------------------
-    // Swap chain for CoreWindow (UWP flip-discard)
+    // Swap chain for HWND (Win32 flip-discard)
     // -----------------------------------------------------------------------
     DXGI_SWAP_CHAIN_DESC1 scDesc{};
     scDesc.Width       = width;
@@ -109,8 +109,11 @@ bool DeviceResources::Initialize(IUnknown* coreWindow, UINT width, UINT height)
     scDesc.Scaling     = DXGI_SCALING_NONE;
 
     winrt::com_ptr<IDXGISwapChain1> sc1;
-    winrt::check_hresult(factory->CreateSwapChainForCoreWindow(
-        m_cmdQueue.get(), coreWindow, &scDesc, nullptr, sc1.put()));
+    winrt::check_hresult(factory->CreateSwapChainForHwnd(
+        m_cmdQueue.get(), hwnd, &scDesc, nullptr, nullptr, sc1.put()));
+    // We present windowed/borderless and handle resizing ourselves; stop DXGI from
+    // grabbing Alt+Enter for its (deprecated) exclusive-fullscreen transition.
+    factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
     m_swapChain = sc1.as<IDXGISwapChain3>();
 
     // -----------------------------------------------------------------------

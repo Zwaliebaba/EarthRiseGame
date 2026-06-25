@@ -4,7 +4,6 @@
 //   Session — Session/SessionImpl: encrypted reliable-UDP client session (§8.5, §10.1)
 //   Replica — Replica/ReplicaManager: snapshot decode + floating-origin projection (§8.4)
 //   Interpolator — snap-on-ack interpolation buffer (§10.1)
-//   Control — IClientController / NullController
 
 #include "pch.h"
 #include <cstdint>
@@ -16,7 +15,6 @@
 #include "Replica.h"
 #include "ReplicaManager.h"
 #include "Interpolator.h"
-#include "IClientController.h"
 
 namespace Neuron::Client
 {

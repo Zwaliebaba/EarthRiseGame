@@ -3,7 +3,7 @@
 // per-frame command infrastructure, and CPU/GPU sync fence (§11).
 //
 // Usage pattern:
-//   Initialize(coreWindow, w, h)        ← called from IFrameworkView::SetWindow
+//   Initialize(hwnd, w, h)              ← called once the Win32 window exists
 //   foreach frame:
 //     BeginFrame()                       ← resets allocator, clears, sets RT
 //     [renderers record into CmdList()]
@@ -29,7 +29,7 @@ class DeviceResources
 public:
     static constexpr UINT FRAME_COUNT = 3; // triple-buffered (frames in flight = 3, §11.1)
 
-    bool Initialize(IUnknown* coreWindow, UINT width, UINT height);
+    bool Initialize(HWND hwnd, UINT width, UINT height);
     void Resize(UINT width, UINT height);
     void Uninitialize();
 

@@ -19,17 +19,13 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include <winrt/Windows.ApplicationModel.h> // Package (install location)
-#include <winrt/Windows.Graphics.Display.h> // DisplayInformation (DPI scale)
-#include <winrt/Windows.Storage.h>          // StorageFolder::Path
-#include <winrt/Windows.UI.Core.h>          // CoreWindow, PointerEventArgs
-#include <winrt/Windows.UI.Input.h>         // PointerPoint / button state
-#include <winrt/Windows.UI.Popups.h>        // MessageDialog (server-unreachable notice)
-#include <winrt/Windows.Foundation.Collections.h> // LocalSettings IPropertySet
+#include <Windows.h>
+#include <windowsx.h> // GET_X_LPARAM / GET_Y_LPARAM
 
 // NeuronRender
 #include "DeviceResources.h"
@@ -64,7 +60,7 @@
 
 // NeuronCore platform impls (compiled into NeuronClient.lib / accessible via link)
 #include "CngCrypto.h"
-#include "DatagramSocketAdapter.h"
+#include "WinsockSocket.h"
 #include "Protocol.h"
 #include "ShapeCatalog.h"
 #include "Snapshot.h"
@@ -101,15 +97,27 @@ static constexpr int STATUS_QUERY_INTERVAL_FRAMES = 30;
 static constexpr const char* DEV_AUTH_USER     = "player1";
 static constexpr const char* DEV_AUTH_PASSWORD = "player1-devpass";
 
-// Read a file packaged with the app (relative to the install location) into a
-// byte buffer. Read-only access to the package folder is permitted on UWP.
+// Directory containing the running executable (assets are deployed alongside it).
+static std::wstring ExeDir()
+{
+  wchar_t path[MAX_PATH];
+  const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+  const std::wstring s(path, (n > 0 && n < MAX_PATH) ? n : 0);
+  const size_t slash = s.find_last_of(L"\\/");
+  return (slash == std::wstring::npos) ? std::wstring{} : s.substr(0, slash);
+}
+
+// Root for game assets: the GameData folder staged next to the executable
+// (see EarthRise/CMakeLists.txt, which copies it post-build).
+static std::wstring AssetRoot() { return ExeDir() + L"\\GameData"; }
+
+// Read a game-data file (path relative to GameData/) into a byte buffer.
 // Returns empty on any failure (callers fail-safe).
 static std::vector<std::byte> LoadPackagedAsset(const wchar_t* relativePath)
 {
   try
   {
-    const auto folder = Windows::ApplicationModel::Package::Current().InstalledLocation().Path();
-    const std::wstring full = std::wstring(folder.c_str()) + L"\\" + relativePath;
+    const std::wstring full = AssetRoot() + L"\\" + relativePath;
     std::ifstream f(full.c_str(), std::ios::binary | std::ios::ate);
     if (!f)
       return {};
@@ -130,7 +138,7 @@ static std::vector<std::byte> LoadPackagedAsset(const wchar_t* relativePath)
 // ─────────────────────────────────────────────────────────────────────────────
 // App
 // ─────────────────────────────────────────────────────────────────────────────
-struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSource, Windows::ApplicationModel::Core::IFrameworkView>
+struct App
 {
   // ---- render ----
   Neuron::Render::DeviceResources m_dr;
@@ -175,14 +183,14 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
   // ---- network ----
   Neuron::Net::CngCrypto m_crypto;
-  std::unique_ptr<Neuron::Net::DatagramSocketAdapter> m_socket; // WinRT DatagramSocket (§8.1)
+  std::unique_ptr<Neuron::Net::WinsockSocket> m_socket; // Winsock UDP (§8.1)
   Neuron::Net::EcPubKey m_pinnedPub{}; // zeroed = dev/test
 
 #ifdef _DEBUG
   // Server-status overlay (F3, debug builds only, §21): a SEPARATE socket polls the
   // server's out-of-band diagnostic port and ServerStatusClient parses the reply into
   // the lines drawn by DrawServerStatusOverlay. Compiled out of retail entirely.
-  std::unique_ptr<Neuron::Net::DatagramSocketAdapter>  m_statusSocket;
+  std::unique_ptr<Neuron::Net::WinsockSocket>          m_statusSocket;
   std::unique_ptr<Neuron::Client::ServerStatusClient>  m_statusClient;
   bool m_showServerStatus{ false };
   int  m_statusReqCountdown{ 0 };
@@ -203,7 +211,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   bool m_running{true};
 
   // ---- window / dpi / timing ----
-  Windows::UI::Core::CoreWindow m_window{nullptr};
+  HWND  m_hwnd{nullptr};
   float m_dpiScale{1.0f};
   std::chrono::steady_clock::time_point m_connectStart{};
   bool m_connectedLogged{false};
@@ -254,17 +262,14 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     }
   }
 
-  // ── IFrameworkViewSource ─────────────────────────────────────────────────
-  Windows::ApplicationModel::Core::IFrameworkView CreateView() { return *this; }
-
-  // ── IFrameworkView ───────────────────────────────────────────────────────
-  void Initialize(const Windows::ApplicationModel::Core::CoreApplicationView&)
+  // ── Init: networking (crypto + sockets + session) ────────────────────────
+  void InitNetwork()
   {
-    check_bool(m_crypto.Initialize());
+    if (!m_crypto.Initialize()) throw std::runtime_error("CngCrypto init failed");
 
-    // WinRT DatagramSocket (§8.1) — no WSAStartup; binds asynchronously off the ASTA.
-    m_socket = std::make_unique<Neuron::Net::DatagramSocketAdapter>();
-    check_bool(m_socket->Open(0)); // ephemeral port
+    // Winsock UDP (§8.1). Process-wide WSAStartup is done once in wWinMain.
+    m_socket = std::make_unique<Neuron::Net::WinsockSocket>();
+    if (!m_socket->Open(0)) throw std::runtime_error("UDP socket open failed"); // ephemeral port
 
     m_session = std::make_unique<Neuron::Client::SessionImpl>(&m_crypto, m_pinnedPub, m_socket.get());
     // Real account auth (§14): bind to an account so the server spawns + replicates our
@@ -277,30 +282,26 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // interleaves with the game session's reliable-UDP. Points at the server's
     // separate diagnostic port (STATUS_PORT); if the server has statusPort 0 the
     // queries simply go unanswered and the overlay shows "no data".
-    m_statusSocket = std::make_unique<Neuron::Net::DatagramSocketAdapter>();
+    m_statusSocket = std::make_unique<Neuron::Net::WinsockSocket>();
     if (m_statusSocket->Open(0))
       m_statusClient = std::make_unique<Neuron::Client::ServerStatusClient>(
           m_statusSocket.get(), "127.0.0.1", STATUS_PORT);
 #endif
   }
 
-  void SetWindow(const Windows::UI::Core::CoreWindow& window)
+  // ── Init: graphics + connect (after the window exists) ───────────────────
+  void InitGraphicsAndConnect()
   {
-    m_window = window;
-
-    // CoreWindow::Bounds() is in logical DIPs; the swap chain needs PHYSICAL
-    // pixels. On a scaled display (e.g. 125%) using DIPs makes the back buffer
-    // smaller than the window → the rendered region sits in the top-left with
-    // black margins. Convert via the display DPI scale.
-    auto disp = Windows::Graphics::Display::DisplayInformation::GetForCurrentView();
-    m_dpiScale = disp.LogicalDpi() / 96.0f;
-
-    const auto bounds = window.Bounds();
-    const UINT w = PhysPx(bounds.Width);
-    const UINT h = PhysPx(bounds.Height);
+    // The process is per-monitor-DPI-aware (set in wWinMain), so the client area
+    // and WM_MOUSE coordinates are already in physical pixels and the swap chain
+    // matches the window 1:1. (m_dpiScale stays 1 — input needs no conversion.)
+    RECT rc{};
+    GetClientRect(m_hwnd, &rc);
+    const UINT w = static_cast<UINT>(rc.right - rc.left);
+    const UINT h = static_cast<UINT>(rc.bottom - rc.top);
 
     const auto initStart = std::chrono::steady_clock::now();
-    check_bool(m_dr.Initialize(winrt::get_unknown(window), w, h));
+    if (!m_dr.Initialize(m_hwnd, w, h)) throw std::runtime_error("DeviceResources init failed");
 
     // Post-process (HDR + bloom). If it initializes, the scene renders into the
     // HDR target and is composited to the back buffer; otherwise we fall back to
@@ -311,11 +312,11 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     OutputDebugStringA(m_bloom ? "[EarthRise] PostProcess: HDR+bloom enabled\n"
                                : "[EarthRise] PostProcess: init failed (LDR direct path)\n");
 
-    check_bool(m_scene.Initialize(&m_dr, sceneFmt));
-    check_bool(m_particles.Initialize(&m_dr, sceneFmt));
-    if (auto dds = LoadPackagedAsset(L"Assets\\Textures\\Particle.dds"); !dds.empty())
+    if (!m_scene.Initialize(&m_dr, sceneFmt)) throw std::runtime_error("SceneRenderer init failed");
+    if (!m_particles.Initialize(&m_dr, sceneFmt)) throw std::runtime_error("ParticleRenderer init failed");
+    if (auto dds = LoadPackagedAsset(L"Textures\\Particle.dds"); !dds.empty())
       m_particles.SetTexture(Neuron::Render::DdsLoader::Load(m_dr.Device(), dds));
-    check_bool(m_canvas.Initialize(&m_dr));
+    if (!m_canvas.Initialize(&m_dr)) throw std::runtime_error("CanvasRenderer init failed");
     LoadUiAssets(); // bitmap font + menu chrome (fail-safe: HUD falls back to blocks)
     LoadAudio();    // XAudio2 engine + clips + ambient bed (fail-safe: silent)
     // Route menu click/select feedback to the loaded UI clips (no audio dep in MenuUi).
@@ -341,61 +342,85 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     // Start connecting to ERServer.
     m_connectStart = std::chrono::steady_clock::now();
     m_session->Connect("127.0.0.1", SERVER_PORT);
-
-    // Keep the back buffer matched to the window across resize / maximize.
-    window.SizeChanged([this](Windows::UI::Core::CoreWindow const&,
-                              Windows::UI::Core::WindowSizeChangedEventArgs const&) { ApplyResize(); });
-    window.KeyDown({this, &App::OnKeyDown});
-    window.Closed({this, &App::OnClosed});
-    window.PointerMoved({this, &App::OnPointerMoved});
-    window.PointerPressed({this, &App::OnPointerPressed});
-    window.PointerReleased({this, &App::OnPointerReleased});
-    window.PointerWheelChanged({this, &App::OnPointerWheel});
   }
 
-  // ── Pointer input (physical pixels via the DPI scale) ─────────────────────
-  void OnPointerMoved(const Windows::UI::Core::CoreWindow&,
-                      const Windows::UI::Core::PointerEventArgs& e)
+  // ── Win32 window procedure ────────────────────────────────────────────────
+  // Routes messages to the App instance stashed in GWLP_USERDATA at WM_NCCREATE.
+  static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
   {
-    const auto p = e.CurrentPoint().Position();
-    m_ptrX = p.X * m_dpiScale;
-    m_ptrY = p.Y * m_dpiScale;
-    const auto props = e.CurrentPoint().Properties();
-    m_ptrDown = props.IsLeftButtonPressed();
-    m_rmbDown = props.IsRightButtonPressed(); // right-drag orbits the camera
+    if (msg == WM_NCCREATE)
+    {
+      auto* cs = reinterpret_cast<CREATESTRUCTW*>(l);
+      SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                        reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+    }
+    auto* self = reinterpret_cast<App*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    return self ? self->HandleMessage(hwnd, msg, w, l) : DefWindowProcW(hwnd, msg, w, l);
   }
-  void OnPointerPressed(const Windows::UI::Core::CoreWindow&,
-                        const Windows::UI::Core::PointerEventArgs& e)
+
+  // Pointer coordinates from WM_MOUSE* are already physical pixels (DPI-aware).
+  LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM w, LPARAM l)
   {
-    const auto p = e.CurrentPoint().Position();
-    m_ptrX = p.X * m_dpiScale;
-    m_ptrY = p.Y * m_dpiScale;
-    const auto props = e.CurrentPoint().Properties();
-    m_ptrDown = props.IsLeftButtonPressed();
-    m_rmbDown = props.IsRightButtonPressed();
-    // Anchor the orbit so the first frame of a right-drag has a zero delta, and record the
-    // RMB press point so release can tell a click from an orbit-drag.
-    if (m_rmbDown) { m_prevPtrX = m_ptrX; m_prevPtrY = m_ptrY; m_rmbDownX0 = m_ptrX; m_rmbDownY0 = m_ptrY; }
-    m_ptrPressed = true;
-  }
-  // Mouse wheel → camera zoom (accumulated; consumed in UpdateCameraInput).
-  void OnPointerWheel(const Windows::UI::Core::CoreWindow&,
-                      const Windows::UI::Core::PointerEventArgs& e)
-  {
-    m_wheelAccum += e.CurrentPoint().Properties().MouseWheelDelta();
-  }
-  void OnPointerReleased(const Windows::UI::Core::CoreWindow&,
-                         const Windows::UI::Core::PointerEventArgs& e)
-  {
-    const auto p = e.CurrentPoint().Position();
-    m_ptrX = p.X * m_dpiScale;
-    m_ptrY = p.Y * m_dpiScale;
-    const auto props = e.CurrentPoint().Properties();
-    const bool wasRmb = m_rmbDown;
-    m_ptrDown = props.IsLeftButtonPressed();
-    m_rmbDown = props.IsRightButtonPressed();
-    m_ptrReleased = true;
-    if (wasRmb && !m_rmbDown) m_rmbReleased = true; // RMB-up edge (consumed each frame)
+    switch (msg)
+    {
+    case WM_MOUSEMOVE:
+      m_ptrX = static_cast<float>(GET_X_LPARAM(l));
+      m_ptrY = static_cast<float>(GET_Y_LPARAM(l));
+      m_ptrDown = (w & MK_LBUTTON) != 0;
+      m_rmbDown = (w & MK_RBUTTON) != 0; // right-drag orbits the camera
+      return 0;
+    case WM_LBUTTONDOWN:
+      SetCapture(hwnd);
+      m_ptrX = static_cast<float>(GET_X_LPARAM(l));
+      m_ptrY = static_cast<float>(GET_Y_LPARAM(l));
+      m_ptrDown = true;
+      m_ptrPressed = true;
+      return 0;
+    case WM_LBUTTONUP:
+      ReleaseCapture();
+      m_ptrX = static_cast<float>(GET_X_LPARAM(l));
+      m_ptrY = static_cast<float>(GET_Y_LPARAM(l));
+      m_ptrDown = false;
+      m_ptrReleased = true;
+      return 0;
+    case WM_RBUTTONDOWN:
+      SetCapture(hwnd);
+      m_ptrX = static_cast<float>(GET_X_LPARAM(l));
+      m_ptrY = static_cast<float>(GET_Y_LPARAM(l));
+      m_rmbDown = true;
+      // Anchor the orbit (first right-drag frame has zero delta) and record the press
+      // point so release can tell a click from an orbit-drag.
+      m_prevPtrX = m_ptrX; m_prevPtrY = m_ptrY; m_rmbDownX0 = m_ptrX; m_rmbDownY0 = m_ptrY;
+      return 0;
+    case WM_RBUTTONUP:
+      ReleaseCapture();
+      m_ptrX = static_cast<float>(GET_X_LPARAM(l));
+      m_ptrY = static_cast<float>(GET_Y_LPARAM(l));
+      if (m_rmbDown) m_rmbReleased = true; // RMB-up edge (consumed each frame)
+      m_rmbDown = false;
+      return 0;
+    case WM_MOUSEWHEEL:
+      m_wheelAccum += GET_WHEEL_DELTA_WPARAM(w);
+      return 0;
+    case WM_KEYDOWN:
+      OnKeyDown(w);
+      return 0;
+    case WM_SIZE:
+      if (w != SIZE_MINIMIZED && m_dr.Device()) ApplyResize();
+      return 0;
+    case WM_CLOSE:
+      // Tell the server we're leaving before the loop unwinds (the server idle
+      // timeout is the backstop).
+      if (m_session) m_session->Disconnect();
+      m_running = false;
+      DestroyWindow(hwnd);
+      return 0;
+    case WM_DESTROY:
+      PostQuitMessage(0);
+      return 0;
+    default:
+      return DefWindowProcW(hwnd, msg, w, l);
+    }
   }
 
   // Apply camera input each frame: right-drag orbit, wheel zoom, arrow-key pan.
@@ -419,17 +444,14 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       m_wheelAccum = 0;
     }
 
-    if (m_window)
     {
-      using VK = Windows::System::VirtualKey;
-      using KS = Windows::UI::Core::CoreVirtualKeyStates;
-      auto down = [&](VK k) { return (m_window.GetKeyState(k) & KS::Down) == KS::Down; };
+      auto down = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
       const float step = m_camera.Distance() * CAM_PAN_FRAC;
       float r = 0.0f, f = 0.0f;
-      if (down(VK::Left))  r -= step;
-      if (down(VK::Right)) r += step;
-      if (down(VK::Up))    f += step;
-      if (down(VK::Down))  f -= step;
+      if (down(VK_LEFT))  r -= step;
+      if (down(VK_RIGHT)) r += step;
+      if (down(VK_UP))    f += step;
+      if (down(VK_DOWN))  f -= step;
       if (r != 0.0f || f != 0.0f) m_camera.PanWorld(r, f); // (also releases base-follow)
     }
   }
@@ -439,21 +461,21 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
   void ApplyResize()
   {
-    if (!m_window)
+    if (!m_hwnd)
       return;
-    const auto b = m_window.Bounds();
-    m_dr.Resize(PhysPx(b.Width), PhysPx(b.Height));
+    RECT rc{};
+    GetClientRect(m_hwnd, &rc);
+    const UINT w = static_cast<UINT>(rc.right - rc.left);
+    const UINT h = static_cast<UINT>(rc.bottom - rc.top);
+    if (w == 0 || h == 0)
+      return; // minimized / zero-size: skip
+    m_dr.Resize(w, h);
     if (m_bloom)
       m_post.Resize(); // recreate HDR/bloom targets at the new back-buffer size
   }
 
-  void Load(const hstring&) {}
-
   void Run()
   {
-    auto window = Windows::UI::Core::CoreWindow::GetForCurrentThread();
-    window.Activate();
-
     // Pump the handshake to completion up front so connect isn't paced one
     // round-trip per vsynced frame. Each Tick() sends the next step; the brief
     // sleep lets the server reply over loopback. Bounded (~400 ms) so a missing
@@ -462,7 +484,7 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
                     m_session->GetState() != Neuron::Client::SessionState::Connected;
          ++i)
     {
-      window.Dispatcher().ProcessEvents(Windows::UI::Core::CoreProcessEventsOption::ProcessAllIfPresent);
+      if (!PumpMessages()) return;
       m_session->Tick();
       if (m_session->GetState() == Neuron::Client::SessionState::Connected)
         break;
@@ -471,10 +493,22 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 
     while (m_running)
     {
-      window.Dispatcher().ProcessEvents(Windows::UI::Core::CoreProcessEventsOption::ProcessAllIfPresent);
-
+      if (!PumpMessages()) break; // WM_QUIT
       Tick();
     }
+  }
+
+  // Drain pending Win32 messages. Returns false on WM_QUIT.
+  bool PumpMessages()
+  {
+    MSG msg{};
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE))
+    {
+      if (msg.message == WM_QUIT) { m_running = false; return false; }
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+    return m_running;
   }
 
   void Uninitialize()
@@ -506,9 +540,9 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
       if (auto w = LoadPackagedAsset(path); !w.empty())
         m_audio.loadClip(w, out);
     };
-    load(L"Assets\\Audio\\ambient_space.wav", m_clipAmbient);
-    load(L"Assets\\Audio\\ui_click.wav", m_clipClick);
-    load(L"Assets\\Audio\\ui_select.wav", m_clipSelect);
+    load(L"Audio\\ambient_space.wav", m_clipAmbient);
+    load(L"Audio\\ui_click.wav", m_clipClick);
+    load(L"Audio\\ui_select.wav", m_clipSelect);
 
     Neuron::Audio::MixSnapshot mix{}; // defaults to 1.0 across master + buses
     m_audio.setMix(mix);
@@ -546,16 +580,16 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
   // MenuUi (which owns them). The font drives all 2D text; the chrome is menu-only.
   void LoadUiAssets()
   {
-    if (auto dds = LoadPackagedAsset(L"Assets\\Fonts\\EditorFont-ENG.dds"); !dds.empty())
+    if (auto dds = LoadPackagedAsset(L"Fonts\\EditorFont-ENG.dds"); !dds.empty())
     {
       auto font = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
       if (font.valid())
         m_canvas.SetFont(std::move(font), er::format::FontAtlasConfig{}); // 256x224, 16x16, cp32
     }
     Neuron::Render::TextureGpu grey, red;
-    if (auto dds = LoadPackagedAsset(L"Assets\\Textures\\InterfaceGrey.dds"); !dds.empty())
+    if (auto dds = LoadPackagedAsset(L"Textures\\InterfaceGrey.dds"); !dds.empty())
       grey = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
-    if (auto dds = LoadPackagedAsset(L"Assets\\Textures\\InterfaceRed.dds"); !dds.empty())
+    if (auto dds = LoadPackagedAsset(L"Textures\\InterfaceRed.dds"); !dds.empty())
       red = Neuron::Render::DdsLoader::Load(m_dr.Device(), dds);
 
     char buf[96];
@@ -633,45 +667,26 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
     OutputDebugStringA(buf);
   }
 
-  // Graceful "can't reach the server" notice. A CoreWindow (no-XAML) app uses
-  // Windows.UI.Popups.MessageDialog, not a XAML ContentDialog. ShowAsync must be awaited
-  // on the UI/ASTA thread — which is where Tick() (the caller) runs — so this is a
-  // fire_and_forget coroutine. Retry restarts the handshake; Exit closes the app.
-  winrt::fire_and_forget ShowServerUnreachable()
+  // Graceful "can't reach the server" notice. Win32: a modal MessageBox (Retry/Cancel).
+  // Retry restarts the handshake; Cancel closes the app. The session keeps retrying with
+  // backoff in the background regardless, so this is informational.
+  void ShowServerUnreachable()
   {
     if (m_dialogOpen)
-      co_return;
+      return;
     m_dialogOpen = true;
-    auto lifetime = get_strong(); // keep this App alive across the co_await
-
-    Windows::UI::Popups::MessageDialog dlg{
+    const int chosen = MessageBoxW(m_hwnd,
         L"EarthRise can't reach the game server.\n\n"
         L"Make sure ERServer is running and reachable, then choose Retry. "
         L"The client keeps trying to connect in the background.",
-        L"Server unavailable" };
-    dlg.Commands().Append(Windows::UI::Popups::UICommand{ L"Retry" });
-    dlg.Commands().Append(Windows::UI::Popups::UICommand{ L"Exit" });
-    dlg.DefaultCommandIndex(0); // Retry on Enter
-    dlg.CancelCommandIndex(1);  // Exit on Esc
-
-    Windows::UI::Popups::IUICommand chosen{ nullptr };
-    try
-    {
-      chosen = co_await dlg.ShowAsync();
-    }
-    catch (...)
-    {
-      // Couldn't show (e.g. a dialog is already up) — keep retrying silently.
-      m_dialogOpen = false;
-      co_return;
-    }
+        L"Server unavailable", MB_RETRYCANCEL | MB_ICONWARNING);
     m_dialogOpen = false;
 
-    if (chosen && std::wstring_view{ chosen.Label() } == L"Exit")
+    if (chosen == IDCANCEL)
     {
       m_running = false;
-      Windows::ApplicationModel::Core::CoreApplication::Exit();
-      co_return;
+      PostMessageW(m_hwnd, WM_CLOSE, 0, 0);
+      return;
     }
 
     // Retry: re-arm the notice and restart the handshake — but only if we still aren't
@@ -1101,62 +1116,105 @@ struct App : implements<App, Windows::ApplicationModel::Core::IFrameworkViewSour
 #endif
 
   // ── Input handlers ───────────────────────────────────────────────────────
-  void OnKeyDown(const Windows::UI::Core::CoreWindow& win, const Windows::UI::Core::KeyEventArgs& args)
+  void OnKeyDown(WPARAM key)
   {
-    using VK = Windows::System::VirtualKey;
-    const VK key = args.VirtualKey();
-
     // Esc closes the active (frontmost) window; the previous one becomes active.
-    if (key == VK::Escape) { m_menu.CloseTopWindow(); return; }
+    if (key == VK_ESCAPE) { m_menu.CloseTopWindow(); return; }
 
 #ifdef _DEBUG
     // F3 toggles the server-status overlay (debug builds only, §21).
-    if (key == VK::F3) { m_showServerStatus = !m_showServerStatus; return; }
+    if (key == VK_F3) { m_showServerStatus = !m_showServerStatus; return; }
 #endif
 
     // --- fleet command hotkeys (§23.2 desktop affordances; M3 area G) ---
-    const bool ctrl =
-        (win.GetKeyState(VK::Control) & Windows::UI::Core::CoreVirtualKeyStates::Down) ==
-        Windows::UI::Core::CoreVirtualKeyStates::Down;
+    const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
 
-    // Ctrl+# set / # recall control groups (0..9).
-    if (key >= VK::Number0 && key <= VK::Number9) {
-      const int group = static_cast<int>(key) - static_cast<int>(VK::Number0);
+    // Ctrl+# set / # recall control groups (0..9). VK '0'..'9' == 0x30..0x39.
+    if (key >= '0' && key <= '9') {
+      const int group = static_cast<int>(key) - '0';
       if (ctrl) m_fleet.SetControlGroup(group);
       else      m_fleet.RecallControlGroup(group);
       return;
     }
 
+    // VK 'A'..'Z' == 0x41..0x5A (uppercase ASCII).
     switch (key) {
-    case VK::A: // select all own ships (smart-select)
+    case 'A': // select all own ships (smart-select)
       m_fleet.SelectAllOwnShips(m_session.get(), m_interp.curr);
       return;
-    case VK::B: // enqueue a ship build at the player's base
+    case 'B': // enqueue a ship build at the player's base
       m_fleet.SendBuild(m_session.get());
       return;
-    case VK::S: // stop the current selection
+    case 'S': // stop the current selection
       m_fleet.SendStop(m_session.get());
       return;
-    case VK::F: // toggle base-follow camera
+    case 'F': // toggle base-follow camera
       m_camera.SetFollow(!m_camera.Follow());
       return;
-    case VK::Space: // recenter on the player's base (re-enables follow)
+    case VK_SPACE: // recenter on the player's base (re-enables follow)
       m_camera.SetFollow(true);
       return;
     default:
       return;
     }
   }
-
-
-  void OnClosed(const Windows::UI::Core::CoreWindow&, const Windows::UI::Core::CoreWindowEventArgs&)
-  {
-    // Tell the server we're leaving before the loop unwinds (UWP may not call
-    // Uninitialize on a window close). The 8 s server idle timeout is the backstop.
-    if (m_session)
-      m_session->Disconnect();
-    m_running = false;
-  }
 };
 
-int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) { Windows::ApplicationModel::Core::CoreApplication::Run(winrt::make<App>()); }
+// ─────────────────────────────────────────────────────────────────────────────
+// Win32 entry point
+// ─────────────────────────────────────────────────────────────────────────────
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
+{
+  // Per-monitor DPI awareness: client area + mouse coords arrive in physical
+  // pixels, so the swap chain matches the window 1:1 on scaled displays.
+  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+  // Process-wide Winsock init (replaces the WinRT DatagramSocket path, §8.1).
+  if (!Neuron::Net::WinsockSocket::GlobalStartup())
+    return 1;
+
+  const wchar_t* kWindowClass = L"EarthRiseWindowClass";
+  WNDCLASSEXW wc{};
+  wc.cbSize        = sizeof(wc);
+  wc.style         = CS_HREDRAW | CS_VREDRAW;
+  wc.lpfnWndProc   = &App::WndProc;
+  wc.hInstance     = hInstance;
+  wc.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
+  wc.lpszClassName = kWindowClass;
+  RegisterClassExW(&wc);
+
+  App app;
+
+  // 1280x720 client area (matches the old default back-buffer size).
+  RECT rc{ 0, 0, 1280, 720 };
+  AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+  HWND hwnd = CreateWindowExW(
+      0, kWindowClass, L"EarthRise", WS_OVERLAPPEDWINDOW,
+      CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top,
+      nullptr, nullptr, hInstance, &app);
+  if (!hwnd)
+  {
+    Neuron::Net::WinsockSocket::GlobalCleanup();
+    return 1;
+  }
+  app.m_hwnd = hwnd;
+
+  int exitCode = 0;
+  try
+  {
+    app.InitNetwork();
+    ShowWindow(hwnd, nCmdShow);
+    app.InitGraphicsAndConnect();
+    app.Run();
+  }
+  catch (const std::exception& e)
+  {
+    OutputDebugStringA(e.what());
+    MessageBoxA(hwnd, e.what(), "EarthRise - fatal error", MB_OK | MB_ICONERROR);
+    exitCode = 1;
+  }
+
+  app.Uninitialize();
+  Neuron::Net::WinsockSocket::GlobalCleanup();
+  return exitCode;
+}
